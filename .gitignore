@@ -1,0 +1,6 @@
+node_modules/
+.codevo/
+secrets/
+.env
+*.log
+.DS_Store

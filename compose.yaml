@@ -1,0 +1,33 @@
+services:
+  runner:
+    build: .
+    image: codevo-runner:0.1.0
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0
+    ports:
+      - "127.0.0.1:${CODEVO_PORT:-4318}:4318"
+    environment:
+      CODEVO_NAME: "${CODEVO_NAME:-Linux runner}"
+      CODEVO_TOKEN_FILE: /run/secrets/runner_token
+    volumes:
+      - runner-data:/data
+    secrets:
+      - runner_token
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4318/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    stop_grace_period: 10s
+secrets:
+  runner_token:
+    file: ./secrets/runner-token
+volumes:
+  runner-data:

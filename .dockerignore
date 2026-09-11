@@ -1,0 +1,6 @@
+.git
+node_modules
+.codevo
+secrets
+.env
+*.log
