@@ -1,9 +1,25 @@
 {
   "compilerOptions": {
-    "target": "ES2023", "module": "NodeNext", "strict": true,
-    "noEmit": true, "allowImportingTsExtensions": true,
-    "erasableSyntaxOnly": true, "noUncheckedIndexedAccess": true,
-    "types": ["node"]
+    "target": "ES2023",
+    "module": "NodeNext",
+    "strict": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmitOnError": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "noUncheckedIndexedAccess": true,
+    "types": [
+      "node"
+    ],
+    "sourceMap": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
 }

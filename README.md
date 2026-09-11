@@ -1,9 +1,12 @@
 # Codevo Runner
 
-Standalone execution-host service for Codevo. **Early foundation, not yet an agent
-executor.** It currently provides authenticated discovery, stable server identity,
-Docker deployment and integration tests. No prompts, provider logins, task history,
-Git synchronization or editor integration are implemented yet.
+Standalone TypeScript execution-host service for Codevo, built with NestJS and its
+Express adapter. **Early foundation, not yet an agent executor.** It currently
+provides authenticated discovery, stable server identity, Docker deployment and
+integration tests. No prompts, provider logins, task history,
+attachments, Git synchronization or editor integration are implemented yet.
+Image and screenshot support is a requirement for the first task-execution slice;
+see the [attachment design](docs/attachments.md).
 
 ## Local development
 
@@ -12,11 +15,18 @@ Requires Node 24.13+ (24.x).
 ```sh
 npm ci
 npm run check
+npm run build
 npm test
 mkdir -p secrets
 node -e "require('fs').writeFileSync('secrets/runner-token', require('crypto').randomBytes(32).toString('base64url') + '\n', {mode: 0o600, flag: 'wx'})"
 CODEVO_TOKEN_FILE=secrets/runner-token npm start
 ```
+
+`npm run build` compiles TypeScript; `npm start` runs `dist/src/main.js`.
+Rebuild after source changes before starting the service. NestJS supplies HTTP
+routing and dependency injection; authentication runs in pre-routing middleware.
+Durable agent execution is a separate, planned application service, not a NestJS background
+request or an automatic framework feature.
 
 Default listener: `127.0.0.1:4318`. `CODEVO_DATA_DIR` defaults to `.codevo`.
 Set `CODEVO_NAME`, `CODEVO_HOST`, and `CODEVO_PORT` to override defaults. The token
@@ -32,6 +42,12 @@ Then run:
 docker compose up -d --build
 docker compose ps
 ```
+
+Optional: after building the image, run `python3 scripts/docker-smoke.py` to verify
+authenticated discovery, nonroot execution, clean shutdown and identity persistence
+across container replacement. It creates and removes its own temporary containers
+and data volume. Pass an image tag as the first argument to check a different image;
+the default is `codevo-runner:0.1.0`.
 
 Docker Engine and Compose must be installed and Docker must start on boot.
 The named `runner-data` volume retains identity when the container is recreated.
