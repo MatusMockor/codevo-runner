@@ -5,6 +5,15 @@ will own its project checkout, provider login, task processes and durable histor
 The current slice stores task **drafts**, PNG/JPEG attachments and creation/cancellation
 events. It does not queue or execute an agent and has no project checkout integration.
 
+## Local-first editor integration
+
+New tasks default to the computer running the editor. Remote execution is an
+explicit per-task choice in the context strip below the prompt, beside branch and
+worktree controls, following T3 Code. Local and remote adapters implement a shared
+application execution interface; local use does not require a remote runner.
+See [execution target requirements](execution-targets.md) for defaults, placement,
+settings and unavailable-target behavior. These editor changes are planned.
+
 ## Framework and dependency boundaries
 
 The service uses TypeScript on Node.js with NestJS and its Express HTTP adapter.
