@@ -3,16 +3,26 @@ import { readConfig } from './config.js';
 import { loadIdentity } from './identity.js';
 import { loadAuthorization } from './auth.js';
 import { createRunnerApplication } from './server.js';
+import { openRunnerServices } from './runtime.js';
 
 async function main() {
   const config = readConfig(process.env);
   const authorized = await loadAuthorization(config.tokenFile);
   const runnerId = await loadIdentity(config.dataDir);
+  const services = await openRunnerServices(config.dataDir, runnerId);
   const app = await createRunnerApplication({ protocolVersion: 1, runnerId, name: config.name,
-    capabilities: { taskExecution: false, eventReplay: false } }, authorized);
+    capabilities: { taskExecution: false, eventReplay: false } }, authorized, services).catch(async error => {
+      await services.close();
+      throw error;
+    });
   const server: Server = app.getHttpServer();
   server.on('error', () => { console.error('Runner listener failed'); process.exitCode = 1; });
-  await app.listen(config.port, config.host);
+  try {
+    await app.listen(config.port, config.host);
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   console.log(`Codevo runner listening on ${config.host}:${config.port}`);
   let stopping = false;
   async function stop() {

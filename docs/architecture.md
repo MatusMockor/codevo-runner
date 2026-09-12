@@ -1,67 +1,93 @@
 # Runner architecture and next slices
 
-The desktop selects an execution target separately from a provider. A target owns
-its project checkout, provider login, task processes and durable history.
+The desktop selects an execution target separately from a provider. Each runner
+will own its project checkout, provider login, task processes and durable history.
+The current slice stores task **drafts**, PNG/JPEG attachments and creation/cancellation
+events. It does not queue or execute an agent and has no project checkout integration.
 
-This first slice implements only authenticated discovery and persistent identity.
-It does not accept prompts or claim execution/replay support.
-
-## Framework and execution boundaries
+## Framework and dependency boundaries
 
 The service uses TypeScript on Node.js with NestJS and its Express HTTP adapter.
-NestJS organizes composition, dependency injection and controllers; Express handles
-the underlying HTTP transport. An injectable `RequestBoundary` middleware performs
-authentication before routing, including requests for unknown routes. Framework
-changes must preserve the versioned discovery contract and existing request restrictions.
+NestJS owns composition, dependency injection and routing. Pre-routing authentication
+verifies the runner token before protected requests are handled.
 
-The current authentication boundary verifies the editor's runner token. It is
-separate from provider login: future Codex/Claude adapters will use credentials on
-the execution host. NestJS does not supply those provider sessions or turn an HTTP
-request into a durable agent task.
+Dependencies point inward:
 
-The intended application boundaries are:
-- Domain: task states, commands, events and protocol validation.
-- Application: task admission, scheduling, cancellation and recovery through ports.
-- Infrastructure: durable task/event repository and Codex/Claude process adapters.
-- Transport: versioned HTTP API and reconnectable event delivery.
-- Composition: process configuration and lifecycle.
+- `src/domain/contracts.ts`: closed message, task, event and attachment types plus limits.
+- `src/application/ports.ts`: asynchronous `TaskRepository`, `AttachmentRepository`
+  and `AttachmentStore` interfaces; application workflows depend on these ports.
+- Infrastructure: SQLite repository and runner-owned attachment files implement the ports.
+- Transport/composition: HTTP validation, response mapping, wiring and lifecycle.
 
-Future task, provider, attachment and project modules must depend on application
-interfaces rather than Express request objects. Task admission will persist intent
-before acknowledgment; a worker will own execution independently of client
-connections. Disconnecting the editor must not cancel accepted work. Process or
-server restart requires explicit recovery from persisted state; a framework or
-container restart alone cannot resume an agent session.
+SQL and filesystem details stay out of controllers and domain contracts. SQLite
+operations run in a dedicated worker thread so synchronous database calls do not
+block the HTTP event loop. This database worker is **not** an agent execution worker.
+The adapter uses Node 24's experimental `node:sqlite` driver; the runtime is pinned
+to Node 24 and the repository boundary isolates that driver from application code.
 
-Use the NestJS Express upload integration when implementing attachments, with
-bounded streaming and runner-owned persistent storage. The framework upload
-integration does not replace the ownership, durability, validation, retention and
-provider-delivery requirements in the [attachment design](attachments.md).
+## Persistence and authority
+
+Each runner uses its own `runner.sqlite` under `CODEVO_DATA_DIR`, with WAL journaling,
+FULL synchronous durability and foreign keys. Task creation, attachment references,
+idempotency and the creation event are committed transactionally. Cancellation and
+its event are also transactional. Repeated identical task admission returns the
+existing task; reusing its idempotency key with different content is a conflict.
+
+Attachment bytes live beside the database in runner-owned storage. The database,
+attachment files and runner identity belong in the same persistent Docker volume.
+Use local disk on the execution host, not a shared network filesystem for SQLite.
+A separate `runner-lease.sqlite` connection holds an exclusive transaction for the
+runner lifetime. A second live runner using that directory fails before attachment
+reconciliation; closing the connection or process exit releases the OS-backed lock.
+Do not remove or replace this lease file while the runner is active. The lease does
+not hold a long-running transaction on the task database.
+
+Do not share a data directory between runner instances or copy an initialized
+identity to a different logical server. Independent servers have independent data
+and tokens; they do not share a scheduling database.
+
+For consistent backups, stop the runner and back up the entire data directory.
+Copying only `runner.sqlite` while the service is active can miss WAL transactions
+and does not preserve attachment content. Container replacement preserves stored
+data only while its volume is retained; a restart policy is not task recovery.
+
+All clients holding the runner token share one authority in this MVP. This is not
+multiuser ownership isolation. Provider credentials, once implemented, will belong
+to the execution host and remain separate from editor-to-runner authentication.
+
+## Current transport scope
+
+Authenticated HTTP supports draft creation, listing, retrieval and cancellation,
+raw image uploads and retrieval, and cursor-based event polling. Event history
+contains metadata, not binary blobs. There is no SSE subscription, automatic live
+reconnection, desktop image-paste UI, follow-up submission or provider execution.
+See the [API contract](api.md) and [attachment scope](attachments.md).
+
+The next execution slice must persist intent before acknowledging queued work and
+own agent processes independently of HTTP connections. Disconnecting the editor
+must not cancel accepted execution. Recovery after a process or server restart
+must mark interrupted work truthfully; NestJS and Docker do not resume agent sessions.
 
 ## Dependency maintenance
 
-`@nestjs/platform-express` 11.2.3 pins Multer 2.2.0, which has a known security
-advisory. The package override to Multer 2.3.0 is intentional even though uploads
-are not enabled in this foundation. Revisit the override when the upstream adapter
-updates its dependency, and verify the resolved version before removing it.
+The Multer 2.3.0 override is intentional while the NestJS Express adapter pins an
+older version. This slice uses raw binary image uploads, not Multer multipart
+handling. Revisit the override when the upstream dependency changes and verify the
+resolved version before removing it.
 
 ## Next vertical slices
 
-1. Durable attachment uploads and task admission with structured message parts,
-   idempotency keys, bounded queues and event cursors. See [attachments](attachments.md).
-2. One provider adapter, registered project roots, owned process groups, cancellation,
-   bounded output and recovery that marks interrupted work truthfully.
-3. Reconnect/replay and authenticated approval responses scoped to exact tasks.
-4. Editor environment settings, project mapping, image paste/drop/file selection,
+1. One provider adapter, registered project roots, owned process groups, scheduling,
+   bounded output, cancellation and truthful interrupted-task recovery.
+2. Follow-up messages, provider image delivery, approval responses and reconnectable
+   execution event delivery scoped to exact tasks.
+3. Editor environment settings, project mapping, image paste/drop/file selection,
    persisted attachment previews, diff and verification results.
+4. Explicit retention/deletion for tasks and abandoned uploads, with safe reference checks.
 5. Second provider, toolchain images and per-task container execution.
 
-Never accept arbitrary shell recipes from clients. Do not infer remote authority
-from a Mac path. Keep authentication and sessions scoped to a runner. Provider
-credentials stay on their execution host. Bind transport to loopback through SSH
-until explicit TLS deployment is implemented. Docker packaging does not itself
-isolate tasks from one another.
-
-Each server needs a separate data volume and token. Never clone an initialized
-identity volume onto a different logical server. A future protocol change must
-negotiate compatibility; protocol version 1 currently covers discovery only.
+Never accept arbitrary shell recipes from clients or infer remote authority from
+a Mac path. Keep provider sessions scoped to their runner. Bind transport to
+loopback through SSH until explicit TLS deployment is implemented. Docker packaging
+does not itself isolate tasks from one another. Protocol changes must preserve or
+explicitly negotiate compatibility rather than silently changing existing contracts.

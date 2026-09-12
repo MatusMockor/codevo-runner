@@ -1,5 +1,7 @@
 """Validate an already built runner image: python3 scripts/docker-smoke.py [image]."""
 
+import base64
+import hashlib
 import json
 import pathlib
 import secrets
@@ -9,6 +11,13 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
+
+
+SCREENSHOT = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAACXBIWXMAAAPoAAAD6AG1e1Jr"
+    "AAAAEElEQVQImWMwqjoBRww4OQBNNhFxLVATHQAAAABJRU5ErkJggg=="
+)
 
 
 def docker(*args):
@@ -20,12 +29,54 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def request(base_url, path, token=None):
+def request(base_url, path, token=None, method="GET", data=None, extra_headers=None,
+            raw=False, expected_status=200):
     headers = {"Authorization": "Bearer " + token} if token else {}
+    headers.update(extra_headers or {})
     with urllib.request.urlopen(
-        urllib.request.Request(base_url + path, headers=headers), timeout=2
+        urllib.request.Request(base_url + path, headers=headers, method=method, data=data),
+        timeout=5,
     ) as response:
+        require(response.status == expected_status, "Unexpected HTTP status for " + path)
+        if raw:
+            require(response.headers.get_content_type() == "image/png", "Incorrect image MIME")
+            return response.read()
         return json.load(response)
+
+
+def store_draft(base_url, token):
+    attachment_id = str(uuid.uuid4())
+    uploaded = request(base_url, "/v1/attachments/" + attachment_id, token,
+                       method="PUT", data=SCREENSHOT, expected_status=201,
+                       extra_headers={"Content-Type": "image/png", "X-File-Name": "screen%20shot.png"})
+    require(uploaded["created"] is True, "Upload was not created")
+    parts = [{"type": "text", "text": "Inspect this screenshot"},
+             {"type": "attachment", "attachmentId": attachment_id}]
+    payload = {"idempotencyKey": str(uuid.uuid4()), "provider": "codex", "parts": parts}
+    created = request(base_url, "/v1/tasks", token, method="POST",
+                      data=json.dumps(payload).encode(), expected_status=201,
+                      extra_headers={"Content-Type": "application/json"})
+    require(created["created"] is True, "Draft was not created")
+    task = created["task"]
+    require(task["status"] == "draft", "Task should stay a draft")
+    require(task["parts"] == parts and task["provider"] == "codex", "Draft content mismatch")
+    return task, uploaded["attachment"]
+
+
+def verify_draft(base_url, token, task, attachment):
+    saved = request(base_url, "/v1/tasks/" + task["id"], token)
+    require(saved == task, "Persisted draft changed")
+    metadata = request(base_url, "/v1/attachments/" + attachment["id"], token)
+    require(metadata == attachment, "Persisted attachment metadata changed")
+    require(metadata["width"] == 4 and metadata["height"] == 3, "Image was not decoded correctly")
+    require(metadata["bytes"] == len(SCREENSHOT), "Image size mismatch")
+    require(metadata["sha256"] == hashlib.sha256(SCREENSHOT).hexdigest(), "Image checksum mismatch")
+    require(metadata["name"] == "screen shot.png", "Image filename mismatch")
+    content = request(base_url, "/v1/attachments/" + attachment["id"] + "/content", token, raw=True)
+    require(content == SCREENSHOT, "Persisted image bytes changed")
+    events = request(base_url, "/v1/tasks/" + task["id"] + "/events?after=0", token)
+    require(len(events["items"]) == 1 and events["items"][0]["type"] == "task.created",
+            "Draft creation event is missing or duplicated")
 
 
 def wait_for_runner(base_url, token):
@@ -54,6 +105,7 @@ def main():
         docker("volume", "create", volume)
         try:
             first_id = None
+            draft = None
             for _ in range(2):
                 docker(
                     "run", "-d", "--name", name, "--read-only", "--cap-drop=ALL",
@@ -79,13 +131,17 @@ def main():
                     require(result["runnerId"] == first_id,
                             "Runner identity changed after container replacement")
                 first_id = result["runnerId"]
+                if draft is None:
+                    draft = store_draft(base_url, token)
+                verify_draft(base_url, token, *draft)
                 require(docker("exec", name, "id", "-u") != "0", "Runner runs as root")
                 docker("stop", "-t", "8", name)
                 require(docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0",
                         "Runner did not stop cleanly")
                 docker("rm", name)
             print("Docker smoke passed on " + architecture + ": authenticated discovery, "
-                  "nonroot runtime, clean stop, persistent identity after replacement.")
+                  "nonroot runtime, clean stop, persistent identity, draft, event and "
+                  "image bytes after replacement.")
         except Exception:
             subprocess.run(["docker", "logs", name], check=False)
             raise

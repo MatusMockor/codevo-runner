@@ -1,52 +1,29 @@
 import 'reflect-metadata';
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
 import {
-  Controller, Get, Inject, Injectable, Module, Res,
-  type INestApplication, type NestMiddleware,
+  Controller, Get, Inject, Module, Res,
+  type INestApplication, type OnApplicationShutdown,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Response } from 'express';
+import { RequestBoundary } from './transport/boundary.js';
+import { AttachmentController, TaskController } from './transport/controllers.js';
+import { send } from './transport/http.js';
+import { AUTHORIZE, DESCRIPTOR, EXTENDED, SERVICES, type Authorize, type RunnerServices } from './transport/services.js';
 
 export type RunnerDescriptor = Readonly<{
   protocolVersion: 1;
   runnerId: string;
   name: string;
-  capabilities: Readonly<{ taskExecution: false; eventReplay: false }>;
+  capabilities: Readonly<{
+    taskExecution: false;
+    eventReplay: boolean;
+    taskDrafts?: boolean;
+    imageAttachments?: boolean;
+  }>;
 }>;
-
-type Authorize = (header: string | undefined) => boolean;
-const DESCRIPTOR = Symbol('runner descriptor');
-const AUTHORIZE = Symbol('runner authorization');
-
-function send(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'connection': 'close',
-  });
-  response.end(JSON.stringify(body));
-}
-
-@Injectable()
-class RequestBoundary implements NestMiddleware {
-  constructor(@Inject(AUTHORIZE) private readonly authorized: Authorize) {}
-
-  use(request: Request, response: Response, next: NextFunction) {
-    if (request.headers.origin) return send(response, 403, { error: 'origin_not_allowed' });
-    if (request.method !== 'GET') return send(response, 405, { error: 'method_not_allowed' });
-    if (request.headers['transfer-encoding'] ||
-        (request.headers['content-length'] && request.headers['content-length'] !== '0'))
-      return send(response, 400, { error: 'body_not_allowed' });
-    if (request.url === '/healthz') return next();
-    if (!this.authorized(request.headers.authorization))
-      return send(response, 401, { error: 'unauthorized' });
-    // Gate the raw URL so Express cannot introduce case, query, or slash aliases.
-    if (request.url !== '/v1/runner') return send(response, 404, { error: 'not_found' });
-    return next();
-  }
-}
+export type { RunnerServices } from './transport/services.js';
 
 @Controller()
 class RunnerController {
@@ -63,6 +40,11 @@ class RunnerController {
   }
 }
 
+class ServiceLifecycle implements OnApplicationShutdown {
+  constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+  async onApplicationShutdown() { await this.services.close(); }
+}
+
 @Module({})
 class RunnerModule {}
 
@@ -70,9 +52,9 @@ class RunnerHttpAdapter extends ExpressAdapter {
   override initHttpServer() {
     const server = createServer({ maxHeaderSize: 8192 }, this.getInstance());
     server.maxConnections = 64;
-    server.requestTimeout = 10_000;
+    server.requestTimeout = 35_000;
     server.headersTimeout = 5_000;
-    server.setTimeout(10_000, socket => socket.destroy());
+    server.setTimeout(35_000, socket => socket.destroy());
     this.httpServer = server;
   }
 }
@@ -80,16 +62,23 @@ class RunnerHttpAdapter extends ExpressAdapter {
 export async function createRunnerApplication(
   descriptor: RunnerDescriptor,
   authorized: Authorize,
+  services?: RunnerServices,
 ): Promise<INestApplication> {
   const adapter = new RunnerHttpAdapter();
   adapter.getInstance().disable('x-powered-by');
+  const effectiveDescriptor: RunnerDescriptor = services ? {
+    ...descriptor,
+    capabilities: { taskExecution: false, eventReplay: true, taskDrafts: true, imageAttachments: true },
+  } : descriptor;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController],
+    controllers: [RunnerController, ...(services ? [TaskController, AttachmentController] : [])],
     providers: [
       RequestBoundary,
-      { provide: DESCRIPTOR, useValue: descriptor },
+      { provide: DESCRIPTOR, useValue: effectiveDescriptor },
       { provide: AUTHORIZE, useValue: authorized },
+      { provide: EXTENDED, useValue: Boolean(services) },
+      ...(services ? [{ provide: SERVICES, useValue: services }, ServiceLifecycle] : []),
     ],
   }, adapter, { bodyParser: false, logger: false, abortOnError: false });
   const boundary = app.get(RequestBoundary);

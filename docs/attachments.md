@@ -1,8 +1,30 @@
 # Images, screenshots and attachments
 
-Status: design requirements, not implemented. The current discovery-only API does
-not accept uploads. Add attachments with initial task admission, not as a later
-text-only protocol retrofit.
+## Implemented scope
+
+The authenticated API accepts raw PNG/JPEG uploads with client-generated UUID v4
+IDs. It validates image content and dimensions, stores immutable files under the
+runner data directory and records metadata through `AttachmentRepository`.
+A draft can reference completed attachments alongside ordered text parts; admission
+stores references and the task creation event transactionally. Metadata and content
+can be retrieved later using the same runner token. Reads verify size and SHA-256;
+missing or corrupted bytes fail rather than returning successful image content.
+
+See [API examples and exact limits](api.md). Uploads are not multipart requests.
+The display filename never selects a filesystem path. Repeating an upload ID with
+the same metadata and bytes returns its existing record; conflicting reuse fails.
+Startup removes leftover temporary files and unregistered blobs within a bounded
+scan. There is no expiry, attachment deletion or garbage collection of completed
+abandoned uploads yet; these count against the retained-storage quota.
+
+All holders of the runner token share one authority. Per-user attachment ownership
+is not implemented. An ID is a runner-scoped reference, not an access credential.
+Stored image support does not imply provider image support: no provider executes
+these drafts yet, and there is no desktop paste/drop/preview integration.
+
+## Remaining product requirements
+
+The sections below describe the full future workflow, not completed features.
 
 ## User workflow
 
@@ -25,8 +47,8 @@ filenames are display metadata only. IDs and digests are not access credentials.
 
 Use a bounded authenticated streaming upload with explicit completion. Store in a
 temporary location, validate content, flush it durably, then atomically finalize it.
-A task may reference only complete immutable attachments owned by the same
-principal and runner. Persist message references and task admission together;
+A task may reference only complete immutable attachments on the same runner.
+If multiuser access is introduced, references must also be scoped to the same principal. Persist message references and task admission together;
 reject missing, foreign, expired or incomplete references before starting work.
 
 The editor may report a remote task accepted only after the runner has durably
