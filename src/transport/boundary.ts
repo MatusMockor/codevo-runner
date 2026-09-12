@@ -4,10 +4,14 @@ import { AUTHORIZE, EXTENDED, type Authorize } from './services.js';
 import { send } from './http.js';
 
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
 const routes = [
   { pattern: /^\/v1\/tasks(?:\?after=[^&?#]*)?$/, methods: ['GET', 'POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}$`), methods: ['GET'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/cancel$`), methods: ['POST'] },
+  { pattern: startRoute, methods: ['POST'] },
+  { pattern: new RegExp(`^/v1/tasks/${uuid}/diff$`), methods: ['GET'] },
+  { pattern: /^\/v1\/projects$/, methods: ['GET'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/events(?:\\?after=[^&?#]*)?$`), methods: ['GET'] },
   { pattern: new RegExp(`^/v1/attachments/${uuid}$`), methods: ['GET', 'PUT'] },
   { pattern: new RegExp(`^/v1/attachments/${uuid}/content$`), methods: ['GET'] },
@@ -35,7 +39,8 @@ export class RequestBoundary implements NestMiddleware {
     if (!route.methods.includes(request.method)) return send(response, 405, { error: 'method_not_allowed' });
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
-    const acceptsBody = request.method === 'PUT' || (request.method === 'POST' && request.url === '/v1/tasks');
+    const acceptsBody = request.method === 'PUT' || (request.method === 'POST' &&
+      (request.url === '/v1/tasks' || startRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

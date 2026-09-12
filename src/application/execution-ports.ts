@@ -1,0 +1,43 @@
+import type { Task } from '../domain/contracts.js';
+import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
+
+/** Each state change and its event must commit atomically. Terminal state wins races. */
+export interface ExecutionRepository {
+  queueTask(taskId: string, projectId: string): Promise<Task>;
+  claimNextTask(): Promise<Task | null>;
+  appendTaskOutput(taskId: string, channel: OutputChannel, text: string): Promise<void>;
+  finishTask(taskId: string, result: ExecutionResult): Promise<Task>;
+  interruptRunningTasks(): Promise<void>;
+}
+/** Registration comes from trusted host configuration, never a client filesystem path. */
+export interface ProjectRegistry {
+  list(): Promise<readonly ProjectSummary[]>;
+  get(id: string): Promise<RegisteredProject>;
+}
+/** Creates a task-owned checkout and returns its server-local working directory. */
+export interface ProjectWorkspace {
+  prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<string>;
+  diff(taskId: string): Promise<WorkspaceDiff>;
+}
+/** Adapter owns its child process group and waits for it to stop before settling. */
+export interface ProviderExecutor {
+  readonly provider: 'codex' | 'claude';
+  readonly supportsAttachments: boolean;
+  execute(request: ExecutionRequest): Promise<ExecutionResult>;
+}
+export interface ExecutionApplication {
+  start(taskId: string, input: unknown): Promise<Task>;
+  cancel(taskId: string): Promise<Task>;
+  projects(): Promise<readonly ProjectSummary[]>;
+  diff(taskId: string): Promise<WorkspaceDiff>;
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface StagedExecutionInputs {
+  readonly attachments: readonly StagedExecutionAttachment[];
+  cleanup(): Promise<void>;
+}
+export interface ExecutionAttachmentStager {
+  stage(taskId: string, attachmentIds: readonly string[]): Promise<StagedExecutionInputs>;
+}

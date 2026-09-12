@@ -1,12 +1,16 @@
-"""Validate an already built runner image: python3 scripts/docker-smoke.py [image]."""
+"""Validate a built runner image: docker-smoke.py [image] [--execution-tools].
 
+The toolchain check runs local project commands without contacting a provider.
+Execution stays disabled here; API execution has separate integration tests.
+"""
+
+import argparse
 import base64
 import hashlib
 import json
 import pathlib
 import secrets
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -90,8 +94,37 @@ def wait_for_runner(base_url, token):
             time.sleep(0.2)
 
 
+def verify_execution_tools(name, replacement):
+    for command in (["git", "--version"], ["codex", "--version"], ["claude", "--version"],
+                    ["python3", "--version"], ["make", "--version"], ["g++", "--version"]):
+        require(bool(docker("exec", name, *command)), "Missing execution tool: " + command[0])
+    script = """
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const assert = require('node:assert/strict');
+assert.equal(process.env.HOME, '/data/provider-home');
+assert.equal(process.env.CODEX_HOME, '/data/provider-home/.codex');
+for (const dir of [process.env.HOME, process.env.CODEX_HOME, '/data/projects/smoke']) {
+  fs.mkdirSync(dir, {recursive: true});
+}
+const marker = process.env.CODEX_HOME + '/smoke-marker';
+if (process.argv[1] === 'replacement') assert.equal(fs.readFileSync(marker, 'utf8'), 'persisted');
+fs.writeFileSync(marker, 'persisted');
+fs.writeFileSync('/tmp/codevo-smoke', 'temporary');
+fs.writeFileSync('/data/projects/smoke/package.json', JSON.stringify({scripts: {test: 'node -e "process.exit(0)"'}}));
+cp.execFileSync('git', ['init'], {cwd: '/data/projects/smoke', stdio: 'pipe'});
+cp.execFileSync('npm', ['test'], {cwd: '/data/projects/smoke', stdio: 'pipe'});
+"""
+    docker("exec", name, "node", "-e", script, "replacement" if replacement else "first")
+
+
 def main():
-    image = sys.argv[1] if len(sys.argv) > 1 else "codevo-runner:0.1.0"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("image", nargs="?", default="codevo-runner:0.1.0")
+    parser.add_argument("--execution-tools", action="store_true")
+    arguments = parser.parse_args()
+    image = arguments.image
+    execution_tools = arguments.execution_tools
     name = "codevo-smoke-" + secrets.token_hex(6)
     volume = name + "-data"
     architecture = docker("image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
@@ -107,10 +140,14 @@ def main():
             first_id = None
             draft = None
             for _ in range(2):
+                resources = ["--pids-limit=128", "--memory=256m", "--cpus=1"]
+                if execution_tools:
+                    resources = ["--pids-limit=1024", "--memory=4g", "--cpus=2",
+                                 "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=1g,mode=1777"]
                 docker(
                     "run", "-d", "--name", name, "--read-only", "--cap-drop=ALL",
-                    "--security-opt=no-new-privileges:true", "--pids-limit=128",
-                    "--memory=256m", "--cpus=1", "--init", "-p", "127.0.0.1::4318",
+                    "--security-opt=no-new-privileges:true", *resources,
+                    "--init", "-p", "127.0.0.1::4318",
                     "-v", volume + ":/data", "--mount",
                     "type=bind,src=" + str(tokenfile) + ",dst=/run/secrets/token,readonly",
                     "-e", "CODEVO_TOKEN_FILE=/run/secrets/token", image,
@@ -130,6 +167,8 @@ def main():
                 if first_id is not None:
                     require(result["runnerId"] == first_id,
                             "Runner identity changed after container replacement")
+                if execution_tools:
+                    verify_execution_tools(name, first_id is not None)
                 first_id = result["runnerId"]
                 if draft is None:
                     draft = store_draft(base_url, token)

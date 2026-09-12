@@ -1,9 +1,11 @@
+import type { ExecutionRepository } from '../../application/execution-ports.js';
+import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 import { Worker } from 'node:worker_threads';
 import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout };
-class SqliteRepository implements RunnerRepository {
+class SqliteRepository implements RunnerRepository, ExecutionRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -47,6 +49,11 @@ class SqliteRepository implements RunnerRepository {
   listEvents(taskId: string, after: number): Promise<Page<TaskEvent>> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
   putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
+  queueTask(id: string, projectId: string): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId] }); }
+  claimNextTask(): Promise<Task | null> { return this.call({ method: 'claimNextTask', args: [] }); }
+  appendTaskOutput(id: string, channel: OutputChannel, text: string): Promise<void> { return this.call({ method: 'appendTaskOutput', args: [id, channel, text] }); }
+  finishTask(id: string, result: ExecutionResult): Promise<Task> { return this.call({ method: 'finishTask', args: [id, result] }); }
+  interruptRunningTasks(): Promise<void> { return this.call({ method: 'interruptRunningTasks', args: [] }); }
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     if (this.closed) return this.worker.terminate().then(() => undefined);
@@ -55,7 +62,7 @@ class SqliteRepository implements RunnerRepository {
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string): Promise<RunnerRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string): Promise<RunnerRepository & ExecutionRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker);
   try { await repository.ready; return repository; }

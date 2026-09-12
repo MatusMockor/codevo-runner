@@ -1,5 +1,5 @@
 import type { Server } from 'node:http';
-import { readConfig } from './config.js';
+import { readConfig, readProjectsFile } from './config.js';
 import { loadIdentity } from './identity.js';
 import { loadAuthorization } from './auth.js';
 import { createRunnerApplication } from './server.js';
@@ -9,7 +9,9 @@ async function main() {
   const config = readConfig(process.env);
   const authorized = await loadAuthorization(config.tokenFile);
   const runnerId = await loadIdentity(config.dataDir);
-  const services = await openRunnerServices(config.dataDir, runnerId);
+  const executionOptions = config.executionEnabled
+    ? { projects: await readProjectsFile(config.projectsFile!), isolation: config.executionIsolation } : undefined;
+  const services = await openRunnerServices(config.dataDir, runnerId, executionOptions);
   const app = await createRunnerApplication({ protocolVersion: 1, runnerId, name: config.name,
     capabilities: { taskExecution: false, eventReplay: false } }, authorized, services).catch(async error => {
       await services.close();

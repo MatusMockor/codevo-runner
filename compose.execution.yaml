@@ -1,0 +1,28 @@
+# Opt in: docker compose -f compose.yaml -f compose.execution.yaml up -d --build
+# Project paths in config/projects.json must exist inside this container.
+services:
+  runner:
+    build:
+      target: execution
+      args:
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.154.0}"
+        CLAUDE_CLI_VERSION: "${CLAUDE_CLI_VERSION:-2.1.270}"
+    image: codevo-runner:0.1.0-execution
+    pids_limit: 1024
+    mem_limit: "${CODEVO_EXECUTION_MEMORY:-4g}"
+    cpus: "${CODEVO_EXECUTION_CPUS:-2.0}"
+    environment:
+      CODEVO_EXECUTION_ENABLED: "true"
+      # This trusted single-user container is the isolation boundary, not each task.
+      CODEVO_EXECUTION_ISOLATION: container
+      CODEVO_PROJECTS_FILE: /run/config/projects.json
+    volumes:
+      - type: bind
+        source: ./config/projects.json
+        target: /run/config/projects.json
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=1g,mode=1777
+    stop_grace_period: 30s

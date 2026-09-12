@@ -1,6 +1,7 @@
 # Execution targets in the editor
 
-Status: accepted product requirements; editor integration is not implemented yet.
+Status: accepted product requirements. The editor has a local-first target selector
+and settings foundation; remote runner connection and task routing remain pending.
 
 ## Default and selection
 
@@ -42,10 +43,11 @@ Docker or an HTTP runner installation on the user's computer. The remote adapter
 uses the selected server's authenticated runner and capabilities.
 
 A saved remote connection is not proof that execution is available. The current
-runner only advertises draft storage and images, with `taskExecution: false`.
-Never offer it as a runnable target until the required execution/provider/project
-capabilities are implemented and verified. It may be shown as configured but not
-ready, with a clear reason.
+default runner advertises draft storage and images, with `taskExecution: false`.
+The explicit execution deployment advertises execution and exposes registered
+project IDs, start and diff endpoints. Execution capability alone does not verify
+provider installation, authentication or project readiness. Verify these before
+offering a runnable editor target; report a clear reason when it is not ready.
 
 If a selected server is unavailable, retain the selection and explain why sending
 is blocked. Never silently execute on a different machine. A disconnected existing

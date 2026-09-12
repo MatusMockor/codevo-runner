@@ -19,12 +19,20 @@ abandoned uploads yet; these count against the retained-storage quota.
 
 All holders of the runner token share one authority. Per-user attachment ownership
 is not implemented. An ID is a runner-scoped reference, not an access credential.
-Stored image support does not imply provider image support: no provider executes
-these drafts yet, and there is no desktop paste/drop/preview integration.
+When execution is enabled, validated attachments are staged into task-scoped
+files and passed to the selected provider's native image input: Codex image paths
+or Claude image content blocks. Staging verifies stored content before execution;
+unsupported image delivery is rejected rather than silently dropping images.
+Temporary execution inputs are cleaned up after the provider finishes; original
+uploaded images remain available for history. The execution image includes both
+Codex and Claude CLIs, each requiring its own provider authentication. There is no desktop
+paste/drop/preview integration yet. Native payload tests verify delivery at the CLI
+boundary; they are not a live-model image interpretation test.
 
 ## Remaining product requirements
 
-The sections below describe the full future workflow, not completed features.
+The sections below describe the complete product requirements; editor integration,
+follow-ups and retention remain outstanding even where backend behavior is present.
 
 ## User workflow
 

@@ -2,7 +2,9 @@ name: codevo-runner
 
 services:
   runner:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: codevo-runner:0.1.0
     init: true
     restart: unless-stopped

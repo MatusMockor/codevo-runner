@@ -1,19 +1,50 @@
 import { TaskService } from './application/task-service.js';
 import { openSqliteRepository } from './infrastructure/sqlite/index.js';
 import { createAttachmentStore } from './infrastructure/files/index.js';
+import { ExecutionService } from './application/execution-service.js';
+import type { ProviderExecutor } from './application/execution-ports.js';
+import type { RegisteredProject } from './domain/execution.js';
+import { ConfiguredProjectRegistry, GitProjectWorkspace } from './infrastructure/projects/index.js';
+import { CliProviderExecutor } from './infrastructure/execution/index.js';
+import { createExecutionAttachmentStager } from './infrastructure/files/execution-attachments.js';
+
+export type RunnerExecutionOptions = Readonly<{
+  projects: readonly RegisteredProject[];
+  providers?: readonly ProviderExecutor[];
+  isolation?: 'provider' | 'container';
+}>;
 
 /** Composition root: concrete infrastructure is wired only at the outside edge. */
-export async function openRunnerServices(dataDir: string, runnerId: string) {
+export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions) {
   const repository = await openSqliteRepository(dataDir, runnerId);
   try {
+    // Recovery is truthful even when an operator disables execution after a crash.
+    await repository.interruptRunningTasks();
     const attachments = await createAttachmentStore(dataDir, runnerId, repository);
+    let execution: ExecutionService | undefined;
+    try {
+      if (options) {
+        const cliOptions = { sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
+        execution = new ExecutionService(repository, repository,
+          new ConfiguredProjectRegistry(options.projects), new GitProjectWorkspace(dataDir),
+          options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
+          await createExecutionAttachmentStager(dataDir, attachments));
+        await execution.initialize();
+      }
+    } catch (error) {
+      try { await execution?.close(); } finally { await attachments.close(); }
+      throw error;
+    }
     let closing: Promise<void> | undefined;
     return {
-      tasks: new TaskService(repository), attachments,
+      tasks: new TaskService(repository), attachments, execution,
       close(): Promise<void> {
         closing ??= (async () => {
-          try { await attachments.close(); }
-          finally { await repository.close(); }
+          try { await execution?.close(); }
+          finally {
+            try { await attachments.close(); }
+            finally { await repository.close(); }
+          }
         })();
         return closing;
       },

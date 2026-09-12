@@ -1,9 +1,10 @@
-# Runner architecture and next slices
+# Runner architecture
 
 The desktop selects an execution target separately from a provider. Each runner
-will own its project checkout, provider login, task processes and durable history.
-The current slice stores task **drafts**, PNG/JPEG attachments and creation/cancellation
-events. It does not queue or execute an agent and has no project checkout integration.
+owns its registered project roots, provider login, task processes and durable history.
+The default deployment stores drafts and PNG/JPEG attachments. Explicitly enabling
+execution adds a persistent queue, one application worker, task-specific Git
+worktrees, CLI processes, bounded output replay and diff retrieval.
 
 ## Local-first editor integration
 
@@ -12,7 +13,7 @@ explicit per-task choice in the context strip below the prompt, beside branch an
 worktree controls, following T3 Code. Local and remote adapters implement a shared
 application execution interface; local use does not require a remote runner.
 See [execution target requirements](execution-targets.md) for defaults, placement,
-settings and unavailable-target behavior. These editor changes are planned.
+settings and unavailable-target behavior. Remote editor integration remains pending.
 
 ## Framework and dependency boundaries
 
@@ -25,6 +26,9 @@ Dependencies point inward:
 - `src/domain/contracts.ts`: closed message, task, event and attachment types plus limits.
 - `src/application/ports.ts`: asynchronous `TaskRepository`, `AttachmentRepository`
   and `AttachmentStore` interfaces; application workflows depend on these ports.
+- `src/application/execution-ports.ts`: `ExecutionRepository`, `ProjectRegistry`,
+  `ProjectWorkspace`, `ProviderExecutor` and attachment staging boundaries.
+- `ExecutionService`: durable admission, sequential dispatch, cancellation and shutdown.
 - Infrastructure: SQLite repository and runner-owned attachment files implement the ports.
 - Transport/composition: HTTP validation, response mapping, wiring and lifecycle.
 
@@ -61,21 +65,48 @@ and does not preserve attachment content. Container replacement preserves stored
 data only while its volume is retained; a restart policy is not task recovery.
 
 All clients holding the runner token share one authority in this MVP. This is not
-multiuser ownership isolation. Provider credentials, once implemented, will belong
-to the execution host and remain separate from editor-to-runner authentication.
+multiuser ownership isolation. Provider credentials belong to the execution host and remain separate from
+editor-to-runner authentication. The bundled execution image stores provider home
+in the persistent data volume. It is a single trusted Unix authority; project
+worktrees do not prevent one agent from accessing other mounted runner data.
 
 ## Current transport scope
 
 Authenticated HTTP supports draft creation, listing, retrieval and cancellation,
 raw image uploads and retrieval, and cursor-based event polling. Event history
-contains metadata, not binary blobs. There is no SSE subscription, automatic live
-reconnection, desktop image-paste UI, follow-up submission or provider execution.
+contains metadata and bounded CLI text output, not image blobs. Execution-enabled
+instances expose project listing, explicit start and worktree diffs. There is no
+SSE subscription, automatic editor reconnection, desktop image-paste UI or follow-up
+submission.
 See the [API contract](api.md) and [attachment scope](attachments.md).
 
-The next execution slice must persist intent before acknowledging queued work and
-own agent processes independently of HTTP connections. Disconnecting the editor
-must not cancel accepted execution. Recovery after a process or server restart
-must mark interrupted work truthfully; NestJS and Docker do not resume agent sessions.
+The execution service persists queued intent before acknowledgment and owns its
+worker independently of HTTP. A client disconnect does not cancel accepted work.
+Only one task runs at a time. Startup marks previously running tasks interrupted
+and drains pending queued work. Shutdown stops the active process; Docker's restart
+policy does not resume provider sessions. Cancelled and terminal states win races
+with late process results.
+
+Projects are registered through an operator-owned JSON file. HTTP clients choose
+an ID, never a source path or clone URL. A task starts in a detached worktree from
+source `HEAD`; source dirty files are not copied. Worktrees, baseline revisions,
+SQLite and attachment bytes persist under the data directory. Source Git roots
+must also persist because worktrees refer back to their Git metadata. A task diff
+compares against the recorded original baseline and separately lists untracked
+filenames. No automatic local/remote checkout synchronization is implemented.
+
+Provider adapters translate text and staged validated images into native CLI
+inputs. Codex receives image paths; Claude receives image content blocks. The
+execution Docker target bundles pinned Codex and Claude CLIs; provider
+authentication is supplied by the operator. The container toolchain determines which
+project commands can run. Application databases are separate project dependencies,
+not the runner's SQLite store. No Docker socket or per-project container launcher
+is included. The execution overlay selects `CODEVO_EXECUTION_ISOLATION=container`:
+Codex runs with `--sandbox danger-full-access` and relies on the whole container
+boundary. Native host execution keeps Codex in `workspace-write` isolation; Claude uses
+`acceptEdits` with file tools and Bash allowed.
+The container setting is not a per-task sandbox and gives the agent access to the
+container user's mounted runner state, credentials and other projects.
 
 ## Dependency maintenance
 
@@ -86,14 +117,12 @@ resolved version before removing it.
 
 ## Next vertical slices
 
-1. One provider adapter, registered project roots, owned process groups, scheduling,
-   bounded output, cancellation and truthful interrupted-task recovery.
-2. Follow-up messages, provider image delivery, approval responses and reconnectable
-   execution event delivery scoped to exact tasks.
-3. Editor environment settings, project mapping, image paste/drop/file selection,
-   persisted attachment previews, diff and verification results.
-4. Explicit retention/deletion for tasks and abandoned uploads, with safe reference checks.
-5. Second provider, toolchain images and per-task container execution.
+1. Editor environment connection, project mapping, image paste/drop/file selection,
+   persisted attachment previews, remote diff and verification results.
+2. Provider readiness/login UX, follow-up messages, approval responses and explicit
+   interrupted-task continuation.
+3. Explicit retention/deletion for tasks, worktrees and abandoned uploads.
+4. Additional toolchain images and per-task container isolation.
 
 Never accept arbitrary shell recipes from clients or infer remote authority from
 a Mac path. Keep provider sessions scoped to their runner. Bind transport to

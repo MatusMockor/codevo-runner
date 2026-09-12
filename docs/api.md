@@ -1,7 +1,8 @@
-# Draft and attachment API (protocol version 1)
+# Task, execution and attachment API (protocol version 1)
 
-The runner stores drafts. Selecting `codex` or `claude` records intent only: it does
-not start a CLI, authenticate a provider, edit a project or run tests.
+Creating a task stores a draft; it never starts execution by itself. With execution
+enabled, a separate start command durably queues the draft against a registered
+server project. The default deployment keeps execution disabled.
 
 Every route below requires `Authorization: Bearer <token>`. The only public route
 is `GET /healthz`. Requests with an Origin header are rejected. Paths are exact;
@@ -13,14 +14,20 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `POST /v1/tasks` | `{ task, created }`, 201 for new or 200 for identical retry |
 | `GET /v1/tasks?after=0` | `{ items, nextCursor }` in ascending creation sequence |
 | `GET /v1/tasks/:id` | Task |
-| `POST /v1/tasks/:id/cancel` | Task with `status: "cancelled"`; no request body |
+| `POST /v1/tasks/:id/cancel` | Cancel task; no request body |
+| `GET /v1/projects` | `{ items: [{ id, name }] }`; execution deployment only |
+| `POST /v1/tasks/:id/start` | Task, HTTP 202; body `{ "projectId": "my-app" }` |
+| `GET /v1/tasks/:id/diff` | `{ patch, truncated, untrackedFiles }` |
 | `GET /v1/tasks/:id/events?after=0` | `{ items, nextCursor }` containing task events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
 | `GET /v1/attachments/:id` | Attachment metadata |
 | `GET /v1/attachments/:id/content` | Original validated image bytes |
 
-Task status is `draft` or `cancelled`. Events are `task.created` and `task.cancelled`.
-Repeated cancellation returns the cancelled task without adding another event.
+Task status is `draft`, `queued`, `running`, `succeeded`, `failed`, `interrupted` or
+`cancelled`. Lifecycle events use `task.<status>` (draft creation is `task.created`).
+`task.output` events carry `channel` (`stdout` or `stderr`) and `text`; terminal
+execution events can carry `exitCode` and a bounded error code. Repeated commands
+do not duplicate lifecycle transitions.
 Pages contain at most 50 items. `after` is an exclusive, nonnegative integer cursor;
 `nextCursor` is null when that response has no further page. For continued event
 polling, retain the largest event `sequence` received even when `nextCursor` is null.
@@ -64,7 +71,7 @@ separators or control characters. Upload content type is exactly `image/png` or
 Content is sent directly, not base64 or multipart. No client filesystem path is
 accepted by the API.
 
-Copy the returned task ID into `TASK_ID` to inspect or cancel the draft:
+Copy the returned task ID into `TASK_ID` to inspect the draft:
 
 ```sh
 TASK_ID=replace-with-returned-task-id
@@ -72,9 +79,62 @@ curl --fail-with-body "$RUNNER_URL/v1/tasks/$TASK_ID" \
   -H "Authorization: Bearer $RUNNER_TOKEN"
 curl --fail-with-body "$RUNNER_URL/v1/tasks/$TASK_ID/events?after=0" \
   -H "Authorization: Bearer $RUNNER_TOKEN"
+```
+
+To abandon a draft or stop a queued/running task, cancel it instead of starting it:
+
+```sh
 curl --fail-with-body -X POST "$RUNNER_URL/v1/tasks/$TASK_ID/cancel" \
   -H "Authorization: Bearer $RUNNER_TOKEN"
 ```
+
+Cancellation is optional; skip it to continue the execution walkthrough. Once
+cancelled, create a new draft with a new task key before attempting execution.
+
+## Start and observe a task
+
+With the execution overlay enabled, use an uncancelled draft task ID:
+
+```sh
+curl --fail-with-body "$RUNNER_URL/v1/projects" \
+  -H "Authorization: Bearer $RUNNER_TOKEN"
+curl --fail-with-body -X POST "$RUNNER_URL/v1/tasks/$TASK_ID/start" \
+  -H "Authorization: Bearer $RUNNER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"projectId":"my-app"}'
+curl --fail-with-body "$RUNNER_URL/v1/tasks/$TASK_ID/events?after=0" \
+  -H "Authorization: Bearer $RUNNER_TOKEN"
+curl --fail-with-body "$RUNNER_URL/v1/tasks/$TASK_ID/diff" \
+  -H "Authorization: Bearer $RUNNER_TOKEN"
+```
+
+Start accepts exactly `projectId`, never paths, clone URLs, executable names or
+shell commands. Admission is persisted before the response. Retrying the same task
+and project does not launch it twice; choosing another project conflicts. Terminal
+tasks are not restarted. Provider installation and authentication happen on the
+host, not through this API; a missing or unauthenticated CLI can fail execution.
+The project list exposes IDs and names, not host paths.
+
+After disconnecting, poll events with the largest received sequence to replay
+missed output. Output is bounded to 1 MiB and 1,024 output events per task, with
+at most 8 KiB per output event. Across the runner, retained output is capped at
+8 MiB and 8,192 output events. Exhausting persisted-output capacity stops the
+provider and fails the task with `output_persistence_failed`; it does not silently
+discard continued output and report success. The process output limit also stops
+an excessively verbose CLI. Execution defaults to a 30-minute
+timeout. SQLite reserves 16 MiB of headroom for state transitions; exhausted
+admission capacity returns a quota error. This is persisted CLI stdout/stderr, not a parsed
+provider conversation. No live SSE, approval interaction or follow-up API exists.
+Cancellation of a running task aborts its process group. Restart marks formerly
+running tasks `interrupted` and leaves queued tasks eligible for execution; it does
+not resume an interrupted provider session.
+
+Diff compares tracked files with the task's original committed baseline, including
+changes committed inside the task worktree. New untracked files are listed by name;
+their contents are not included in `patch`. Diff and filename output are bounded
+and `truncated` signals an incomplete result. A task with no project conflicts;
+a worktree not yet created is not found. This endpoint does not transfer files or
+apply changes to the editor's local checkout.
 
 ## Limits and errors
 

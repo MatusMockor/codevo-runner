@@ -28,12 +28,45 @@ export class TaskController {
 
   @Post(':id/cancel')
   cancel(@Param('id') id: string, @Res() response: Response) {
-    return handle(response, async () => send(response, 200, await this.services.tasks.cancel(id)));
+    return handle(response, async () => {
+      const tasks = this.services.execution ?? this.services.tasks;
+      send(response, 200, await tasks.cancel(id));
+    });
+  }
+
+  @Post(':id/start')
+  start(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      const task = await this.services.execution.start(id, await jsonBody(request));
+      send(response, 202, task);
+    });
+  }
+
+  @Get(':id/diff')
+  diff(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.diff(id));
+    });
   }
 
   @Get(':id/events')
   events(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => send(response, 200, await this.services.tasks.events(id, cursor(request))));
+  }
+}
+
+@Controller('v1/projects')
+export class ProjectController {
+  constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+
+  @Get()
+  list(@Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, { items: await this.services.execution.projects() });
+    });
   }
 }
 

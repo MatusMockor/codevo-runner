@@ -1,3 +1,5 @@
+import type { TaskStatus } from './execution.js';
+
 export const LIMITS = Object.freeze({
   jsonBytes: 65_536, textBytes: 48_000, parts: 16, attachmentsPerTask: 8,
   attachmentBytes: 8 * 1024 * 1024, imagePixels: 16_000_000, imageDimension: 8192,
@@ -12,14 +14,15 @@ export type CreateTask = Readonly<{
 }>;
 export type Task = Readonly<{
   id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
-  status: 'draft' | 'cancelled'; parts: readonly MessagePart[]; createdAt: string;
+  status: TaskStatus; projectId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;
 export type Attachment = Readonly<{
   id: string; runnerId: string; name: string; mediaType: MediaType; bytes: number;
   sha256: string; width: number; height: number; createdAt: string;
 }>;
 export type TaskEvent = Readonly<{
-  sequence: number; taskId: string; type: 'task.created' | 'task.cancelled'; createdAt: string;
+  sequence: number; taskId: string; type: 'task.created' | 'task.cancelled' | 'task.queued' | 'task.running' | 'task.succeeded' | 'task.failed' | 'task.interrupted' | 'task.output'; createdAt: string;
+  channel?: 'stdout' | 'stderr'; text?: string; exitCode?: number | null; error?: string;
 }>;
 export type Page<T> = Readonly<{ items: readonly T[]; nextCursor: number | null }>;
 export type ErrorCode = 'invalid_input' | 'not_found' | 'conflict' | 'quota_exceeded' |

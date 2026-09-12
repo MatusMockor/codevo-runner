@@ -4,6 +4,11 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { LIMITS, RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 
+import { EXECUTION_LIMITS, type ExecutionResult, type OutputChannel } from '../../domain/execution.js';
+
+/** Bulk data leaves room for every admitted task's bounded terminal records. */
+export const SQLITE_EXECUTION_STORAGE = Object.freeze({ outputBytes: 8 * 1024 * 1024, outputEvents: 8192, reserveBytes: 16 * 1024 * 1024, errorBytes: 1024 });
+
 export class RepositoryDatabase {
   private readonly db!: DatabaseSync;
   private readonly lease!: DatabaseSync;
@@ -23,7 +28,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -33,7 +38,9 @@ export class RepositoryDatabase {
       const identity = this.db.prepare("SELECT value FROM metadata WHERE key='runnerId'").get();
       if (identity && identity['value'] !== this.runnerId) throw new RunnerError('conflict');
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
-      this.db.exec('PRAGMA user_version=1');
+      if (version !== 2) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
+        PRAGMA user_version=2;`);
     });
   }
   private transaction<T>(action: () => T): T {
@@ -44,6 +51,13 @@ export class RepositoryDatabase {
       try { this.db.exec('ROLLBACK'); } catch { /* The original failure is authoritative. */ }
       throw error;
     }
+  }
+  private requireBulkCapacity(): void {
+    const pages = Number(this.db.prepare('PRAGMA page_count').get()!['page_count']);
+    const free = Number(this.db.prepare('PRAGMA freelist_count').get()!['freelist_count']);
+    const size = Number(this.db.prepare('PRAGMA page_size').get()!['page_size']);
+    const maximum = Number(this.db.prepare('PRAGMA max_page_count').get()!['max_page_count']);
+    if ((maximum - pages + free) * size < SQLITE_EXECUTION_STORAGE.reserveBytes) throw new RunnerError('quota_exceeded');
   }
   private task(row: Record<string, unknown>): Task {
     return { ...JSON.parse(row['payload'] as string) as Task, sequence: Number(row['sequence']) };
@@ -62,6 +76,7 @@ export class RepositoryDatabase {
         if (previous['fingerprint'] !== fingerprint) throw new RunnerError('conflict');
         return { task: this.task(previous), created: false };
       }
+      this.requireBulkCapacity();
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const id of refs) this.getAttachment(id);
       const count = Number(this.db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']);
@@ -70,20 +85,72 @@ export class RepositoryDatabase {
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const id of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, id);
       this.event(task.id, 'task.created');
+      this.requireBulkCapacity();
       return { task: { ...task, sequence: Number(result.lastInsertRowid) }, created: true };
     });
   }
-  private event(id: string, type: TaskEvent['type']): void {
-    this.db.prepare('INSERT INTO events(task_id,type,created_at) VALUES(?,?,?)').run(id, type, new Date().toISOString());
+  private event(id: string, type: TaskEvent['type'], data?: object): void {
+    this.db.prepare('INSERT INTO events(task_id,type,created_at,data) VALUES(?,?,?,?)').run(id, type, new Date().toISOString(), data ? JSON.stringify(data) : null);
+  }
+  private save(task: Task, event: TaskEvent['type'], data?: object): Task {
+    this.db.prepare('UPDATE tasks SET payload=? WHERE id=?').run(JSON.stringify(task), task.id);
+    this.event(task.id, event, data);
+    return task;
   }
   cancelTask(id: string): Task {
     return this.transaction(() => {
       const task = this.getTask(id);
-      if (task.status === 'cancelled') return task;
-      const cancelled: Task = { ...task, status: 'cancelled' };
-      this.db.prepare('UPDATE tasks SET payload=? WHERE id=?').run(JSON.stringify(cancelled), id);
-      this.event(id, 'task.cancelled');
-      return cancelled;
+      if (!['draft', 'queued', 'running'].includes(task.status)) return task;
+      return this.save({ ...task, status: 'cancelled' }, 'task.cancelled');
+    });
+  }
+  queueTask(id: string, projectId: string): Task {
+    return this.transaction(() => {
+      const task = this.getTask(id);
+      if (task.projectId === projectId && task.status !== 'draft') return task;
+      if (task.status !== 'draft') throw new RunnerError('conflict');
+      if (!projectId || projectId.length > 128) throw new RunnerError('invalid_input');
+      this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(id);
+      return this.save({ ...task, projectId, status: 'queued' }, 'task.queued');
+    });
+  }
+  claimNextTask(): Task | null {
+    return this.transaction(() => {
+      const row = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='queued' ORDER BY sequence LIMIT 1").get();
+      if (!row) return null;
+      return this.save({ ...this.task(row), status: 'running' }, 'task.running');
+    });
+  }
+  appendTaskOutput(id: string, channel: OutputChannel, text: string): void {
+    if (channel !== 'stdout' && channel !== 'stderr') throw new RunnerError('invalid_input');
+    this.transaction(() => {
+      if (this.getTask(id).status !== 'running' || !text) return;
+      const usage = this.db.prepare('SELECT output_bytes,output_events FROM task_execution WHERE task_id=?').get(id)!;
+      if (Number(usage['output_events']) >= EXECUTION_LIMITS.outputEvents) throw new RunnerError('quota_exceeded');
+      const global = this.db.prepare('SELECT coalesce(sum(output_bytes),0) AS bytes,coalesce(sum(output_events),0) AS events FROM task_execution').get()!;
+      if (Number(global['events']) >= SQLITE_EXECUTION_STORAGE.outputEvents) throw new RunnerError('quota_exceeded');
+      const available = Math.min(EXECUTION_LIMITS.outputEventBytes, EXECUTION_LIMITS.outputBytes - Number(usage['output_bytes']), SQLITE_EXECUTION_STORAGE.outputBytes - Number(global['bytes']));
+      if (available <= 0 || Buffer.byteLength(text) > available) throw new RunnerError('quota_exceeded');
+      const output = text;
+      this.requireBulkCapacity();
+      this.event(id, 'task.output', { channel, text: output });
+      this.db.prepare('UPDATE task_execution SET output_bytes=output_bytes+?,output_events=output_events+1 WHERE task_id=?').run(Buffer.byteLength(output), id);
+      this.requireBulkCapacity();
+    });
+  }
+  finishTask(id: string, result: ExecutionResult): Task {
+    return this.transaction(() => {
+      const task = this.getTask(id);
+      if (task.status !== 'running') return task;
+      const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
+      const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };
+      return this.save({ ...task, status }, status === 'succeeded' ? 'task.succeeded' : 'task.failed', data);
+    });
+  }
+  interruptRunningTasks(): void {
+    this.transaction(() => {
+      const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence").all();
+      for (const row of rows) this.save({ ...this.task(row), status: 'interrupted' }, 'task.interrupted');
     });
   }
   private page<T extends { sequence: number }>(rows: T[]): Page<T> {
@@ -95,7 +162,7 @@ export class RepositoryDatabase {
   }
   listEvents(taskId: string, after: number): Page<TaskEvent> {
     this.getTask(taskId);
-    return this.page(this.db.prepare('SELECT sequence,task_id,type,created_at FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1).map(row => ({ sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string })));
+    return this.page(this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1).map(row => ({ sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string, ...(row['data'] ? JSON.parse(row['data'] as string) as object : {}) })));
   }
   getAttachment(id: string): Attachment {
     const row = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(id);
@@ -116,11 +183,22 @@ export class RepositoryDatabase {
       }
       const usage = this.db.prepare('SELECT count(*) AS n,coalesce(sum(bytes),0) AS bytes FROM attachments').get()!;
       if (Number(usage['n']) >= LIMITS.attachments || Number(usage['bytes']) + value.bytes > LIMITS.storageBytes) throw new RunnerError('quota_exceeded');
+      this.requireBulkCapacity();
       this.db.prepare('INSERT INTO attachments VALUES(?,?,?)').run(value.id, JSON.stringify(value), value.bytes);
+      this.requireBulkCapacity();
       return { attachment: value, created: true };
     });
   }
   close(): void {
     try { this.db.close(); } finally { this.lease.close(); }
   }
+}
+
+/** Truncate only at UTF-8 boundaries so stored byte limits remain exact. */
+function boundedText(text: string, bytes: number): string {
+  const encoded = Buffer.from(text);
+  if (encoded.length <= bytes) return text;
+  let end = bytes;
+  while (end > 0 && (encoded[end]! & 0xc0) === 0x80) end--;
+  return encoded.subarray(0, end).toString('utf8');
 }
