@@ -35,6 +35,95 @@ Default listener: `127.0.0.1:4318`. `CODEVO_DATA_DIR` defaults to `.codevo`.
 Set `CODEVO_NAME`, `CODEVO_HOST`, and `CODEVO_PORT` to override defaults. The token
 is loaded at startup; restart after rotation. Never commit or log token contents.
 
+## Direct Linux deployment with systemd
+
+Docker is optional. The runner can run directly as a user service on Linux, with
+provider CLIs and project development tools installed for that same user. The
+following example uses the `codex` account and a checkout at
+`/home/codex/codevo-runner`; replace absolute paths for your account and installation.
+
+1. Install Node 24.13+ (24.x), Git and the build tools required by your projects.
+   Install the Claude and/or Codex CLI under the service account and complete its
+   interactive login there. Provider credentials belong to that Linux account;
+   they are separate from the runner token and your local editor login.
+
+   In the runner checkout, run `npm ci` and `npm run build`. Record the absolute
+   executable path with `command -v node`. A systemd service does not load your
+   interactive shell or initialize nvm.
+
+2. Prepare private configuration and persistent state:
+
+   ```sh
+   install -d -m 700 ~/.config/codevo-runner ~/.local/share/codevo-runner
+   node -e "require('fs').writeFileSync(process.env.HOME + '/.config/codevo-runner/runner-token', require('crypto').randomBytes(32).toString('base64url') + '\\n', {mode: 0o600, flag: 'wx'})"
+   ```
+
+   Create `~/.config/codevo-runner/projects.json` with a real, writable server Git
+   checkout, using its **host path**, for example:
+
+   ```json
+   [{ "id": "my-app", "name": "My app", "path": "/home/codex/projects/my-app" }]
+   ```
+
+   Create `~/.config/codevo-runner/runner.env` with these values, adjusting paths
+   and the installed Node version. Use absolute paths: this file does not expand
+   `~`, `$HOME` or shell commands.
+
+   ```dotenv
+   CODEVO_HOST=127.0.0.1
+   CODEVO_PORT=4318
+   CODEVO_NAME=Linux server
+   CODEVO_TOKEN_FILE=/home/codex/.config/codevo-runner/runner-token
+   CODEVO_DATA_DIR=/home/codex/.local/share/codevo-runner
+   CODEVO_PROJECTS_FILE=/home/codex/.config/codevo-runner/projects.json
+   CODEVO_EXECUTION_ENABLED=true
+   CODEVO_EXECUTION_ISOLATION=provider
+   PATH=/home/codex/.local/bin:/home/codex/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+   ```
+
+   Include the actual provider CLI and language-runtime directories in `PATH`.
+   Keep `provider` isolation on a direct host; `container` mode is reserved for
+   the Docker deployment. Restrict the environment file with
+   `chmod 600 ~/.config/codevo-runner/runner.env`.
+
+3. Copy [the user service example](deploy/codevo-runner.service.example) and edit
+   `ExecStart` to use the absolute Node executable from step 1. Adjust
+   `WorkingDirectory` if the checkout is elsewhere.
+
+   ```sh
+   install -d -m 700 ~/.config/systemd/user
+   install -m 600 deploy/codevo-runner.service.example ~/.config/systemd/user/codevo-runner.service
+   # Edit the installed unit before starting it.
+   systemd-analyze --user verify ~/.config/systemd/user/codevo-runner.service
+   systemctl --user daemon-reload
+   systemctl --user enable --now codevo-runner.service
+   systemctl --user status codevo-runner.service
+   journalctl --user -u codevo-runner.service -n 50 --no-pager
+   ```
+
+4. Enable lingering so the user service starts on boot and remains running after
+   SSH logout. This may require administrator privileges:
+
+   ```sh
+   sudo loginctl enable-linger codex
+   loginctl show-user codex -p Linger
+   ```
+
+   Confirm `Linger=yes`, then reconnect after logout and verify the service is
+   still active. Connect the editor/client through the SSH tunnel below; token
+   authentication remains required. Follow the
+   [API walkthrough](docs/api.md#start-and-observe-a-task) to verify execution.
+
+SQLite, attachments and task worktrees persist in `CODEVO_DATA_DIR`; registered
+source repositories and provider credentials remain in their own host locations.
+Agent commands run as the service user directly on Linux. Install required project
+runtimes on that host. This is a trusted execution account, not an isolated user
+per task; do not run the service as root. Queued tasks survive a service restart,
+but active tasks become `interrupted`. Stop the service before updating its files
+or taking a consistent backup, then rebuild and restart it. Back up the data
+directory together with registered repositories and configuration, protecting
+credentials separately. An SSH disconnect alone does not interrupt tasks.
+
 ## Docker on a Linux server
 
 Create a unique token as above. The image runs as UID 1000; ensure that user can
