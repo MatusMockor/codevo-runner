@@ -52,12 +52,35 @@ and data volume. Pass an image tag as the first argument to check a different im
 the default is `codevo-runner:0.1.0`.
 
 Docker Engine and Compose must be installed and Docker must start on boot.
-The named `runner-data` volume retains identity, SQLite data and attachment files
+The Compose project defaults to `codevo-runner`. Its project-scoped volume
+`codevo-runner_runner-data` retains identity, SQLite data and attachment files
 when the container is recreated. Use local server storage for this volume, not a
 shared network filesystem; run one runner instance per data directory.
 Do not use `docker compose down -v` unless intentionally deleting runner state.
 Each server gets its own data volume and token. This foundation image contains
 Node, not provider CLIs or project build tools; those belong to the execution slice.
+
+### Multiple runners on one server
+
+Use a separate checkout and token for each instance, a unique Compose project name,
+and a different host port:
+
+```sh
+# Run from the personal instance checkout.
+CODEVO_PORT=4318 docker compose -p codevo-personal up -d --build
+# Run from the work instance checkout, with its own secrets/runner-token.
+CODEVO_PORT=4319 docker compose -p codevo-work up -d --build
+```
+
+These instances use `codevo-personal_runner-data` and `codevo-work_runner-data`.
+Compose also scopes their container and network names. Keep volumes project-scoped;
+do not add a global volume `name`, an external shared volume, or a fixed
+`container_name`. Use the same `-p` value for subsequent management commands, such
+as `docker compose -p codevo-work ps`.
+
+If an existing deployment used a different project name, keep that name with `-p`
+(or `COMPOSE_PROJECT_NAME`) when updating. Changing the project name selects a new
+volume; it does not migrate or delete the old data.
 
 Compose publishes only on server loopback. From a client machine, forward it:
 

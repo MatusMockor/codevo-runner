@@ -1,3 +1,5 @@
+name: codevo-runner
+
 services:
   runner:
     build: .
