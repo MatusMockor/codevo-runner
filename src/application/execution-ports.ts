@@ -1,3 +1,4 @@
+import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
 import type { Task } from '../domain/contracts.js';
 import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
@@ -24,6 +25,8 @@ export interface ProjectRegistry {
 export interface ProjectWorkspace {
   prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<string>;
   diff(taskId: string): Promise<WorkspaceDiff>;
+  files(project: RegisteredProject, taskId: string): Promise<WorkspaceFiles>;
+  fileDiff(project: RegisteredProject, taskId: string, path: string): Promise<WorkspaceFileDiff>;
   resume(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<string>;
 }
 /** Adapter owns its child process group and waits for it to stop before settling. */
@@ -39,6 +42,8 @@ export interface ExecutionApplication {
   cancel(taskId: string): Promise<Task>;
   projects(): Promise<readonly ProjectSummary[]>;
   diff(taskId: string): Promise<WorkspaceDiff>;
+  files(taskId: string): Promise<WorkspaceFiles>;
+  fileDiff(taskId: string, input: unknown): Promise<WorkspaceFileDiff>;
   initialize(): Promise<void>;
   close(): Promise<void>;
 }

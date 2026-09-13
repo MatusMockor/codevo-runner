@@ -242,3 +242,43 @@ test('session remains captured when a later malformed frame fails the turn', asy
     assert.equal(await readFile(join(f.cwd, 'session-captured'), 'utf8'), sessionId);
   } finally { await f.close(); }
 });
+
+for (const resumed of [false, true]) {
+  for (const provider of ['codex', 'claude'] as const) {
+    test(`${provider} explicit launch controls survive ${resumed ? 'resume' : 'start'} without legacy permission overrides`, async () => {
+      const f = await fixture(`let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
+        console.log(JSON.stringify({args:process.argv.slice(2),stdin,type:'diagnostic'}));
+        ${providerSuccess(provider)}
+      });`);
+      try {
+        const launch = provider === 'codex'
+          ? { provider: 'codex' as const, model: 'gpt-5.5' as const, mode: 'readOnly' as const }
+          : { provider: 'claudeCode' as const, model: 'opus' as const, mode: 'plan' as const, effort: 'high' as const, context: '1m' as const, fastMode: true };
+        const result = await new CliProviderExecutor(provider, { executable: f.executable }).execute({ ...f.request,
+          ...(resumed ? { resumeSessionId: sessionId } : {}), task: { ...f.request.task, provider, launch } });
+        assert.equal(result.error, undefined);
+        const observed = JSON.parse(f.output().split('\n')[0]!);
+        if (provider === 'codex') {
+          assert.deepEqual(observed.args.slice(resumed ? 3 : 2, resumed ? 7 : 6), ['-m', 'gpt-5.5', resumed ? '-c' : '--sandbox', resumed ? 'sandbox_mode="read-only"' : 'read-only']);
+          assert.ok(!observed.args.includes('approval_policy="never"'));
+          assert.ok(!observed.args.includes('sandbox_mode="workspace-write"'));
+        }
+        if (provider === 'claude') {
+          assert.deepEqual(observed.args.slice(6, 14), ['--model', 'opus[1m]', '--permission-mode', 'plan', '--effort', 'high', '--settings', '{"fastMode":true}']);
+          assert.ok(!observed.args.includes('--allowedTools'));
+          assert.ok(!observed.args.includes('acceptEdits'));
+        }
+      } finally { await f.close(); }
+    });
+  }
+}
+
+test('invalid persisted launch fails before provider spawn', async () => {
+  const f = await fixture('require("node:fs").writeFileSync("spawned","bad")');
+  try {
+    const launch = { provider: 'claudeCode' as const, model: 'opus' as const, mode: 'plan' as const, effort: 'high' as const };
+    const result = await new CliProviderExecutor('codex', { executable: f.executable }).execute({ ...f.request, task: { ...f.request.task, launch } });
+    assert.equal(result.error, 'launch_options_invalid');
+    await assert.rejects(readFile(join(f.cwd, 'spawned')));
+  } finally { await f.close(); }
+});

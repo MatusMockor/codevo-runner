@@ -14,7 +14,8 @@ See the [API with examples](docs/api.md), [architecture](docs/architecture.md) a
 
 ## Local development
 
-Requires Node 24.13+ (24.x).
+Requires Node 24.13+ (24.x). Remote per-file change review also requires Python 3
+for descriptor-anchored file reads; a missing interpreter returns a review error.
 
 ```sh
 npm ci
@@ -43,7 +44,7 @@ provider CLIs and project development tools installed for that same user. The
 following example uses the `codex` account and a checkout at
 `/home/codex/Developer/codevo-runner`; replace absolute paths for your account and installation.
 
-1. Install Node 24.13+ (24.x), Git and the build tools required by your projects.
+1. Install Node 24.13+ (24.x), Git, Python 3 and the build tools required by your projects.
    Install the Claude and/or Codex CLI under the service account and complete its
    interactive login there. Provider credentials belong to that Linux account;
    they are separate from the runner token and your local editor login.

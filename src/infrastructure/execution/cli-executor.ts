@@ -5,6 +5,8 @@ import type { ProviderExecutor } from '../../application/execution-ports.js';
 import { LIMITS } from '../../domain/contracts.js';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
+import { parseLaunchOptions } from '../../domain/launch.js';
+import { launchArguments, launchPrompt } from '../../domain/launch-arguments.js';
 import { runProcess } from './process-runner.js';
 
 export type CliExecutorOptions = Readonly<{
@@ -40,12 +42,16 @@ export class CliProviderExecutor implements ProviderExecutor {
     if (request.task.provider !== this.provider) return { exitCode: null, error: 'provider_mismatch' };
     if (request.signal.aborted) return { exitCode: null, error: 'cancelled' };
     if (request.resumeSessionId !== undefined && !isProviderSessionId(request.resumeSessionId)) return { exitCode: null, error: 'provider_session_invalid' };
+    let launch;
+    try { launch = request.task.launch === undefined ? undefined : parseLaunchOptions(request.task.launch, this.provider); }
+    catch { return { exitCode: null, error: 'launch_options_invalid' }; }
     const references = request.task.parts.filter(part => part.type === 'attachment');
     if (references.length !== request.attachments.length || references.length > LIMITS.attachmentsPerTask ||
       references.some((part, index) => part.attachmentId !== request.attachments[index]?.id)) {
       return { exitCode: null, error: 'attachment_input_invalid' };
     }
-    const prompt = request.task.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
+    const rawPrompt = request.task.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
+    const prompt = launch ? launchPrompt(launch, rawPrompt) : rawPrompt;
     const images: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [];
     try {
       for (const attachment of request.attachments) {
@@ -71,11 +77,11 @@ export class CliProviderExecutor implements ProviderExecutor {
     } catch { return { exitCode: null, error: 'attachment_input_invalid' }; }
     const args = this.provider === 'codex'
       ? ['exec', ...(request.resumeSessionId ? ['resume'] : []), '--json',
-        '-c', `sandbox_mode="${this.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write'}"`,
-        '-c', 'approval_policy="never"', ...request.attachments.flatMap(image => ['-i', image.path]), '--',
+        ...(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : ['-c', `sandbox_mode="${this.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write'}"`,
+        '-c', 'approval_policy="never"']), ...request.attachments.flatMap(image => ['-i', image.path]), '--',
         ...(request.resumeSessionId ? [request.resumeSessionId] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json',
-        '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash',
+        ...(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash']),
         ...(request.resumeSessionId ? ['--resume', request.resumeSessionId] : [])];
     // Codex exec requires nonempty stdin even when image flags are present.
     const stdin = this.provider === 'codex' ? (prompt || 'Inspect the attached images.') : `${JSON.stringify({

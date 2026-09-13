@@ -1,3 +1,4 @@
+import { parseLaunchOptions } from '../../domain/launch.js';
 import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import { CloneDatabase, CLONE_SCHEMA } from './clone-database.js';
@@ -82,7 +83,8 @@ export class RepositoryDatabase {
   continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } { return this.resumes.continueTask(id, input); }
   setTaskSession(id: string, sessionId: string): void { this.resumes.setTaskSession(id, sessionId); }
   createTask(input: CreateTask): { task: Task; created: boolean } {
-    const normalized = { provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
+    const launch = input.launch === undefined ? undefined : parseLaunchOptions(input.launch, input.provider);
+    const normalized = { ...(launch ? { launch } : {}), provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
     const fingerprint = JSON.stringify(normalized);
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT sequence,payload,fingerprint FROM tasks WHERE key=?').get(input.idempotencyKey);
@@ -95,7 +97,7 @@ export class RepositoryDatabase {
       for (const id of refs) this.getAttachment(id);
       const count = Number(this.db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']);
       if (count >= LIMITS.tasks) throw new RunnerError('quota_exceeded');
-      const task: Task = { id: randomUUID(), sequence: 0, runnerId: this.runnerId, provider: input.provider, status: 'draft', parts: input.parts, createdAt: new Date().toISOString() };
+      const task: Task = { id: randomUUID(), sequence: 0, runnerId: this.runnerId, provider: input.provider, status: 'draft', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const id of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, id);
       this.event(task.id, 'task.created');

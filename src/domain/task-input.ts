@@ -1,3 +1,4 @@
+import { parseLaunchOptions } from './launch.js';
 import { isId, LIMITS, RunnerError, type CreateTask, type MessagePart } from './contracts.js';
 
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -9,7 +10,8 @@ function record(value: unknown, keys: readonly string[]): Record<string, unknown
 }
 
 export function parseTaskInput(value: unknown): CreateTask {
-  const input = record(value, ['idempotencyKey', 'provider', 'parts']);
+  const hasLaunch = typeof value === 'object' && value !== null && Object.hasOwn(value, 'launch');
+  const input = record(value, ['idempotencyKey', 'provider', 'parts', ...(hasLaunch ? ['launch'] : [])]);
   if (!isId(input.idempotencyKey) || (input.provider !== 'codex' && input.provider !== 'claude'))
     throw new RunnerError('invalid_input');
   if (!Array.isArray(input.parts) || input.parts.length < 1 || input.parts.length > LIMITS.parts)
@@ -37,7 +39,7 @@ export function parseTaskInput(value: unknown): CreateTask {
     }
     throw new RunnerError('invalid_input');
   });
-  return Object.freeze({ idempotencyKey: input.idempotencyKey, provider: input.provider, parts: Object.freeze(parts) });
+  return Object.freeze({ idempotencyKey: input.idempotencyKey, provider: input.provider, parts: Object.freeze(parts), ...(hasLaunch ? { launch: parseLaunchOptions(input.launch, input.provider) } : {}) });
 }
 
 export function validateCursor(after: number): number {

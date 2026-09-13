@@ -23,6 +23,8 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id/resume` | Continuation eligibility `{ available, reason }` |
 | `POST /v1/tasks/:id/continue` | `{ task, created }`, 202 for new or 200 for identical retry |
 | `GET /v1/tasks/:id/diff` | `{ patch, truncated, untrackedFiles }` |
+| `GET /v1/tasks/:id/files` | Bounded changed-file list `{ files, truncated }` |
+| `POST /v1/tasks/:id/file-diff` | Original and current text for one changed relative path |
 | `GET /v1/tasks/:id/events?after=0` | `{ items, nextCursor }` containing task events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
 | `GET /v1/attachments/:id` | Attachment metadata |
@@ -306,3 +308,24 @@ conflicting retries 409, oversized payloads 413, unsupported media 415, exhauste
 quotas 429, and busy/unavailable storage 503. Authentication failures are 401;
 Origin requests are 403. Upload deadline expiry may return 408 `request_timeout`
 or close a stalled connection. Error responses never contain token or file contents.
+
+## Per-file change review
+
+Execution-enabled runners advertise `taskFileDiffs`. The files endpoint returns up to
+1,000 entries shaped as `{ path, status, oldPath? }`; status is `added`, `modified`,
+`deleted`, `renamed`, or `untracked`. Unsupported filename encodings and result limits
+set `truncated: true`. Names are relative to the conversation's original worktree.
+
+The file-diff endpoint accepts exactly `{ "path": "src/example.ts" }` and returns
+`{ path, original: { text, truncated }, modified: { text, truncated }, unavailableReason }`.
+`unavailableReason` is `null`, `binary`, or `large`. Each side is limited to 64 KiB of
+UTF-8; binary or oversized results return empty text on both sides rather than a
+misleading partial diff. Large results set both truncation flags. Missing/deleted sides
+are empty text with `truncated: false`. Original text comes from the conversation's
+saved baseline; current text reflects the same worktree used by later turns.
+
+Paths cannot be absolute or contain backslashes, control characters, empty segments,
+`.`/`..`, or `.git` segments. Current-file reads reject symlinks, hardlinks, and special
+files; directory traversal and Git inspection retain the verified workspace identity.
+Python 3 is required for this descriptor-based boundary. Missing Python or invalid
+workspace authority returns an error, never a successful empty review.

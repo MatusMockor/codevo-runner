@@ -7,7 +7,10 @@ import type { RunnerDescriptor } from '../server.js';
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
 const continueRoute = new RegExp(`^/v1/tasks/${uuid}/continue$`);
+const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
 const routes = [
+  { pattern: fileDiffRoute, methods: ['POST'] },
+  { pattern: new RegExp(`^/v1/tasks/${uuid}/files$`), methods: ['GET'] },
   { pattern: continueRoute, methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/resume$`), methods: ['GET'] },
   { pattern: /^\/v1\/projects\/clone$/, methods: ['POST'] },
@@ -49,7 +52,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'POST' &&
-      (request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url)));
+      (request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || fileDiffRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

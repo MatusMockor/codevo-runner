@@ -1,11 +1,13 @@
-import { spawn } from 'node:child_process';
-import { mkdir, realpath, lstat, writeFile, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, realpath, lstat, writeFile, readFile, open } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { ProjectRegistry, ProjectWorkspace } from '../../application/execution-ports.js';
 import { isId, RunnerError } from '../../domain/contracts.js';
 import type { RegisteredProject } from '../../domain/execution.js';
 
-const OUTPUT_LIMIT = 256 * 1024;
+import { git } from './git-command.js';
+import { listWorkspaceFiles, readWorkspaceFileDiff } from './workspace-files.js';
+import { validateWorkspacePath } from '../../domain/workspace-files.js';
 
 /** Host-admin registration only. Public listings never expose filesystem paths. */
 export class ConfiguredProjectRegistry implements ProjectRegistry {
@@ -30,6 +32,7 @@ export class ConfiguredProjectRegistry implements ProjectRegistry {
 export class GitProjectWorkspace implements ProjectWorkspace {
   private readonly root: string;
   private readonly baselines: string;
+  private reviews = 0;
   constructor(dataDir: string) {
     this.root = resolve(dataDir, 'workspaces');
     this.baselines = resolve(dataDir, 'workspace-baselines');
@@ -75,7 +78,7 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     if (await realpath(common) !== await realpath(sourceCommon)) throw new RunnerError('conflict');
     const basePath = join(this.baselines, workspaceTaskId);
     if (!(await lstat(basePath)).isFile() || (await lstat(basePath)).isSymbolicLink()) throw new RunnerError('conflict');
-    const base = await readFile(basePath, 'utf8');
+    const base = await readBaseline(basePath);
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('conflict');
     await git(cwd, ['cat-file', '-e', `${base}^{commit}`], signal);
     signal?.throwIfAborted();
@@ -97,47 +100,60 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     return { patch: patch.text, truncated: patch.truncated || untracked.truncated, untrackedFiles: filenames };
   }
 
+  files(project: RegisteredProject, taskId: string) {
+    return this.review(project, taskId, (cwd, base, _identity, signal) => listWorkspaceFiles(cwd, base, signal, _identity));
+  }
+
+  fileDiff(project: RegisteredProject, taskId: string, path: string) {
+    validateWorkspacePath(path);
+    return this.review(project, taskId, (cwd, base, identity, signal) => readWorkspaceFileDiff(cwd, identity, base, path, signal));
+  }
+
+  private async review<T>(project: RegisteredProject, taskId: string,
+    operation: (cwd: string, base: string, identity: { dev: number; ino: number }, signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.reviews >= 2) throw new RunnerError('busy');
+    this.reviews++;
+    const signal = AbortSignal.timeout(10_000);
+    try {
+      const cwd = await this.resume(project, taskId, signal);
+      const identity = await lstat(cwd);
+      const canonical = await realpath(cwd);
+      const baselinePath = join(this.baselines, taskId);
+      const baseline = await open(baselinePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const baselineIdentity = await baseline.stat();
+        if (!baselineIdentity.isFile() || ![40, 64].includes(baselineIdentity.size)) throw new RunnerError('conflict');
+        const buffer = Buffer.alloc(64);
+        const read = await baseline.read(buffer, 0, buffer.length, 0);
+        const base = buffer.subarray(0, read.bytesRead).toString('utf8');
+        if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('conflict');
+        const result = await operation(canonical, base, identity, signal);
+        await this.resume(project, taskId, signal);
+        const current = await lstat(cwd);
+        const currentBaseline = await lstat(baselinePath);
+        if (current.dev !== identity.dev || current.ino !== identity.ino || await realpath(cwd) !== canonical ||
+            currentBaseline.dev !== baselineIdentity.dev || currentBaseline.ino !== baselineIdentity.ino ||
+            currentBaseline.mtimeMs !== baselineIdentity.mtimeMs || currentBaseline.size !== baselineIdentity.size)
+          throw new RunnerError('conflict');
+        signal.throwIfAborted();
+        return result;
+      } finally { await baseline.close(); }
+    } finally { this.reviews--; }
+  }
+
   private taskPath(taskId: string) {
     if (!isId(taskId)) throw new RunnerError('invalid_input');
     return join(this.root, taskId);
   }
 }
 
-function git(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<{text: string; truncated: boolean}> {
-  signal?.throwIfAborted();
-  return new Promise((resolveResult, reject) => {
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-    Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
-    const child = spawn('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
-      '-c', 'diff.external=', ...args], { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-    let size = 0;
-    let truncated = false;
-    const chunks: Buffer[] = [];
-    let stopped = false;
-    const killGroup = () => {
-      if (process.platform === 'win32' || !child.pid) { child.kill('SIGKILL'); return; }
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Process already exited. */ }
-    };
-    const stop = () => { stopped = true; killGroup(); };
-    // Exit precedes close: descendants may still hold stdout/stderr open after Git exits.
-    child.once('exit', killGroup);
-    const timer = setTimeout(stop, 30_000);
-    signal?.addEventListener('abort', stop, { once: true });
-    if (signal?.aborted) stop();
-    child.stdout.on('data', (chunk: Buffer) => {
-      const keep = Math.min(chunk.length, OUTPUT_LIMIT - size);
-      if (keep) chunks.push(chunk.subarray(0, keep));
-      size += keep;
-      if (keep < chunk.length) truncated = true;
-    });
-    child.stderr.resume();
-    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', stop); };
-    child.once('error', error => { killGroup(); cleanup(); reject(error); });
-    child.once('close', code => {
-      cleanup();
-      if (stopped || signal?.aborted) return reject(signal?.reason ?? new Error('Git operation timed out'));
-      if (code !== 0) return reject(new Error(`Git operation failed (${code})`));
-      resolveResult({ text: new TextDecoder().decode(Buffer.concat(chunks), { stream: truncated }), truncated });
-    });
-  });
+async function readBaseline(path: string): Promise<string> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || ![40, 64].includes(info.size)) throw new RunnerError('conflict');
+    const buffer = Buffer.alloc(64);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally { await file.close(); }
 }

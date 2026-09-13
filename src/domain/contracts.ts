@@ -1,3 +1,4 @@
+import type { AgentLaunchOptions } from './launch.js';
 import type { TaskStatus } from './execution.js';
 
 export const LIMITS = Object.freeze({
@@ -10,11 +11,11 @@ export type MediaType = 'image/png' | 'image/jpeg';
 export type MessagePart = Readonly<{ type: 'text'; text: string }> |
   Readonly<{ type: 'attachment'; attachmentId: string }>;
 export type CreateTask = Readonly<{
-  idempotencyKey: string; provider: 'codex' | 'claude'; parts: readonly MessagePart[];
+  idempotencyKey: string; provider: 'codex' | 'claude'; launch?: AgentLaunchOptions; parts: readonly MessagePart[];
 }>;
 export type Task = Readonly<{
   id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
-  status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
+  launch?: AgentLaunchOptions; status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;
 export type Attachment = Readonly<{
   id: string; runnerId: string; name: string; mediaType: MediaType; bytes: number;

@@ -1,3 +1,4 @@
+import { parseLaunchOptions } from '../../domain/launch.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
@@ -67,7 +68,8 @@ export class ResumeDatabase {
     this.dependencies.transaction(() => this.captureSession(id, sessionId));
   }
   findContinuation(id: string, input: ContinueTask): { task: Task; created: false } | null {
-    this.dependencies.getTask(id);
+    const parent = this.dependencies.getTask(id);
+    if (input.launch !== undefined) parseLaunchOptions(input.launch, parent.provider);
     const previous = this.db.prepare('SELECT sequence,payload,fingerprint FROM tasks WHERE key=?').get(input.idempotencyKey);
     if (!previous) return null;
     if (previous['fingerprint'] !== this.continuationFingerprint(id, input)) throw new RunnerError('conflict');
@@ -75,12 +77,13 @@ export class ResumeDatabase {
   }
   private continuationFingerprint(id: string, input: ContinueTask): string {
     const parts = input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId });
-    return JSON.stringify({ parentTaskId: id, parts });
+    return JSON.stringify({ parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
   }
   continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } {
     const fingerprint = this.continuationFingerprint(id, input);
     return this.dependencies.transaction(() => {
       const parent = this.dependencies.getTask(id);
+      const launch = input.launch === undefined ? parent.launch : parseLaunchOptions(input.launch, parent.provider);
       const previous = this.findContinuation(id, input);
       if (previous) return previous;
       if (!this.getResumeState(id).available) throw new RunnerError('conflict');
@@ -90,7 +93,7 @@ export class ResumeDatabase {
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const ref of refs) this.dependencies.getAttachment(ref);
       const root = parent.conversationId ?? parent.id;
-      const task: Task = { id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', parts: input.parts, createdAt: new Date().toISOString() };
+      const task: Task = { id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const ref of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, ref);
       this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(task.id);

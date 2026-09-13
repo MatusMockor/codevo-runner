@@ -19,6 +19,8 @@ export type RunnerDescriptor = Readonly<{
   capabilities: Readonly<{
     taskExecution: boolean;
     taskContinuation?: boolean;
+    taskFileDiffs?: boolean;
+    taskLaunchOptions?: boolean;
     eventReplay: boolean;
     taskDrafts?: boolean;
     projectCloning?: boolean;
@@ -70,7 +72,7 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
+    capabilities: { taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
   } : descriptor;
   const app = await NestFactory.create({
     module: RunnerModule,

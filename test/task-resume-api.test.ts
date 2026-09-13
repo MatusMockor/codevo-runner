@@ -39,7 +39,7 @@ process.stdin.on('end', () => {
   if (resume && fs.readFileSync('tracked.txt', 'utf8') !== 'first turn\\n') process.exit(12);
   if (!resume && fs.readFileSync('tracked.txt', 'utf8') !== 'original\\n') process.exit(13);
   fs.writeFileSync('tracked.txt', resume ? 'first turn\\nsecond turn\\n' : 'first turn\\n');
-  fs.appendFileSync('turns.jsonl', JSON.stringify({ cwd: process.cwd(), resume, input }) + '\\n');
+  fs.appendFileSync('turns.jsonl', JSON.stringify({ cwd: process.cwd(), resume, input, args: process.argv.slice(2) }) + '\\n');
   const events = provider === 'codex'
     ? [{ type: 'thread.started', thread_id: sessionId }, { type: 'turn.completed' }]
     : [{ type: 'system', subtype: 'init', session_id: sessionId }, { type: 'result', subtype: 'success', session_id: sessionId, is_error: false, result: 'Done' }];
@@ -196,3 +196,36 @@ test('committed continuation retry returns the existing turn when its worktree i
     await rename(moved, cwd);
   }
 });
+
+for (const provider of ['claude', 'codex'] as const) {
+  test(`${provider}: selected launch crosses HTTP, durable storage and CLI on both turns`, { timeout: 20_000 }, async t => {
+    const { data, get, post, finished, restart } = await fixture(t, provider);
+    assert.equal((await (await get('/v1/runner')).json()).capabilities.taskLaunchOptions, true);
+    const launch = provider === 'codex'
+      ? { provider: 'codex', model: 'gpt-5.5', mode: 'readOnly' }
+      : { provider: 'claudeCode', model: 'opus', mode: 'plan', effort: 'high', context: '1m' };
+    const parts = [{ type: 'text', text: 'First turn' }];
+    assert.equal((await post('/v1/tasks', { idempotencyKey: randomUUID(), provider, parts, launch: { ...launch, args: ['--evil'] } })).status, 400);
+    const created = await post('/v1/tasks', { idempotencyKey: randomUUID(), provider, parts, launch });
+    assert.equal(created.status, 201);
+    const first = (await created.json()).task as Task;
+    assert.equal(first.launch?.model, launch.model);
+    assert.equal((await post(`/v1/tasks/${first.id}/start`, { projectId: 'sample' })).status, 202);
+    assert.equal((await finished(first.id)).status, 'succeeded');
+    await restart();
+    const body = { idempotencyKey: randomUUID(), parts: [{ type: 'text', text: 'Second turn' }],
+      launch: { ...launch, model: provider === 'codex' ? 'gpt-5.4' : 'sonnet' } };
+    const continued = await post(`/v1/tasks/${first.id}/continue`, body);
+    assert.equal(continued.status, 202);
+    const second = (await continued.json()).task as Task;
+    assert.equal((await finished(second.id)).status, 'succeeded');
+    assert.equal((await post(`/v1/tasks/${first.id}/continue`, body)).status, 200);
+    assert.equal((await post(`/v1/tasks/${first.id}/continue`, { ...body, launch })).status, 409);
+    const turns = (await readFile(join(data, 'workspaces', first.id, 'turns.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(turns.length, 2);
+    assert.ok(turns[0].args.includes(provider === 'codex' ? 'gpt-5.5' : 'opus[1m]'));
+    assert.ok(turns[1].args.includes(provider === 'codex' ? 'gpt-5.4' : 'sonnet[1m]'));
+    assert.ok(!turns[1].args.includes('--allowedTools'));
+    assert.equal(second.launch?.model, body.launch.model);
+  });
+}

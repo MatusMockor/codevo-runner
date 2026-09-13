@@ -1,3 +1,4 @@
+import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
 import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
@@ -84,6 +85,26 @@ export class ExecutionService implements ExecutionApplication {
     const task = await this.tasks.getTask(validateId(taskId));
     if (!task.projectId) throw new RunnerError('conflict');
     return this.workspaces.diff((await this.executions.getTaskSession(taskId)).workspaceTaskId);
+  }
+
+  async files(taskId: string) {
+    const { project, workspaceTaskId } = await this.reviewContext(taskId);
+    return this.workspaces.files(project, workspaceTaskId);
+  }
+
+  async fileDiff(taskId: string, input: unknown) {
+    const path = parseWorkspaceFileInput(input);
+    const { project, workspaceTaskId } = await this.reviewContext(taskId);
+    return this.workspaces.fileDiff(project, workspaceTaskId, path);
+  }
+
+  private async reviewContext(taskId: string) {
+    this.assertAvailable();
+    const task = await this.tasks.getTask(validateId(taskId));
+    if (!task.projectId) throw new RunnerError('conflict');
+    const project = await this.registry.get(task.projectId);
+    const { workspaceTaskId } = await this.executions.getTaskSession(taskId);
+    return { project, workspaceTaskId };
   }
 
   async close(): Promise<void> {

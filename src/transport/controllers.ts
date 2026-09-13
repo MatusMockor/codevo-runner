@@ -68,6 +68,22 @@ export class TaskController {
     });
   }
 
+  @Get(':id/files')
+  files(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.files(id));
+    });
+  }
+
+  @Post(':id/file-diff')
+  fileDiff(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.fileDiff(id, await jsonBody(request)));
+    });
+  }
+
   @Get(':id/events')
   events(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => send(response, 200, await this.services.tasks.events(id, cursor(request))));
