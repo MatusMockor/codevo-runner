@@ -16,7 +16,12 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id` | Task |
 | `POST /v1/tasks/:id/cancel` | Cancel task; no request body |
 | `GET /v1/projects` | `{ items: [{ id, name }] }`; execution deployment only |
+| `POST /v1/projects/clone` | Clone job, HTTP 202; body `{ idempotencyKey, url, name, branch? }` |
+| `GET /v1/project-clones/:id` | Clone job |
+| `POST /v1/project-clones/:id/cancel` | Cancel clone job; no request body |
 | `POST /v1/tasks/:id/start` | Task, HTTP 202; body `{ "projectId": "my-app" }` |
+| `GET /v1/tasks/:id/resume` | Continuation eligibility `{ available, reason }` |
+| `POST /v1/tasks/:id/continue` | `{ task, created }`, 202 for new or 200 for identical retry |
 | `GET /v1/tasks/:id/diff` | `{ patch, truncated, untrackedFiles }` |
 | `GET /v1/tasks/:id/events?after=0` | `{ items, nextCursor }` containing task events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
@@ -33,6 +38,71 @@ Pages contain at most 50 items. `after` is an exclusive, nonnegative integer cur
 polling, retain the largest event `sequence` received even when `nextCursor` is null.
 Task-list cursors enumerate creation, not changes to previously listed tasks.
 There is no SSE connection or automatic event subscription.
+
+## Clone and register a repository
+
+An execution-enabled runner advertises `projectCloning`. Cloning creates a durable
+job and runs independently of the HTTP request. It does not start an AI task.
+
+```sh
+CLONE_KEY=$(node -p 'crypto.randomUUID()')
+curl --fail-with-body -X POST "$RUNNER_URL/v1/projects/clone" \
+  -H "Authorization: Bearer $RUNNER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary "{\"idempotencyKey\":\"$CLONE_KEY\",\"url\":\"git@github.com:YOUR-ORG/YOUR-REPO.git\",\"name\":\"my-app\",\"branch\":\"main\"}"
+```
+
+Set `RUNNER_URL` and securely provide `RUNNER_TOKEN` as in the examples below.
+The response is a job directly, with no wrapping `job` property:
+
+```json
+{
+  "id": "12345678-1234-4123-8123-123456789abc",
+  "status": "queued",
+  "project": null,
+  "error": null
+}
+```
+
+Poll `GET /v1/project-clones/:id`. Status is `queued`, `running`, `succeeded`,
+`failed`, `interrupted` or `cancelled`. A successful job includes
+`project: { id, name }`; the registered project can then be selected for task
+start. Errors are bounded codes, not raw Git output. There is no clone-job list
+or clone-output event endpoint. Keep the job ID and original idempotency key to
+recover an uncertain response; identical admission with that key returns the
+same job, while changed input conflicts. Retry an interrupted or failed attempt
+with a new key after resolving the cause.
+
+The body accepts only the four documented fields. `idempotencyKey` is a lowercase
+UUID v4. `name` is also the destination folder name: 1–64 ASCII letters, digits,
+underscores or hyphens, starting with a letter or digit. `branch` is optional and
+must be a valid bounded branch name (at most 255 characters); omitting it clones
+the default branch. URLs are at most 2,048 characters and accept the supported
+HTTPS, `ssh://user@host/path` or `user@host:path` forms. Credentials in HTTPS URLs,
+query strings, fragments, local paths and other protocols are rejected.
+
+HTTPS is anonymous: credential helpers and interactive prompts are disabled.
+For private repositories, configure SSH authentication and known host keys under
+the runner's service account. The runner does not accept credentials or forward
+the desktop SSH agent. The clone destination is selected by the operator's
+`CODEVO_PROJECTS_ROOT` (default `~/Developer`), never a client-supplied path.
+Any existing destination file, directory or symlink is a conflict and is never
+overwritten. Names already registered or reserved by another clone also conflict.
+
+One clone runs at a time. Up to eight queued/running jobs are admitted, and at most
+1,000 jobs are retained. Configured projects, managed projects and active clone
+reservations share a 32-slot limit. There is no automatic history eviction or cloned-repository size quota.
+Git has a ten-minute deadline; output is discarded rather than retained as a log.
+Cancellation durably changes queued/running jobs to `cancelled` and stops the owned
+Git process group. Late completion cannot overwrite a terminal state.
+
+Successful project registration and the `succeeded` job transition commit together
+in SQLite. Disconnecting the client does not stop a clone. Runner restart marks
+both queued and running clone jobs `interrupted`, without automatic retry. Normal
+failure/cancellation removes only the destination still owned by that operation;
+an abrupt process death can leave a partial directory. Inspect that directory
+before removing it, or retry with another name. These clone recovery rules differ
+from the agent task queue, whose queued tasks remain eligible after restart.
 
 ## Upload then store a draft
 
@@ -124,10 +194,11 @@ discard continued output and report success. The process output limit also stops
 an excessively verbose CLI. Execution defaults to a 30-minute
 timeout. SQLite reserves 16 MiB of headroom for state transitions; exhausted
 admission capacity returns a quota error. This is persisted CLI stdout/stderr, not a parsed
-provider conversation. No live SSE, approval interaction or follow-up API exists.
+provider conversation. There is no live SSE or approval interaction API.
 Cancellation of a running task aborts its process group. Restart marks formerly
 running tasks `interrupted` and leaves queued tasks eligible for execution; it does
-not resume an interrupted provider session.
+not automatically resume an interrupted provider session. An explicit follow-up
+can continue an eligible session as described below.
 
 Diff compares tracked files with the task's original committed baseline, including
 changes committed inside the task worktree. New untracked files are listed by name;
@@ -135,6 +206,69 @@ their contents are not included in `patch`. Diff and filename output are bounded
 and `truncated` signals an incomplete result. A task with no project conflicts;
 a worktree not yet created is not found. This endpoint does not transfer files or
 apply changes to the editor's local checkout.
+
+## Continue a provider session
+
+An execution-enabled runner advertises `taskContinuation`. Continuation is explicit:
+first inspect `GET /v1/tasks/:id/resume`, then submit the next turn to
+`POST /v1/tasks/:id/continue`. Neither endpoint accepts a provider session ID,
+workspace path or replacement provider from the client.
+
+The eligibility response is exactly one of:
+
+```json
+{ "available": true, "reason": null }
+{ "available": false, "reason": "task_not_finished" }
+{ "available": false, "reason": "session_unavailable" }
+{ "available": false, "reason": "newer_turn_exists" }
+```
+
+A finished task can continue only when it is the latest turn and has saved session
+metadata and a usable original Git worktree. This check does not query the provider's
+history store or prove login readiness. Missing, expired or rejected provider
+history can still fail execution. The runner does not fall back to a new session.
+
+Upload any new images before submitting their references. The continuation body
+contains exactly `idempotencyKey` and `parts`, with the same UUID, message-part,
+prompt and attachment limits as draft creation:
+
+```json
+{
+  "idempotencyKey": "12345678-1234-4123-8123-123456789abc",
+  "parts": [{ "type": "text", "text": "Now add a regression test for that fix." }]
+}
+```
+
+Successful admission creates and queues a new task atomically; no separate start
+request is needed. Its provider and project come from the parent. The task includes
+`parentTaskId` and `conversationId` (the original task ID). Existing task records
+may omit these optional fields. Each turn has its own events and status, while
+all turns share the original worktree and baseline. Only the latest turn can admit
+a successor; continuation does not branch from older turns. Every new turn counts
+against the runner-wide task and output quotas.
+
+Reuse the same key and unchanged parts when retrying an uncertain response. An
+identical retry returns the same task with `created: false`; changed input or a
+noneligible parent conflicts. Do not generate a new key merely because the client
+lost the response. Once a successor exists, its parent is no longer eligible.
+
+The CLI resumes the server-owned provider session. Structured provider output is
+checked against its expected session ID; a mismatched session or provider-reported
+failure cannot be treated as successful continuation. Cancellation or service
+restart stops the process as for other tasks. A finished failed, cancelled or
+interrupted latest turn can be eligible for another explicit follow-up if its
+session metadata and worktree remain available.
+
+Historical tasks may recover a session ID from retained structured stdout, bounded
+by the existing event/output limits. Recovery does not copy or repair the provider's
+history. Missing output, missing history or relocated worktrees/source repositories
+can prevent continuation. In particular, the same Git branch name does not identify
+a provider conversation, and importing a local session does not transfer it here.
+
+A conversation's diff is cumulative against its original baseline and reads its
+current shared worktree, even when requested through an older turn's task ID. It
+is not a frozen snapshot of that turn. Untracked file contents and local checkout
+synchronization remain outside this endpoint's scope.
 
 ## Limits and errors
 

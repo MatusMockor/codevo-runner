@@ -91,8 +91,9 @@ const fs = require('node:fs');
 let prompt = '';
 process.stdin.on('data', chunk => prompt += chunk);
 process.stdin.on('end', () => {
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: '${randomUUID()}' }));
   if (prompt === 'Wait until cancelled') {
-    process.stdout.write('waiting-for-cancel\\n');
+    console.log(JSON.stringify({ type: 'item.completed', text: 'waiting-for-cancel' }));
     setInterval(() => {}, 1000);
     return;
   }
@@ -100,7 +101,8 @@ process.stdin.on('end', () => {
   if (imageIndex < 0 || fs.readFileSync(process.argv[imageIndex + 1])[0] !== 137) process.exit(7);
   setTimeout(() => {
   fs.appendFileSync('README.md', 'Updated by server agent\\n');
-  process.stdout.write(JSON.stringify({ type: 'result', prompt }) + '\\n');
+  console.log(JSON.stringify({ type: 'item.completed', prompt }));
+  console.log(JSON.stringify({ type: 'turn.completed' }));
 }, 150);
 });
 `, { mode: 0o700 });

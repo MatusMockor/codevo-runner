@@ -3,7 +3,7 @@ Description=Codevo Runner
 
 [Service]
 Type=simple
-WorkingDirectory=%h/codevo-runner
+WorkingDirectory=%h/Developer/codevo-runner
 EnvironmentFile=%h/.config/codevo-runner/runner.env
 # Replace this path with the absolute Node 24.13+ (24.x) executable path.
 ExecStart=/absolute/path/to/node dist/src/main.js

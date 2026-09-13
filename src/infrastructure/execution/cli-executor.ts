@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import type { ProviderExecutor } from '../../application/execution-ports.js';
 import { LIMITS } from '../../domain/contracts.js';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
+import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import { runProcess } from './process-runner.js';
 
 export type CliExecutorOptions = Readonly<{
@@ -38,6 +39,7 @@ export class CliProviderExecutor implements ProviderExecutor {
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
     if (request.task.provider !== this.provider) return { exitCode: null, error: 'provider_mismatch' };
     if (request.signal.aborted) return { exitCode: null, error: 'cancelled' };
+    if (request.resumeSessionId !== undefined && !isProviderSessionId(request.resumeSessionId)) return { exitCode: null, error: 'provider_session_invalid' };
     const references = request.task.parts.filter(part => part.type === 'attachment');
     if (references.length !== request.attachments.length || references.length > LIMITS.attachmentsPerTask ||
       references.some((part, index) => part.attachmentId !== request.attachments[index]?.id)) {
@@ -68,17 +70,33 @@ export class CliProviderExecutor implements ProviderExecutor {
       }
     } catch { return { exitCode: null, error: 'attachment_input_invalid' }; }
     const args = this.provider === 'codex'
-      ? ['exec', '--json', '--sandbox', this.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write',
-        '-c', 'approval_policy="never"', ...request.attachments.flatMap(image => ['-i', image.path]), '--', '-']
+      ? ['exec', ...(request.resumeSessionId ? ['resume'] : []), '--json',
+        '-c', `sandbox_mode="${this.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write'}"`,
+        '-c', 'approval_policy="never"', ...request.attachments.flatMap(image => ['-i', image.path]), '--',
+        ...(request.resumeSessionId ? [request.resumeSessionId] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json',
-        '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash'];
+        '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash',
+        ...(request.resumeSessionId ? ['--resume', request.resumeSessionId] : [])];
     // Codex exec requires nonempty stdin even when image flags are present.
     const stdin = this.provider === 'codex' ? (prompt || 'Inspect the attached images.') : `${JSON.stringify({
       type: 'user', message: { role: 'user', content: [...images, ...(prompt ? [{ type: 'text', text: prompt }] : [])] },
     })}\n`;
     const env: NodeJS.ProcessEnv = {};
     for (const key of ENVIRONMENT_KEYS) if (process.env[key]) env[key] = process.env[key];
-    return runProcess({ executable: this.executable, args, cwd: request.cwd, stdin, env,
-      signal: request.signal, timeoutMs: this.timeoutMs, outputBytes: this.outputBytes, onOutput: request.onOutput });
+    const parser = new ProviderOutputParser(this.provider, request.resumeSessionId);
+    let sessionPublished = false;
+    const result = await runProcess({ executable: this.executable, args, cwd: request.cwd, stdin, env,
+      signal: request.signal, timeoutMs: this.timeoutMs, outputBytes: this.outputBytes, onOutput: async (channel, text) => {
+        if (channel === 'stdout') parser.push(text);
+        const sessionId = parser.currentSessionId();
+        if (sessionId && !sessionPublished) {
+          await request.onSession?.(sessionId);
+          sessionPublished = true;
+        }
+        await request.onOutput(channel, text);
+      } });
+    const parsed = parser.finish();
+    if (result.error || result.exitCode !== 0) return { ...parsed, ...result };
+    return { ...result, ...parsed };
   }
 }

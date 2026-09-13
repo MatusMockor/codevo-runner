@@ -14,7 +14,7 @@ export type CreateTask = Readonly<{
 }>;
 export type Task = Readonly<{
   id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
-  status: TaskStatus; projectId?: string; parts: readonly MessagePart[]; createdAt: string;
+  status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;
 export type Attachment = Readonly<{
   id: string; runnerId: string; name: string; mediaType: MediaType; bytes: number;

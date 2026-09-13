@@ -1,3 +1,4 @@
+import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
 import type { ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
@@ -40,6 +41,36 @@ export class ExecutionService implements ExecutionApplication {
     return queued;
   }
 
+  async resumeState(taskId: string) {
+    this.assertAvailable();
+    validateId(taskId);
+    const state = await this.executions.getResumeState(taskId);
+    if (!state.available) return state;
+    const task = await this.tasks.getTask(taskId);
+    const session = await this.executions.getTaskSession(taskId);
+    try {
+      if (!task.projectId) throw new RunnerError('conflict');
+      await this.workspaces.resume(await this.registry.get(task.projectId), session.workspaceTaskId);
+    } catch { return { available: false, reason: 'session_unavailable' as const }; }
+    return this.executions.getResumeState(taskId);
+  }
+
+  async continue(taskId: string, input: unknown) {
+    this.assertAvailable();
+    validateId(taskId);
+    const parsed = parseContinueTask(input);
+    const previous = await this.executions.findContinuation(taskId, parsed);
+    if (previous) return previous;
+    const task = await this.tasks.getTask(taskId);
+    this.executorFor({ ...task, parts: parsed.parts });
+    if (!task.projectId) throw new RunnerError('conflict');
+    const session = await this.executions.getTaskSession(taskId);
+    await this.workspaces.resume(await this.registry.get(task.projectId), session.workspaceTaskId);
+    const result = await this.executions.continueTask(taskId, parsed);
+    this.wake();
+    return result;
+  }
+
   async cancel(taskId: string): Promise<Task> {
     validateId(taskId);
     const task = await this.tasks.cancelTask(taskId);
@@ -52,7 +83,7 @@ export class ExecutionService implements ExecutionApplication {
   async diff(taskId: string) {
     const task = await this.tasks.getTask(validateId(taskId));
     if (!task.projectId) throw new RunnerError('conflict');
-    return this.workspaces.diff(taskId);
+    return this.workspaces.diff((await this.executions.getTaskSession(taskId)).workspaceTaskId);
   }
 
   async close(): Promise<void> {
@@ -105,14 +136,20 @@ export class ExecutionService implements ExecutionApplication {
       if (!task.projectId) throw new RunnerError('invalid_input');
       const executor = this.executorFor(task);
       const project = await this.registry.get(task.projectId);
-      const cwd = await this.workspaces.prepare(project, task.id, abort.signal);
+      const session = await this.executions.getTaskSession(task.id);
+      if (task.parentTaskId && !session.sessionId) throw new RunnerError('conflict');
+      const cwd = task.parentTaskId
+        ? await this.workspaces.resume(project, session.workspaceTaskId, abort.signal)
+        : await this.workspaces.prepare(project, task.id, abort.signal);
       abort.signal.throwIfAborted();
       const ids = task.parts.flatMap((part) => part.type === 'attachment' ? [part.attachmentId] : []);
       if (ids.length > 0) inputs = await this.attachments!.stage(task.id, ids);
       abort.signal.throwIfAborted();
-      const result = await executor.execute({ task, cwd, signal: abort.signal, attachments: inputs?.attachments ?? [],
+      const result = await executor.execute({ task, cwd, ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
+        onSession: (sessionId) => this.executions.setTaskSession(task.id, sessionId),
         onOutput: (channel, text) => this.executions.appendTaskOutput(task.id, channel, text),
       });
+      if (result.sessionId) await this.executions.setTaskSession(task.id, result.sessionId);
       if (!this.closing) await this.executions.finishTask(task.id, result);
     } catch {
       // Do not persist raw exception strings: they may contain credentials or host paths.

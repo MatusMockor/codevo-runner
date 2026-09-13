@@ -13,7 +13,9 @@ explicit per-task choice in the context strip below the prompt, beside branch an
 worktree controls, following T3 Code. Local and remote adapters implement a shared
 application execution interface; local use does not require a remote runner.
 See [execution target requirements](execution-targets.md) for defaults, placement,
-settings and unavailable-target behavior. Remote editor integration remains pending.
+settings and unavailable-target behavior. The desktop integration provides saved
+SSH connections, server project selection, image paste/drop/file selection, task
+history, output, explicit provider-session follow-up and remote diffs.
 
 ## Framework and dependency boundaries
 
@@ -29,6 +31,8 @@ Dependencies point inward:
 - `src/application/execution-ports.ts`: `ExecutionRepository`, `ProjectRegistry`,
   `ProjectWorkspace`, `ProviderExecutor` and attachment staging boundaries.
 - `ExecutionService`: durable admission, sequential dispatch, cancellation and shutdown.
+- Clone application service and ports: durable clone admission, a separate sequential
+  worker, Git clone execution and managed project registration through SQLite.
 - Infrastructure: SQLite repository and runner-owned attachment files implement the ports.
 - Transport/composition: HTTP validation, response mapping, wiring and lifecycle.
 
@@ -47,7 +51,8 @@ its event are also transactional. Repeated identical task admission returns the
 existing task; reusing its idempotency key with different content is a conflict.
 
 Attachment bytes live beside the database in runner-owned storage. The database,
-attachment files and runner identity belong in the same persistent Docker volume.
+attachment files and runner identity belong in the same persistent data directory
+(or the same persistent volume when using Docker).
 Use local disk on the execution host, not a shared network filesystem for SQLite.
 A separate `runner-lease.sqlite` connection holds an exclusive transaction for the
 runner lifetime. A second live runner using that directory fails before attachment
@@ -75,9 +80,10 @@ worktrees do not prevent one agent from accessing other mounted runner data.
 Authenticated HTTP supports draft creation, listing, retrieval and cancellation,
 raw image uploads and retrieval, and cursor-based event polling. Event history
 contains metadata and bounded CLI text output, not image blobs. Execution-enabled
-instances expose project listing, explicit start and worktree diffs. There is no
-SSE subscription, automatic editor reconnection, desktop image-paste UI or follow-up
-submission.
+instances expose project listing, explicit start, continuation eligibility,
+follow-up admission and worktree diffs. There is no SSE subscription or automatic
+editor reconnection. The desktop
+provides image paste/drop/file selection and polls saved task state.
 See the [API contract](api.md) and [attachment scope](attachments.md).
 
 The execution service persists queued intent before acknowledgment and owns its
@@ -87,13 +93,62 @@ and drains pending queued work. Shutdown stops the active process; Docker's rest
 policy does not resume provider sessions. Cancelled and terminal states win races
 with late process results.
 
-Projects are registered through an operator-owned JSON file. HTTP clients choose
-an ID, never a source path or clone URL. A task starts in a detached worktree from
-source `HEAD`; source dirty files are not copied. Worktrees, baseline revisions,
+Projects combine the operator-owned JSON registry with successfully cloned projects
+registered in SQLite. Clone admission accepts a bounded repository URL, folder name
+and optional branch. The Git adapter resolves the operator-configured
+`CODEVO_PROJECTS_ROOT` (default the service account's `~/Developer`), exclusively
+reserves a destination, and owns its subprocess group. Existing destinations are
+refused, including symlinks. HTTPS credential helpers and interactive Git prompts
+are disabled; private repositories use server-owned SSH authentication.
+
+Clone intent and idempotency are persisted before acknowledgment. Clone completion
+and managed-project registration are atomic. The separate clone worker runs one
+job at a time independently of HTTP; cancellation wins against late completion.
+On restart, queued and running clone jobs become `interrupted`, unlike the agent
+queue. No implicit retry or overwrite occurs. Normal cleanup checks destination
+identity; abrupt process death can leave an incomplete folder for operator review.
+Retained jobs, queue admission and project reservations are bounded, but cloned
+repository disk size has no quota. The JSON registry remains an operator-managed
+source of existing projects; cloning does not rewrite that file.
+
+Task start still accepts a registered project ID, never a source path or clone URL.
+A new conversation starts in a detached worktree from source `HEAD`; source dirty
+files are not copied. Explicit follow-up turns reuse that original worktree. Worktrees, baseline revisions,
 SQLite and attachment bytes persist under the data directory. Source Git roots
 must also persist because worktrees refer back to their Git metadata. A task diff
 compares against the recorded original baseline and separately lists untracked
 filenames. No automatic local/remote checkout synchronization is implemented.
+
+## Provider conversation ownership
+
+Continuation is advertised separately through `taskContinuation`. A conversation
+keeps a server-owned provider session ID, original worktree identity and latest
+task ID. Each turn remains a separate durable task with its own output and status;
+follow-up task records carry `conversationId` and `parentTaskId`. SQLite repository
+operations atomically admit the child, queue its execution and advance the latest
+turn pointer. An idempotent retry returns that same child. Only the latest finished
+turn may have a successor, so two clients cannot branch an older shared worktree
+through continuation admission.
+
+The application checks worktree identity before continuation and dispatch. Provider
+adapters resume the saved session using the original provider and working directory.
+Bounded structured stdout parsing captures provider session identity and detects
+provider errors or unexpected session replacement. There is no silent fresh-session
+fallback. A saved ID and valid worktree establish eligibility, not proof that the
+provider's external history store or credentials remain usable.
+
+All turns share the original baseline and mutable worktree. Diff retrieval is
+cumulative and reflects its current state, including requests for older turns; no
+per-turn filesystem snapshot is stored. Source repositories, worktrees and provider
+history must remain available together. Bounded recovery of session IDs from older
+stored stdout can make historical tasks eligible, but does not migrate provider
+history or repair path associations after moving repositories or worktrees.
+
+Restart still marks an active task `interrupted`; it does not automatically resume
+a provider process. A user can explicitly continue an eligible latest terminal task,
+including an interrupted, failed or cancelled turn, as a new queued task. See the
+[continuation API](api.md#continue-a-provider-session) for the closed eligibility
+reasons and idempotency rules.
 
 Provider adapters translate text and staged validated images into native CLI
 inputs. Codex receives image paths; Claude receives image content blocks. The
@@ -117,10 +172,9 @@ resolved version before removing it.
 
 ## Next vertical slices
 
-1. Editor environment connection, project mapping, image paste/drop/file selection,
-   persisted attachment previews, remote diff and verification results.
-2. Provider readiness/login UX, follow-up messages, approval responses and explicit
-   interrupted-task continuation.
+1. Explicit transfer of remote changes to the local checkout and richer result
+   presentation.
+2. Provider readiness/login UX, approval responses and richer conversation history.
 3. Explicit retention/deletion for tasks, worktrees and abandoned uploads.
 4. Additional toolchain images and per-task container isolation.
 

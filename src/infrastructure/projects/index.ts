@@ -60,6 +60,28 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     return cwd;
   }
 
+  async resume(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<string> {
+    const cwd = this.taskPath(workspaceTaskId);
+    signal?.throwIfAborted();
+    const source = await realpath(project.path);
+    if ((await lstat(this.root)).isSymbolicLink() || (await lstat(this.baselines)).isSymbolicLink() ||
+        !(await lstat(cwd)).isDirectory() || (await lstat(cwd)).isSymbolicLink()) throw new RunnerError('conflict');
+    const canonicalCwd = await realpath(cwd);
+    if (canonicalCwd !== join(await realpath(this.root), workspaceTaskId)) throw new RunnerError('conflict');
+    const top = (await git(cwd, ['rev-parse', '--show-toplevel'], signal)).text.trim();
+    if (await realpath(top) !== canonicalCwd) throw new RunnerError('conflict');
+    const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal)).text.trim();
+    const sourceCommon = (await git(source, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal)).text.trim();
+    if (await realpath(common) !== await realpath(sourceCommon)) throw new RunnerError('conflict');
+    const basePath = join(this.baselines, workspaceTaskId);
+    if (!(await lstat(basePath)).isFile() || (await lstat(basePath)).isSymbolicLink()) throw new RunnerError('conflict');
+    const base = await readFile(basePath, 'utf8');
+    if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('conflict');
+    await git(cwd, ['cat-file', '-e', `${base}^{commit}`], signal);
+    signal?.throwIfAborted();
+    return cwd;
+  }
+
   async diff(taskId: string): Promise<{ patch: string; truncated: boolean; untrackedFiles: readonly string[] }> {
     const cwd = this.taskPath(taskId);
     try {

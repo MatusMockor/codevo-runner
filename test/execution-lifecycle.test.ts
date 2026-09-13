@@ -30,8 +30,9 @@ async function fixture(t: TestContext) {
 let prompt = '';
 process.stdin.on('data', chunk => prompt += chunk);
 process.stdin.on('end', () => {
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: '${randomUUID()}' }));
   if (prompt === 'hold') {
-    process.stdout.write('started:' + process.pid + '\\n');
+    console.log(JSON.stringify({ type: 'item.completed', text: 'started:' + process.pid }));
     setInterval(() => {}, 1000);
     return;
   }
@@ -40,11 +41,12 @@ process.stdin.on('end', () => {
     let alive = true;
     try { process.kill(pid, 0); }
     catch (error) { if (error.code !== 'ESRCH') throw error; alive = false; }
-    process.stdout.write('prior-alive:' + alive + '\\n');
+    console.log(JSON.stringify({ type: 'item.completed', text: 'prior-alive:' + alive }));
+    console.log(JSON.stringify({ type: alive ? 'turn.failed' : 'turn.completed' }));
     process.exitCode = alive ? 2 : 0;
     return;
   }
-  process.stdout.write('completed\\n');
+  console.log(JSON.stringify({ type: 'turn.completed' }));
 });
 `, { mode: 0o700 });
   const runnerId = randomUUID();
@@ -76,7 +78,7 @@ async function create(services: Awaited<ReturnType<typeof openRunnerServices>>, 
 async function startedPid(services: Awaited<ReturnType<typeof openRunnerServices>>, taskId: string) {
   const output = await until(async () => (await services.tasks.events(taskId, 0)).items
     .filter(event => event.type === 'task.output').map(event => event.text ?? '').join(''),
-  text => /started:\d+\n/.test(text));
+  text => /started:\d+/.test(text));
   return Number(/started:(\d+)/.exec(output)![1]);
 }
 

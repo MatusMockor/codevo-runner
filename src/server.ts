@@ -8,7 +8,7 @@ import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { RequestBoundary } from './transport/boundary.js';
-import { AttachmentController, ProjectController, TaskController } from './transport/controllers.js';
+import { AttachmentController, ProjectController, ProjectCloneController, TaskController } from './transport/controllers.js';
 import { send } from './transport/http.js';
 import { AUTHORIZE, DESCRIPTOR, EXTENDED, SERVICES, type Authorize, type RunnerServices } from './transport/services.js';
 
@@ -18,8 +18,10 @@ export type RunnerDescriptor = Readonly<{
   name: string;
   capabilities: Readonly<{
     taskExecution: boolean;
+    taskContinuation?: boolean;
     eventReplay: boolean;
     taskDrafts?: boolean;
+    projectCloning?: boolean;
     imageAttachments?: boolean;
   }>;
 }>;
@@ -68,11 +70,11 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true },
+    capabilities: { taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
   } : descriptor;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [TaskController, AttachmentController, ProjectController] : [])],
+    controllers: [RunnerController, ...(services ? [TaskController, AttachmentController, ProjectController, ProjectCloneController] : [])],
     providers: [
       RequestBoundary,
       { provide: DESCRIPTOR, useValue: effectiveDescriptor },

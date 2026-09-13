@@ -1,3 +1,6 @@
+import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
+import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
+import { CloneDatabase, CLONE_SCHEMA } from './clone-database.js';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -12,6 +15,8 @@ export const SQLITE_EXECUTION_STORAGE = Object.freeze({ outputBytes: 8 * 1024 * 
 export class RepositoryDatabase {
   private readonly db!: DatabaseSync;
   private readonly lease!: DatabaseSync;
+  readonly clones: CloneDatabase;
+  readonly resumes: ResumeDatabase;
   constructor(dataDir: string, private readonly runnerId: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     try {
@@ -20,6 +25,8 @@ export class RepositoryDatabase {
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=16384; PRAGMA journal_size_limit=4194304;');
       this.migrate();
+      this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
+      this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
     } catch (error) {
       try { this.db?.close(); } finally { this.lease?.close(); }
       throw error;
@@ -28,7 +35,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1 && version !== 2) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -38,9 +45,11 @@ export class RepositoryDatabase {
       const identity = this.db.prepare("SELECT value FROM metadata WHERE key='runnerId'").get();
       if (identity && identity['value'] !== this.runnerId) throw new RunnerError('conflict');
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
-      if (version !== 2) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
+      if (version === 0 || version === 1) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
       this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
-        PRAGMA user_version=2;`);
+        PRAGMA user_version=4;`);
+      this.db.exec(CLONE_SCHEMA);
+      this.db.exec(RESUME_SCHEMA);
     });
   }
   private transaction<T>(action: () => T): T {
@@ -67,6 +76,11 @@ export class RepositoryDatabase {
     if (!row) throw new RunnerError('not_found');
     return this.task(row);
   }
+  getTaskSession(id: string): { sessionId: string | null; workspaceTaskId: string } { return this.resumes.getTaskSession(id); }
+  getResumeState(id: string): ResumeState { return this.resumes.getResumeState(id); }
+  findContinuation(id: string, input: ContinueTask): { task: Task; created: false } | null { return this.resumes.findContinuation(id, input); }
+  continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } { return this.resumes.continueTask(id, input); }
+  setTaskSession(id: string, sessionId: string): void { this.resumes.setTaskSession(id, sessionId); }
   createTask(input: CreateTask): { task: Task; created: boolean } {
     const normalized = { provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
     const fingerprint = JSON.stringify(normalized);
@@ -141,6 +155,7 @@ export class RepositoryDatabase {
   finishTask(id: string, result: ExecutionResult): Task {
     return this.transaction(() => {
       const task = this.getTask(id);
+      if (result.sessionId) this.resumes.captureSession(id, result.sessionId);
       if (task.status !== 'running') return task;
       const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
       const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };

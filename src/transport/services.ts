@@ -1,7 +1,9 @@
+import type { CloneApplication } from '../application/clone-ports.js';
 import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 
 export interface RunnerServices {
+  readonly clones?: CloneApplication;
   readonly tasks: TaskApplication;
   readonly attachments: AttachmentStore;
   readonly execution?: ExecutionApplication;

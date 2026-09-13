@@ -14,6 +14,18 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'createClone': value = db.clones.createClone(...request.args); break;
+        case 'getClone': value = db.clones.getClone(...request.args); break;
+        case 'cancelClone': value = db.clones.cancelClone(...request.args); break;
+        case 'claimClone': value = db.clones.claimClone(); break;
+        case 'finishClone': value = db.clones.finishClone(...request.args); break;
+        case 'interruptClones': value = db.clones.interruptClones(); break;
+        case 'listManagedProjects': value = db.clones.listManagedProjects(); break;
+        case 'getTaskSession': value = db.getTaskSession(...request.args); break;
+        case 'getResumeState': value = db.getResumeState(...request.args); break;
+        case 'findContinuation': value = db.findContinuation(...request.args); break;
+        case 'continueTask': value = db.continueTask(...request.args); break;
+        case 'setTaskSession': value = db.setTaskSession(...request.args); break;
         case 'createTask': value = db.createTask(...request.args); break;
         case 'getTask': value = db.getTask(...request.args); break;
         case 'listTasks': value = db.listTasks(...request.args); break;

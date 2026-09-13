@@ -43,6 +43,23 @@ export class TaskController {
     });
   }
 
+  @Get(':id/resume')
+  resume(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.resumeState(id));
+    });
+  }
+
+  @Post(':id/continue')
+  continue(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      const result = await this.services.execution.continue(id, await jsonBody(request));
+      send(response, result.created ? 202 : 200, result);
+    });
+  }
+
   @Get(':id/diff')
   diff(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
@@ -57,9 +74,36 @@ export class TaskController {
   }
 }
 
+@Controller('v1/project-clones')
+export class ProjectCloneController {
+  constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+  @Get(':id')
+  get(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.clones) throw new RunnerError('not_found');
+      send(response, 200, await this.services.clones.get(id));
+    });
+  }
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.clones) throw new RunnerError('not_found');
+      send(response, 200, await this.services.clones.cancel(id));
+    });
+  }
+}
+
 @Controller('v1/projects')
 export class ProjectController {
   constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+  @Post('clone')
+  clone(@Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.clones) throw new RunnerError('not_found');
+      send(response, 202, await this.services.clones.create(await jsonBody(request)));
+    });
+  }
+
 
   @Get()
   list(@Res() response: Response) {
