@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { LinuxProcessTree } from './linux-process-tree.js';
 import { StringDecoder } from 'node:string_decoder';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 
@@ -20,11 +21,18 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
     let bytes = 0;
     let delivery = Promise.resolve();
     const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+    let tree: LinuxProcessTree | undefined;
+    try { if (process.platform === 'linux' && child.pid) tree = new LinuxProcessTree(child.pid); }
+    catch { failure = 'process_cleanup_failed'; }
+    const tracking = tree ? setInterval(() => {
+      try { tree.observe(); } catch { stop('process_cleanup_failed'); }
+    }, 100) : undefined;
     const killGroup = () => {
+      try { tree?.kill(); } catch { failure = 'process_cleanup_failed'; }
       if (!child.pid) return;
       try { process.kill(-child.pid, 'SIGKILL'); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failure ??= 'process_cleanup_failed';
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failure = 'process_cleanup_failed';
       }
     };
     const stop = (reason: string) => { failure ??= reason; killGroup(); };
@@ -33,6 +41,7 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
     plan.signal.addEventListener('abort', abort, { once: true });
     // Cover cancellation between the initial check and listener registration.
     if (plan.signal.aborted) abort();
+    if (failure) killGroup();
     child.once('error', () => { failure ??= 'provider_unavailable'; });
     child.stdin.on('error', () => { /* Early provider exit closes stdin normally. */ });
     for (const channel of ['stdout', 'stderr'] as const) {
@@ -60,6 +69,7 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
     child.once('exit', killGroup);
     child.once('close', (exitCode) => {
       clearTimeout(timer);
+      clearInterval(tracking);
       plan.signal.removeEventListener('abort', abort);
       killGroup();
       void delivery.then(async () => {

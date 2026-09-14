@@ -183,3 +183,29 @@ test('bulk database quota reserves capacity for admitted task completion and can
     assert.equal(Buffer.byteLength(events.items.at(-1)!.error!), 1024);
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('cancelled execution records cleanup failure once without changing ordinary cancellation', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'runner-cleanup-db-'));
+  const runnerId = randomUUID();
+  let repository = await openSqliteRepository(directory, runnerId);
+  try {
+    const active = (await repository.createTask(input())).task;
+    await repository.queueTask(active.id, 'project');
+    await repository.claimNextTask();
+    await repository.cancelTask(active.id);
+    for (const error of ['cancelled', 'execution_timeout', 'provider_reported_failure']) {
+      assert.equal((await repository.finishTask(active.id, { exitCode: null, error })).status, 'cancelled');
+    }
+    assert.equal((await repository.finishTask(active.id, { exitCode: null, error: 'process_cleanup_failed' })).status, 'failed');
+    await repository.finishTask(active.id, { exitCode: null, error: 'process_cleanup_failed' });
+    const draft = (await repository.createTask(input())).task;
+    await repository.cancelTask(draft.id);
+    assert.equal((await repository.finishTask(draft.id, { exitCode: null, error: 'process_cleanup_failed' })).status, 'cancelled');
+    await repository.close();
+    repository = await openSqliteRepository(directory, runnerId);
+    assert.equal((await repository.getTask(active.id)).status, 'failed');
+    const failures = (await repository.listEvents(active.id, 0)).items.filter(event => event.type === 'task.failed');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0]?.error, 'process_cleanup_failed');
+  } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
+});

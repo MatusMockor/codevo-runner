@@ -158,7 +158,11 @@ export class RepositoryDatabase {
     return this.transaction(() => {
       const task = this.getTask(id);
       if (result.sessionId) this.resumes.captureSession(id, result.sessionId);
-      if (task.status !== 'running') return task;
+      // Cancellation records intent before the worker has reaped its processes.
+      // Only an actual cleanup failure may correct that terminal acknowledgement.
+      const cleanupFailed = task.status === 'cancelled' && result.error === 'process_cleanup_failed'
+        && this.db.prepare("SELECT 1 FROM events WHERE task_id=? AND type='task.running' LIMIT 1").get(id);
+      if (task.status !== 'running' && !cleanupFailed) return task;
       const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
       const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };
       return this.save({ ...task, status }, status === 'succeeded' ? 'task.succeeded' : 'task.failed', data);
