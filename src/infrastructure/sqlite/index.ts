@@ -1,3 +1,4 @@
+import type { PendingMessage, PendingMessages } from '../../domain/pending-message.js';
 import type { HistorySearchRepository } from '../../application/history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
@@ -52,6 +53,11 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  enqueuePending(id: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }> { return this.call({ method: 'enqueuePending', args: [id, input] }); }
+  listPending(id: string): Promise<PendingMessages> { return this.call({ method: 'listPending', args: [id] }); }
+  removePending(id: string, pendingId: string): Promise<PendingMessage> { return this.call({ method: 'removePending', args: [id, pendingId] }); }
+  resumePending(id: string): Promise<PendingMessages> { return this.call({ method: 'resumePending', args: [id] }); }
+  promotePending(): Promise<Task | null> { return this.call({ method: 'promotePending', args: [] }); }
   searchHistory(query: HistorySearchQuery): Promise<HistorySearchPage> { return this.call({ method: 'searchHistory', args: [query] }); }
   getTaskSession(id: string): Promise<{ sessionId: string | null; workspaceTaskId: string }> { return this.call({ method: 'getTaskSession', args: [id] }); }
   getResumeState(id: string): Promise<ResumeState> { return this.call({ method: 'getResumeState', args: [id] }); }
@@ -94,12 +100,14 @@ export async function openSqliteRepository(dataDir: string, runnerId: string, ch
 
 function changesInventory(operation: Operation, value: unknown): boolean {
   switch (operation.method) {
+    // A promotion attempt may pause a blocked queue without creating a task.
+    case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
     case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
     case 'continueTask': case 'setTaskSession': case 'createTask': case 'cancelTask':
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
-    case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
+    case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
     case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory': return false;
   }

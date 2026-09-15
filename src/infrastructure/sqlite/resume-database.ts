@@ -80,8 +80,11 @@ export class ResumeDatabase {
     return JSON.stringify({ parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
   }
   continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } {
+    return this.dependencies.transaction(() => this.admitContinuation(id, input));
+  }
+  /** Caller owns the SQLite transaction; used for atomic pending-message promotion. */
+  admitContinuation(id: string, input: ContinueTask): { task: Task; created: boolean } {
     const fingerprint = this.continuationFingerprint(id, input);
-    return this.dependencies.transaction(() => {
       const parent = this.dependencies.getTask(id);
       const launch = input.launch === undefined ? parent.launch : parseLaunchOptions(input.launch, parent.provider);
       const previous = this.findContinuation(id, input);
@@ -102,6 +105,5 @@ export class ResumeDatabase {
       this.dependencies.event(task.id, 'task.queued');
       this.dependencies.requireCapacity();
       return { task: { ...task, sequence: Number(result.lastInsertRowid) }, created: true };
-    });
   }
 }

@@ -383,3 +383,34 @@ that has never been persisted by this runner. `incomplete` signals malformed
 provider records or an exceeded event scan bound in this page; a null cursor
 means the retained task scan ended, not that omitted/provider-only history exists
 in this database. Active incomplete JSON records can mark a page incomplete.
+
+## Pending conversation messages
+
+The `pendingMessages` discovery capability advertises durable followups while a
+conversation is running. These messages are separate from executed task history.
+The task ID in each route identifies its server-owned conversation; callers never
+provide a provider session ID or workspace path.
+
+- `GET /v1/tasks/:id/pending` returns `{ items }` in FIFO order, at most 16 active messages.
+- `POST /v1/tasks/:id/pending` accepts the same closed `{ idempotencyKey, parts, launch? }`
+  body as continuation. It returns `{ pending, created }` (202, or 200 for an identical retry).
+- `DELETE /v1/tasks/:id/pending/:pendingId` returns the cancelled message. Repeating
+  removal is safe; removing an already dispatched message returns conflict.
+- `POST /v1/tasks/:id/pending/resume` accepts no body and returns `{ items }`. It
+  explicitly resumes a paused queue only when the latest turn has a usable saved session.
+
+A pending message contains `id`, `conversationId`, `status`, `parts`, `createdAt`,
+`taskId` (null until dispatched), and optional `launch`. Status is `queued`, `paused`,
+`dispatched`, or `cancelled`; the list excludes dispatched and cancelled records.
+Both message content and image references are retained in SQLite. The queue has a
+16-message active limit per conversation and a 1,000-record lifetime retention limit
+for durable retry identities. Exhaustion returns `quota_exceeded`; records are not
+silently evicted. Removal retains its retry identity.
+
+After a successful settled turn with saved provider identity, the worker atomically
+promotes one head message into a normal continuation task. HTTP/SSH disconnect does
+not prevent subsequent messages from running. Stop, execution failure and service
+restart pause undispatched messages. Restart does not replay the interrupted turn.
+Explicit queue resume is required after a pause; sending an unrelated continuation
+or adding another pending message does not silently release a paused queue. Admission
+failures such as task quota pause the affected queue without stopping unrelated tasks.

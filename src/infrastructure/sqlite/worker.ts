@@ -14,6 +14,11 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'enqueuePending': value = db.pending.enqueuePending(...request.args); break;
+        case 'listPending': value = db.pending.listPending(...request.args); break;
+        case 'removePending': value = db.pending.removePending(...request.args); break;
+        case 'resumePending': value = db.pending.resumePending(...request.args); break;
+        case 'promotePending': value = db.pending.promotePending(); break;
         case 'searchHistory': value = db.searchHistory(...request.args); break;
         case 'createClone': value = db.clones.createClone(...request.args); break;
         case 'getClone': value = db.clones.getClone(...request.args); break;

@@ -30,6 +30,35 @@ export class ExecutionService implements ExecutionApplication {
     this.wake();
   }
 
+  async pending(taskId: string) {
+    this.assertAvailable();
+    return this.executions.listPending(validateId(taskId));
+  }
+
+  async enqueue(taskId: string, input: unknown) {
+    this.assertAvailable();
+    validateId(taskId);
+    const parsed = parseContinueTask(input);
+    const task = await this.tasks.getTask(taskId);
+    this.executorFor({ ...task, parts: parsed.parts });
+    const result = await this.executions.enqueuePending(taskId, parsed);
+    this.wake();
+    return result;
+  }
+
+  async removePending(taskId: string, pendingId: string) {
+    this.assertAvailable();
+    return this.executions.removePending(validateId(taskId), validateId(pendingId));
+  }
+
+  async resumePending(taskId: string) {
+    this.assertAvailable();
+    validateId(taskId);
+    const result = await this.executions.resumePending(taskId);
+    this.wake();
+    return result;
+  }
+
   async start(taskId: string, input: unknown): Promise<Task> {
     this.assertAvailable();
     validateId(taskId);
@@ -141,6 +170,8 @@ export class ExecutionService implements ExecutionApplication {
   private async drain(): Promise<void> {
     while (!this.closing) {
       this.wakeRequested = false;
+      await this.executions.promotePending();
+      if (this.closing) return;
       const task = await this.executions.claimNextTask();
       if (!task) return;
       await this.run(task);

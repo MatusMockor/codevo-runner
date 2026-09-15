@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { LIMITS, RunnerError } from '../domain/contracts.js';
 import { cursor, handle, jsonBody, send } from './http.js';
@@ -57,6 +57,39 @@ export class TaskController {
       if (!this.services.execution) throw new RunnerError('not_found');
       const result = await this.services.execution.continue(id, await jsonBody(request));
       send(response, result.created ? 202 : 200, result);
+    });
+  }
+
+  @Get(':id/pending')
+  pending(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.pending(id));
+    });
+  }
+
+  @Post(':id/pending')
+  enqueue(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      const result = await this.services.execution.enqueue(id, await jsonBody(request));
+      send(response, result.created ? 202 : 200, result);
+    });
+  }
+
+  @Delete(':id/pending/:pendingId')
+  removePending(@Param('id') id: string, @Param('pendingId') pendingId: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.removePending(id, pendingId));
+    });
+  }
+
+  @Post(':id/pending/resume')
+  resumePending(@Param('id') id: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.resumePending(id));
     });
   }
 

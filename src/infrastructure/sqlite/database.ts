@@ -1,3 +1,4 @@
+import { PendingDatabase, PENDING_SCHEMA } from './pending-database.js';
 import { searchHistory } from './history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
 import { parseLaunchOptions } from '../../domain/launch.js';
@@ -20,6 +21,7 @@ export class RepositoryDatabase {
   private readonly lease!: DatabaseSync;
   readonly clones: CloneDatabase;
   readonly resumes: ResumeDatabase;
+  readonly pending: PendingDatabase;
   constructor(dataDir: string, private readonly runnerId: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     try {
@@ -29,6 +31,7 @@ export class RepositoryDatabase {
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=16384; PRAGMA journal_size_limit=4194304;');
       this.migrate();
       this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
+      this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
       this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
     } catch (error) {
       try { this.db?.close(); } finally { this.lease?.close(); }
@@ -38,7 +41,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -50,9 +53,10 @@ export class RepositoryDatabase {
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
       if (version === 0 || version === 1) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
       this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
-        PRAGMA user_version=4;`);
+        PRAGMA user_version=5;`);
       this.db.exec(CLONE_SCHEMA);
       this.db.exec(RESUME_SCHEMA);
+      this.db.exec(PENDING_SCHEMA);
     });
   }
   private transaction<T>(action: () => T): T {
@@ -119,6 +123,7 @@ export class RepositoryDatabase {
   cancelTask(id: string): Task {
     return this.transaction(() => {
       const task = this.getTask(id);
+      this.pending.pauseTask(id);
       if (!['draft', 'queued', 'running'].includes(task.status)) return task;
       return this.save({ ...task, status: 'cancelled' }, 'task.cancelled');
     });
@@ -167,12 +172,14 @@ export class RepositoryDatabase {
         && this.db.prepare("SELECT 1 FROM events WHERE task_id=? AND type='task.running' LIMIT 1").get(id);
       if (task.status !== 'running' && !cleanupFailed) return task;
       const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
+      if (status === 'failed') this.pending.pauseTask(id);
       const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };
       return this.save({ ...task, status }, status === 'succeeded' ? 'task.succeeded' : 'task.failed', data);
     });
   }
   interruptRunningTasks(): void {
     this.transaction(() => {
+      this.pending.pauseAll();
       const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence").all();
       for (const row of rows) this.save({ ...this.task(row), status: 'interrupted' }, 'task.interrupted');
     });

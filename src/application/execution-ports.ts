@@ -1,3 +1,4 @@
+import type { PendingMessage, PendingMessages } from '../domain/pending-message.js';
 import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
 import type { Task } from '../domain/contracts.js';
@@ -5,6 +6,11 @@ import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, 
 
 /** Each state change and its event must commit atomically. Terminal state wins races. */
 export interface ExecutionRepository {
+  enqueuePending(taskId: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }>;
+  listPending(taskId: string): Promise<PendingMessages>;
+  removePending(taskId: string, pendingId: string): Promise<PendingMessage>;
+  resumePending(taskId: string): Promise<PendingMessages>;
+  promotePending(): Promise<Task | null>;
   getResumeState(taskId: string): Promise<ResumeState>;
   getTaskSession(taskId: string): Promise<TaskSession>;
   setTaskSession(taskId: string, sessionId: string): Promise<void>;
@@ -36,6 +42,10 @@ export interface ProviderExecutor {
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
 export interface ExecutionApplication {
+  enqueue(taskId: string, input: unknown): Promise<{ pending: PendingMessage; created: boolean }>;
+  pending(taskId: string): Promise<PendingMessages>;
+  removePending(taskId: string, pendingId: string): Promise<PendingMessage>;
+  resumePending(taskId: string): Promise<PendingMessages>;
   start(taskId: string, input: unknown): Promise<Task>;
   resumeState(taskId: string): Promise<ResumeState>;
   continue(taskId: string, input: unknown): Promise<Readonly<{ task: Task; created: boolean }>>;

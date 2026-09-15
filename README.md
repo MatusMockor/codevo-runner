@@ -352,3 +352,7 @@ Updating the service can interrupt active work. Back up the complete data volume
 while the runner is stopped; include external registered repositories if using
 bind mounts. Provider credentials in that volume are sensitive. Workspaces and
 project dependencies currently have no automatic cleanup or disk quota.
+
+Pending conversation followups are durable and continue after editor disconnect.
+Stop, failure and service restart pause undispatched followups until explicit resume.
+See [pending message API](docs/api.md#pending-conversation-messages) for limits and routes.
