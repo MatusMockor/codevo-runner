@@ -1,3 +1,5 @@
+import { searchHistory } from './history-search.js';
+import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
 import { parseLaunchOptions } from '../../domain/launch.js';
 import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
@@ -72,6 +74,7 @@ export class RepositoryDatabase {
   private task(row: Record<string, unknown>): Task {
     return { ...JSON.parse(row['payload'] as string) as Task, sequence: Number(row['sequence']) };
   }
+  searchHistory(query: HistorySearchQuery): HistorySearchPage { return searchHistory(this.db, query); }
   getTask(id: string): Task {
     const row = this.db.prepare('SELECT sequence,payload FROM tasks WHERE id=?').get(id);
     if (!row) throw new RunnerError('not_found');

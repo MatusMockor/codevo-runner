@@ -1,3 +1,5 @@
+import { HistorySearchController } from './history-search-controller.js';
+import { RunnerChangeTransport } from './transport/changes.js';
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import {
@@ -22,6 +24,7 @@ export type RunnerDescriptor = Readonly<{
     taskFileDiffs?: boolean;
     taskLaunchOptions?: boolean;
     eventReplay: boolean;
+    changeNotifications?: boolean;
     taskDrafts?: boolean;
     projectCloning?: boolean;
     imageAttachments?: boolean;
@@ -74,11 +77,13 @@ export async function createRunnerApplication(
     ...descriptor,
     capabilities: { taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
   } : descriptor;
+  const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [TaskController, AttachmentController, ProjectController, ProjectCloneController] : [])],
+    controllers: [RunnerController, ...(services ? [TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
     providers: [
       RequestBoundary,
+      ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),
       { provide: DESCRIPTOR, useValue: effectiveDescriptor },
       { provide: AUTHORIZE, useValue: authorized },
       { provide: EXTENDED, useValue: Boolean(services) },
@@ -88,5 +93,6 @@ export async function createRunnerApplication(
   const boundary = app.get(RequestBoundary);
   app.use(boundary.use.bind(boundary));
   await app.init();
+  changes?.attach(app.getHttpServer());
   return app;
 }

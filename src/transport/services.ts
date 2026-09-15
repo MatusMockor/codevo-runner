@@ -1,8 +1,12 @@
+import type { HistorySearchApplication } from '../application/history-search.js';
+import type { RunnerChangeSource } from '../application/runner-changes.js';
 import type { CloneApplication } from '../application/clone-ports.js';
 import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 
 export interface RunnerServices {
+  readonly historySearch?: HistorySearchApplication;
+  readonly changes?: RunnerChangeSource;
   readonly clones?: CloneApplication;
   readonly tasks: TaskApplication;
   readonly attachments: AttachmentStore;

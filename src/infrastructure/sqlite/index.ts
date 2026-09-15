@@ -1,3 +1,5 @@
+import type { HistorySearchRepository } from '../../application/history-search.js';
+import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import type { CloneRepository } from '../../application/clone-ports.js';
 import type { CloneInput, CloneJob, StoredClone } from '../../domain/project-clone.js';
@@ -8,14 +10,14 @@ import { Worker } from 'node:worker_threads';
 import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
-type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout };
-class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository {
+type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
+class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
   private closePromise?: Promise<void>;
   readonly ready: Promise<void>;
-  constructor(private readonly worker: Worker) {
+  constructor(private readonly worker: Worker, private readonly changed: () => void) {
     this.ready = new Promise((resolve, reject) => this.pending.set(0, { resolve: () => resolve(), reject, timer: this.deadline() }));
     worker.on('message', (reply: Reply) => {
       const pending = this.pending.get(reply.id);
@@ -23,6 +25,10 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       this.pending.delete(reply.id);
       clearTimeout(pending.timer);
       if (reply.error) { pending.reject(new RunnerError(reply.error)); return; }
+      if (pending.operation && changesInventory(pending.operation, reply.value)) {
+        // Persistence already committed; notification failures must not strand callers.
+        try { this.changed(); } catch { /* Notifications are best-effort invalidations. */ }
+      }
       pending.resolve(reply.value);
     });
     worker.on('error', () => this.fail());
@@ -41,11 +47,12 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
     if (this.pending.size >= 64 && !closing) return Promise.reject(new RunnerError('busy'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: value => resolve(value as T), reject, timer: this.deadline() });
+      this.pending.set(id, { resolve: value => resolve(value as T), reject, timer: this.deadline(), operation });
       try { this.worker.postMessage({ ...operation, id }); }
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  searchHistory(query: HistorySearchQuery): Promise<HistorySearchPage> { return this.call({ method: 'searchHistory', args: [query] }); }
   getTaskSession(id: string): Promise<{ sessionId: string | null; workspaceTaskId: string }> { return this.call({ method: 'getTaskSession', args: [id] }); }
   getResumeState(id: string): Promise<ResumeState> { return this.call({ method: 'getResumeState', args: [id] }); }
   findContinuation(id: string, input: ContinueTask): Promise<{ task: Task; created: false } | null> { return this.call({ method: 'findContinuation', args: [id, input] }); }
@@ -78,9 +85,22 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string): Promise<RunnerRepository & ExecutionRepository & CloneRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
-  const repository = new SqliteRepository(worker);
+  const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
   catch (error) { await worker.terminate(); throw error; }
+}
+
+function changesInventory(operation: Operation, value: unknown): boolean {
+  switch (operation.method) {
+    case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
+    case 'continueTask': case 'setTaskSession': case 'createTask': case 'cancelTask':
+    case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
+      return true;
+    case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
+    case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
+    case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory': return false;
+  }
 }

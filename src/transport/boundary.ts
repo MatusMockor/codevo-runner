@@ -9,6 +9,7 @@ const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
 const continueRoute = new RegExp(`^/v1/tasks/${uuid}/continue$`);
 const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
 const routes = [
+  { pattern: /^\/v1\/history\/search(?:\?[^#]*)?$/, methods: ['GET'] },
   { pattern: fileDiffRoute, methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/files$`), methods: ['GET'] },
   { pattern: continueRoute, methods: ['POST'] },

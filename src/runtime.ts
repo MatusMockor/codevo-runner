@@ -1,3 +1,5 @@
+import { HistorySearchService } from './application/history-search.js';
+import { RunnerChanges } from './application/runner-changes.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectCloneService, ManagedProjectRegistry } from './application/project-clone-service.js';
@@ -21,7 +23,8 @@ export type RunnerExecutionOptions = Readonly<{
 
 /** Composition root: concrete infrastructure is wired only at the outside edge. */
 export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions) {
-  const repository = await openSqliteRepository(dataDir, runnerId);
+  const changes = new RunnerChanges();
+  const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish());
   try {
     // Recovery is truthful even when an operator disables execution after a crash.
     await repository.interruptRunningTasks();
@@ -50,7 +53,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      tasks: new TaskService(repository), attachments, execution, clones,
+      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes,
       close(): Promise<void> {
         closing ??= (async () => {
           try {

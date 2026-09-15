@@ -329,3 +329,57 @@ Paths cannot be absolute or contain backslashes, control characters, empty segme
 files; directory traversal and Git inspection retain the verified workspace identity.
 Python 3 is required for this descriptor-based boundary. Missing Python or invalid
 workspace authority returns an error, never a successful empty review.
+
+### Runner change notifications
+
+Native clients may upgrade `GET /v1/changes` to WebSocket. The upgrade requires
+exactly one `Authorization: Bearer …` and one `x-codevo-runner-id` header matching
+this runner. Origins, request bodies, query strings and application messages from
+clients are rejected. Ping/pong control frames are supported. This endpoint is
+additive; older runners return an unsupported-route response and clients must
+retain their bounded polling fallback.
+
+Every connection receives an immediate JSON snapshot:
+`{"type":"snapshot","runnerId":"…","epoch":"UUID","revision":0}`.
+After durable task, output, resume-session or project-clone changes, the server
+sends the same shape with `"type":"changed"`. Notifications coalesce over 100 ms;
+revision numbers can skip. They are invalidations, not task events. On **every**
+new connection or epoch change, reload authoritative inventory and resume existing
+per-task HTTP event cursors. Never interpret revision gaps as missing transcript
+messages, and never treat a disconnected subscription as current state.
+
+The process epoch changes on restart. There is no retained notification queue or
+subscription replay log. Existing durable task event APIs remain the replay source.
+There are at most 16 subscriptions, a 256-byte incoming application-frame limit,
+a 16 KiB outbound backlog cutoff and a 15-second ping cadence. Unresponsive peers
+are terminated on the following heartbeat; server shutdown terminates subscriptions
+and removes listeners/timers. No token or provider output is included in notifications.
+
+## Retained history search
+
+`GET /v1/history/search?q=<literal>&after=<task-sequence>&projectId=<optional>`
+uses the same bearer authorization and pinned runner identity as task routes.
+`q` is a literal case-insensitive substring, trimmed, 2–256 characters (at most
+1024 UTF-8 bytes). `after` defaults to zero; unknown and duplicate query fields
+are rejected. Optional `projectId` is 1–128 characters.
+
+The response is `{ items, nextCursor, scope: "retained_runner_history", incomplete }`.
+Each item contains `taskId`, `conversationId`, nullable `projectId`, `taskSequence`,
+`role` (`user` or `assistant`), nullable `eventSequence`, and a bounded `snippet`.
+One first match per role per task is returned; it represents matching tasks, not
+an exhaustive list of occurrences. `eventSequence` locates the first persisted
+output chunk contributing to the matching provider record.
+
+Each page examines at most ten tasks, including nonmatching and foreign-project
+tasks, off the HTTP thread in the SQLite worker. Clients must continue when
+`nextCursor` is non-null even when `items` is empty. Cursors advance by task
+sequence without duplicate task matches; they do not provide a frozen snapshot
+of actively changing output. Restart a search to include changes to earlier tasks.
+
+Search includes all retained task prompts and recognized Claude assistant text/
+result records and Codex completed agent messages, regardless of UI history
+pagination. It excludes tool output, stderr, images, and provider-only history
+that has never been persisted by this runner. `incomplete` signals malformed
+provider records or an exceeded event scan bound in this page; a null cursor
+means the retained task scan ended, not that omitted/provider-only history exists
+in this database. Active incomplete JSON records can mark a page incomplete.

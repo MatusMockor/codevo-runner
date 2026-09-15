@@ -14,6 +14,7 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'searchHistory': value = db.searchHistory(...request.args); break;
         case 'createClone': value = db.clones.createClone(...request.args); break;
         case 'getClone': value = db.clones.getClone(...request.args); break;
         case 'cancelClone': value = db.clones.cancelClone(...request.args); break;
