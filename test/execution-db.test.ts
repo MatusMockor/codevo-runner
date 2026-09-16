@@ -75,7 +75,8 @@ test('output is UTF-8 safe and bounded across reopen without sacrificing complet
     }
     await repository.close();
     repository = await openSqliteRepository(directory, runnerId);
-    await assert.rejects(repository.appendTaskOutput(task.id, 'stdout', 'must not exceed cap'), { code: 'quota_exceeded' });
+    await repository.appendTaskOutput(task.id, 'stdout', 'newest output');
+    assert.ok((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence);
     await repository.finishTask(task.id, { exitCode: 1, error: 'failed' });
     let cursor = 0;
     let total = 0;
@@ -93,7 +94,7 @@ test('output is UTF-8 safe and bounded across reopen without sacrificing complet
       if (page.nextCursor === null) break;
       cursor = page.nextCursor;
     }
-    assert.equal(total, EXECUTION_LIMITS.outputBytes);
+    assert.equal(total, EXECUTION_LIMITS.outputBytes - EXECUTION_LIMITS.outputEventBytes + Buffer.byteLength('newest output'));
     assert.equal(types.at(-1), 'task.failed');
     assert.equal((await repository.getTask(task.id)).status, 'failed');
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
@@ -124,7 +125,8 @@ test('tiny output events cannot grow history beyond its event quota', async () =
     await repository.queueTask(task.id, 'project');
     await repository.claimNextTask();
     for (let index = 0; index < EXECUTION_LIMITS.outputEvents; index++) await repository.appendTaskOutput(task.id, 'stdout', 'x');
-    await assert.rejects(repository.appendTaskOutput(task.id, 'stdout', 'x'), { code: 'quota_exceeded' });
+    await repository.appendTaskOutput(task.id, 'stdout', 'newest');
+    assert.ok((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence);
     await repository.finishTask(task.id, { exitCode: 0 });
     let cursor = 0;
     let count = 0;
@@ -156,8 +158,8 @@ test('global output quota survives reopening and preserves terminal writes', asy
     const task = (await repository.createTask(input())).task;
     await repository.queueTask(task.id, 'project');
     await repository.claimNextTask();
-    await assert.rejects(repository.appendTaskOutput(task.id, 'stdout', 'beyond global budget'), { code: 'quota_exceeded' });
-    assert.equal((await repository.listEvents(task.id, 0)).items.filter(event => event.type === 'task.output').length, 0);
+    await repository.appendTaskOutput(task.id, 'stdout', 'beyond global budget');
+    assert.equal((await repository.listEvents(task.id, 0)).items.filter(event => event.type === 'task.output').length, 1);
     assert.equal((await repository.finishTask(task.id, { exitCode: 1, error: 'bounded failure' })).status, 'failed');
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });

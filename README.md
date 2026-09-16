@@ -356,3 +356,46 @@ project dependencies currently have no automatic cleanup or disk quota.
 Pending conversation followups are durable and continue after editor disconnect.
 Stop, failure and service restart pause undispatched followups until explicit resume.
 See [pending message API](docs/api.md#pending-conversation-messages) for limits and routes.
+
+### Automatic instruction snapshots
+
+Clients may include `instructions: { version: 1, files: [{ scope: "global" | "project", path, content }] }`
+with task creation, continuation and pending-message admission when the runner advertises
+`instructionSync` (Linux runners with execution enabled). Each admitted turn stores its own immutable snapshot; idempotency also
+covers the snapshot. Task and pending-message API responses do not return instruction text.
+A continuation after synchronized instructions must supply a fresh snapshot (an empty files
+array explicitly removes previously managed files).
+
+Snapshots accept at most 128 Markdown files, 64 KiB UTF-8 per file, 512 KiB total, and
+512-byte relative paths with at most 32 components. Absolute paths, traversal, symlinks,
+case aliases and duplicate destinations are rejected. Only Markdown instruction/import
+files are synchronized; credentials, provider settings and hooks are not copied.
+
+Before the provider starts, project files are reconciled in the conversation's isolated
+worktree, preserving their nested paths. Global rule files are placed under
+`.claude/rules/codevo-global/`, preserving frontmatter and rewriting relative imports to
+their synchronized destinations. Global root/import files live under
+`.codevo-instructions/global/`; the shared server home is never overwritten. A clean tracked file may be initially replaced only when its bytes match the Git HEAD
+baseline. An unmanaged differing file or a managed
+file changed independently on the server causes synchronization to fail. Removals affect
+only previously managed files. An interrupted update is journaled and recovered only if
+every affected file still matches the recorded old or new content. No provider starts
+after a failed synchronization.
+
+Every turn also receives refreshed global `CLAUDE.md` content (including its relative
+Markdown imports) and an index of scoped instruction entry points through stdin. This
+works on continuation without relying on a provider's cached system prompt. Claude uses
+its native project rule discovery; Codex receives explicit guidance to read the applicable
+CLAUDE files and honor directory/frontmatter scope. This is instruction delivery, not a
+promise that different providers interpret rules identically. Old conversation history is
+not erased; the current snapshot explicitly supersedes earlier synchronized rules. Server
+provider settings and server-installed global rules may still apply. Unsupported absolute
+or home-directory imports must be made portable before synchronization.
+
+The runner serializes execution and retains its exclusive database lease for the full
+process lifetime. Instruction synchronization requires Linux descriptor-relative filesystem operations.
+Worktree isolation and path checks protect normal project operations;
+they are not a sandbox against another malicious process running as the same Unix user.
+Synchronized tracked files are ordinary worktree edits and can appear in review diffs.
+
+See [execution deadlines and disconnected clients](docs/execution-policy.md) for the configurable task runtime policy.

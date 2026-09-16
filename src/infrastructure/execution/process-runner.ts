@@ -6,7 +6,7 @@ import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 /** Internal launch plan: never construct arguments/environment from HTTP fields. */
 export type ProcessPlan = Readonly<{
   executable: string; args: readonly string[]; cwd: string; stdin: string;
-  env: NodeJS.ProcessEnv; signal: AbortSignal; timeoutMs: number; outputBytes: number;
+  env: NodeJS.ProcessEnv; signal: AbortSignal; timeoutMs: number; outputBytes?: number;
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;
 
@@ -48,8 +48,8 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
       const stream = child[channel];
       stream.on('data', (chunk: Buffer) => {
         if (failure) return;
-        bytes += chunk.length;
-        if (bytes > plan.outputBytes) { stop('output_limit_exceeded'); return; }
+        if (plan.outputBytes !== undefined) bytes += chunk.length;
+        if (plan.outputBytes !== undefined && bytes > plan.outputBytes) { stop('output_limit_exceeded'); return; }
         const text = decoders[channel].write(chunk);
         stream.pause();
         delivery = delivery.then(async () => {

@@ -1,8 +1,9 @@
+import type { InstructionSnapshot } from './instructions.js';
 import type { AgentLaunchOptions } from './launch.js';
 import type { TaskStatus } from './execution.js';
 
 export const LIMITS = Object.freeze({
-  jsonBytes: 65_536, textBytes: 48_000, parts: 16, attachmentsPerTask: 8,
+  jsonBytes: 4 * 1024 * 1024, textBytes: 48_000, parts: 16, attachmentsPerTask: 8,
   attachmentBytes: 8 * 1024 * 1024, imagePixels: 16_000_000, imageDimension: 8192,
   attachments: 256, storageBytes: 256 * 1024 * 1024, tasks: 1000,
   pageSize: 50, uploads: 2, uploadTimeoutMs: 30_000,
@@ -11,10 +12,10 @@ export type MediaType = 'image/png' | 'image/jpeg';
 export type MessagePart = Readonly<{ type: 'text'; text: string }> |
   Readonly<{ type: 'attachment'; attachmentId: string }>;
 export type CreateTask = Readonly<{
-  idempotencyKey: string; provider: 'codex' | 'claude'; launch?: AgentLaunchOptions; parts: readonly MessagePart[];
+  instructions?: InstructionSnapshot; idempotencyKey: string; provider: 'codex' | 'claude'; launch?: AgentLaunchOptions; parts: readonly MessagePart[];
 }>;
 export type Task = Readonly<{
-  id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
+  instructions?: InstructionSnapshot; id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
   launch?: AgentLaunchOptions; status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;
 export type Attachment = Readonly<{
@@ -26,6 +27,7 @@ export type TaskEvent = Readonly<{
   channel?: 'stdout' | 'stderr'; text?: string; exitCode?: number | null; error?: string;
 }>;
 export type Page<T> = Readonly<{ items: readonly T[]; nextCursor: number | null }>;
+export type EventPage = Page<TaskEvent> & Readonly<{ outputTruncatedBeforeSequence?: number; outputStartsAtLineBoundary?: boolean }>;
 export type ErrorCode = 'invalid_input' | 'not_found' | 'conflict' | 'quota_exceeded' |
   'unsupported_media' | 'too_large' | 'busy' | 'storage_unavailable';
 export class RunnerError extends Error {

@@ -10,9 +10,10 @@ async function main() {
   const authorized = await loadAuthorization(config.tokenFile);
   const runnerId = await loadIdentity(config.dataDir);
   const executionOptions = config.executionEnabled
-    ? { projects: config.projectsFile ? await readProjectsFile(config.projectsFile) : [], isolation: config.executionIsolation, projectsRoot: config.projectsRoot } : undefined;
+    ? { projects: config.projectsFile ? await readProjectsFile(config.projectsFile) : [], isolation: config.executionIsolation, projectsRoot: config.projectsRoot, executionTimeoutMs: config.executionTimeoutMs } : undefined;
   const services = await openRunnerServices(config.dataDir, runnerId, executionOptions);
   const app = await createRunnerApplication({ protocolVersion: 1, runnerId, name: config.name,
+    ...(config.executionEnabled ? { executionTimeoutMs: config.executionTimeoutMs } : {}),
     capabilities: { taskExecution: false, eventReplay: false } }, authorized, services).catch(async error => {
       await services.close();
       throw error;

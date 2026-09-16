@@ -35,7 +35,7 @@ test('artifact metadata persists immutable captures, isolates tasks and upgrades
     assert.deepEqual(await repository.listArtifacts(second), []);
     await repository.close();
     const check = new DatabaseSync(join(directory, 'runner.sqlite'));
-    assert.equal(check.prepare('PRAGMA user_version').get()!['user_version'], 6); check.close();
+    assert.equal(check.prepare('PRAGMA user_version').get()!['user_version'], 8); check.close();
     await assert.rejects(openSqliteRepository(directory, randomUUID()), { code: 'conflict' });
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });

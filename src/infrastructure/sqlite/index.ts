@@ -1,3 +1,5 @@
+import type { QuestionRepository } from '../../application/question-ports.js';
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../../domain/questions.js';
 import type { Artifact } from '../../domain/artifact.js';
 import type { ArtifactRepository } from '../../application/artifact-ports.js';
 import type { PendingMessage, PendingMessages } from '../../domain/pending-message.js';
@@ -11,10 +13,10 @@ import type { ExecutionRepository } from '../../application/execution-ports.js';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 import { Worker } from 'node:worker_threads';
 import type { RunnerRepository } from '../../application/ports.js';
-import { RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
+import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository {
+class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -55,6 +57,10 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  createQuestion(request: AgentQuestionRequest): Promise<AgentQuestionRequest> { return this.call({ method: 'createQuestion', args: [request] }); }
+  listQuestions(taskId: string): Promise<readonly AgentQuestionRequest[]> { return this.call({ method: 'listQuestions', args: [taskId] }); }
+  answerQuestion(taskId: string, id: string, response: AgentQuestionResponse): Promise<AgentQuestionRequest> { return this.call({ method: 'answerQuestion', args: [taskId, id, response] }); }
+  expireQuestions(taskId?: string): Promise<void> { return this.call({ method: 'expireQuestions', args: taskId === undefined ? [] : [taskId] }); }
   listArtifactIds(): Promise<readonly string[]> { return this.call({ method: 'listArtifactIds', args: [] }); }
   putArtifact(artifact: Artifact, path: string): Promise<{ artifact: Artifact; created: boolean }> { return this.call({ method: 'putArtifact', args: [artifact, path] }); }
   findArtifact(taskId: string, path: string): Promise<Artifact | null> { return this.call({ method: 'findArtifact', args: [taskId, path] }); }
@@ -75,7 +81,7 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
   getTask(id: string): Promise<Task> { return this.call({ method: 'getTask', args: [id] }); }
   listTasks(after: number): Promise<Page<Task>> { return this.call({ method: 'listTasks', args: [after] }); }
   cancelTask(id: string): Promise<Task> { return this.call({ method: 'cancelTask', args: [id] }); }
-  listEvents(taskId: string, after: number): Promise<Page<TaskEvent>> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
+  listEvents(taskId: string, after: number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
   putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
   queueTask(id: string, projectId: string): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId] }); }
@@ -98,7 +104,7 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -108,12 +114,14 @@ export async function openSqliteRepository(dataDir: string, runnerId: string, ch
 function changesInventory(operation: Operation, value: unknown): boolean {
   switch (operation.method) {
     // A promotion attempt may pause a blocked queue without creating a task.
+    case 'createQuestion': case 'answerQuestion': case 'expireQuestions':
     case 'putArtifact': case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
     case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
     case 'continueTask': case 'setTaskSession': case 'createTask': case 'cancelTask':
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'listQuestions':
     case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':

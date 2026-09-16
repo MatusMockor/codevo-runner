@@ -188,15 +188,33 @@ host, not through this API; a missing or unauthenticated CLI can fail execution.
 The project list exposes IDs and names, not host paths.
 
 After disconnecting, poll events with the largest received sequence to replay
-missed output. Output is bounded to 1 MiB and 1,024 output events per task, with
-at most 8 KiB per output event. Across the runner, retained output is capped at
-8 MiB and 8,192 output events. Exhausting persisted-output capacity stops the
-provider and fails the task with `output_persistence_failed`; it does not silently
-discard continued output and report success. The process output limit also stops
-an excessively verbose CLI. Execution defaults to a 30-minute
-timeout. SQLite reserves 16 MiB of headroom for state transitions; exhausted
-admission capacity returns a quota error. This is persisted CLI stdout/stderr, not a parsed
-provider conversation. There is no live SSE or approval interaction API.
+missed output. Retained output is a rolling window of 1 MiB and 1,024 output events
+per task, with at most 8 KiB per event. Across the runner it is capped at 8 MiB
+and 8,192 output events. Oldest output is evicted without stopping the provider;
+lifecycle records and each task's newest output record remain. Historical final
+answers can age out; this endpoint is not a permanent conversation archive.
+
+After eviction, event pages also include the paired fields
+`outputTruncatedBeforeSequence` (highest evicted output sequence, inclusive) and
+`outputStartsAtLineBoundary` (whether retained stdout begins at a JSON-line boundary).
+They are absent before eviction. When the caller's last consumed sequence is below
+the watermark, reset its partial parser; if the boundary flag is false, discard
+stdout through the next newline before parsing subsequent frames. Retained lifecycle
+records may precede the watermark and must still be processed. Show older output as
+unavailable and continue consuming new output. Search marks retained-history results
+incomplete when output was evicted. SQLite migration 7 persists these watermarks.
+
+Provider metadata and artifact discovery process the complete stream independently
+of the retained replay window. There is no default lifetime process-output cutoff;
+chunks use backpressure. Execution defaults to a 12-hour wall-clock deadline,
+configurable from one minute to seven days; waiting for an answer counts toward
+that deadline. See [execution policy](execution-policy.md). The legacy metadata
+parser rejects individual frames over 64 KiB; interactive provider frames are
+bounded to 8 MiB. Real persistence failures
+still stop execution with `output_persistence_failed`. SQLite reserves 16 MiB of
+headroom for state transitions; exhausted admission capacity returns a quota error.
+This is persisted CLI stdout/stderr, not a parsed provider conversation. There is
+no live SSE or approval interaction API.
 Cancellation of a running task aborts its process group. Restart marks formerly
 running tasks `interrupted` and leaves queued tasks eligible for execution; it does
 not automatically resume an interrupted provider session. An explicit follow-up
@@ -443,6 +461,29 @@ conflict for running tasks or uncaptured obsolete turns; existing snapshots repl
 
 SQLite migration 6 adds artifact metadata. Private blobs live in `artifacts/`
 beside the database; back up both. Startup reconciles uncommitted files left by a
-crash. Automatic discovery is limited to 1 MiB of structured provider output,
-256 KiB per frame, and inline Markdown links/images, excluding tool/user/subagent
-messages. Legacy turns without a saved snapshot still require their source files.
+crash. Automatic discovery streams without a lifetime byte cutoff, with a
+256 KiB frame bound, and recognizes inline Markdown links/images, excluding
+tool/user/subagent messages. Oversized frames are skipped through their newline;
+discovery resumes and reports incomplete capture. Legacy turns without a saved snapshot still require their source files.
+
+### Interactive questions
+
+When `interactiveQuestions` is advertised, a running task can pause for a structured
+provider question. `GET /v1/tasks/:taskId/questions` returns `{items: [...]}` with
+bounded durable requests. Each request has `id`, `taskId`, provider (`codex` or
+`claudeCode`), `questions`, and `status` (`pending`, `answered`, `cancelled`, or
+`expired`). Each question has `id`, `header`, `prompt`, `options` (id, label,
+description), `multiple`, and `allowCustom`.
+
+`POST /v1/tasks/:taskId/questions/:requestId/answer` accepts
+`{answers: [{questionId, optionIds: [...], text: "..."}]}` and returns
+`{request: ...}`. Every question must be answered exactly once. Option identifiers
+must belong to that question; free text requires `allowCustom`. Answered requests
+include `answers`. An exact retry is idempotent; a different or stale answer is a
+conflict. A response resumes the existing provider process, never a queued turn.
+
+Closing an editor or losing its connection does not cancel the pending question.
+Reconnect and fetch requests again. Cancelling the task cancels pending questions;
+runner restart or provider exit expires pending questions truthfully. The configured
+task execution deadline still applies while waiting for an answer. Authentication
+and runner identity checks are identical to other task routes.

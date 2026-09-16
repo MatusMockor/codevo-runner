@@ -125,3 +125,30 @@ test('pending HTTP routes reject injected fields and bodies on bodyless operatio
   assert.equal((await request(path, 'PUT', input)).status, 405);
   assert.equal((await request(`${path}?extra=true`)).status, 404);
 });
+
+test('pending and continuation HTTP projections keep private instruction snapshots off the wire', { timeout: 20_000 }, async t => {
+  const { request, create, release } = await fixture(t, 'claude');
+  const first = await create();
+  const started = await request(`/v1/tasks/${first}/start`, 'POST', { projectId: 'sample' });
+  assert.equal(started.status, 202);
+  await eventually(async () => (await (await request(`/v1/tasks/${first}`)).json()).status === 'running');
+  const path = `/v1/tasks/${first}/pending`;
+  const instructions = { version: 1, files: [{ scope: 'global', path: 'CLAUDE.md', content: 'PRIVATE_RULE_SNAPSHOT' }] };
+  const queued = await request(path, 'POST', { idempotencyKey: randomUUID(), parts: [{ type: 'text', text: 'Queued' }], instructions });
+  assert.equal(queued.status, 202);
+  const admitted = await queued.json();
+  assert.equal(Object.hasOwn(admitted.pending, 'instructions'), false);
+  const listed = await (await request(path)).text();
+  assert.equal(listed.includes('instructions'), false);
+  assert.equal(listed.includes('PRIVATE_RULE_SNAPSHOT'), false);
+  const removed = await request(`${path}/${admitted.pending.id}`, 'DELETE');
+  assert.equal(removed.status, 200);
+  assert.equal((await removed.text()).includes('instructions'), false);
+  await release();
+  await eventually(async () => (await (await request(`/v1/tasks/${first}`)).json()).status === 'succeeded');
+  const continued = await request(`/v1/tasks/${first}/continue`, 'POST', {
+    idempotencyKey: randomUUID(), parts: [{ type: 'text', text: 'Continue' }], instructions: { version: 1, files: [] },
+  });
+  assert.equal(continued.status, 202);
+  assert.equal(Object.hasOwn((await continued.json()).task, 'instructions'), false);
+});

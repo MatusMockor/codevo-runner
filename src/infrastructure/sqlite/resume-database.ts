@@ -1,3 +1,4 @@
+import { parseInstructionSnapshot } from '../../domain/instructions.js';
 import { parseLaunchOptions } from '../../domain/launch.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -69,6 +70,7 @@ export class ResumeDatabase {
   }
   findContinuation(id: string, input: ContinueTask): { task: Task; created: false } | null {
     const parent = this.dependencies.getTask(id);
+    if (parent.instructions && input.instructions === undefined) throw new RunnerError('invalid_input');
     if (input.launch !== undefined) parseLaunchOptions(input.launch, parent.provider);
     const previous = this.db.prepare('SELECT sequence,payload,fingerprint FROM tasks WHERE key=?').get(input.idempotencyKey);
     if (!previous) return null;
@@ -77,7 +79,7 @@ export class ResumeDatabase {
   }
   private continuationFingerprint(id: string, input: ContinueTask): string {
     const parts = input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId });
-    return JSON.stringify({ parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
+    return JSON.stringify({ ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
   }
   continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } {
     return this.dependencies.transaction(() => this.admitContinuation(id, input));
@@ -96,7 +98,7 @@ export class ResumeDatabase {
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const ref of refs) this.dependencies.getAttachment(ref);
       const root = parent.conversationId ?? parent.id;
-      const task: Task = { id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
+      const task: Task = { ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const ref of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, ref);
       this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(task.id);

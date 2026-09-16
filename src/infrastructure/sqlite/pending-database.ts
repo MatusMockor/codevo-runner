@@ -59,12 +59,13 @@ export class PendingDatabase {
      const root = this.root(id);
      const latest = this.latest(root);
      const launch = input.launch === undefined ? latest.launch : parseLaunchOptions(input.launch, latest.provider);
-     const fingerprint = JSON.stringify({ root, parts: input.parts, ...(input.launch ? { launch: input.launch } : {}) });
+     const fingerprint = JSON.stringify({ ...(input.instructions ? { instructions: input.instructions } : {}), root, parts: input.parts, ...(input.launch ? { launch: input.launch } : {}) });
      const previous = this.db.prepare('SELECT payload,fingerprint FROM pending_messages WHERE key=?').get(input.idempotencyKey);
      if (previous) {
        if (previous['fingerprint'] !== fingerprint) throw new RunnerError('conflict');
        return { pending: this.record(previous), created: false };
      }
+     if (latest.instructions && input.instructions === undefined) throw new RunnerError('invalid_input');
      this.dependencies.requireCapacity();
      const count = Number(this.db.prepare('SELECT count(*) AS n FROM pending_messages').get()!['n']);
      if (count >= PENDING_LIMITS.retained || this.listPending(id).items.length >= PENDING_LIMITS.perConversation) throw new RunnerError('quota_exceeded');
@@ -72,7 +73,7 @@ export class PendingDatabase {
      for (const ref of refs) this.dependencies.getAttachment(ref);
      const paused = ['failed', 'cancelled', 'interrupted'].includes(latest.status) ? 1 : 0;
      this.db.prepare('INSERT INTO pending_queues(root_id,paused) VALUES(?,?) ON CONFLICT(root_id) DO UPDATE SET paused=max(paused,excluded.paused)').run(root, paused);
-     const pending: PendingMessage = { id: randomUUID(), conversationId: root, status: 'queued', parts: input.parts, ...(launch ? { launch } : {}), createdAt: new Date().toISOString(), taskId: null };
+     const pending: PendingMessage = { ...(input.instructions ? { instructions: input.instructions } : {}), id: randomUUID(), conversationId: root, status: 'queued', parts: input.parts, ...(launch ? { launch } : {}), createdAt: new Date().toISOString(), taskId: null };
      this.db.prepare('INSERT INTO pending_messages(id,root_id,key,fingerprint,dispatch_key,payload) VALUES(?,?,?,?,?,?)').run(pending.id, root, input.idempotencyKey, fingerprint, randomUUID(), JSON.stringify(pending));
      for (const ref of refs) this.db.prepare('INSERT INTO pending_attachments VALUES(?,?)').run(pending.id, ref);
      this.dependencies.requireCapacity();
@@ -124,7 +125,7 @@ export class PendingDatabase {
        this.db.exec('SAVEPOINT pending_promotion');
        let result: { task: Task; created: boolean };
        try {
-         result = this.dependencies.continueTask(latest.id, { idempotencyKey: row['dispatch_key'] as string, parts: pending.parts, ...(pending.launch ? { launch: pending.launch } : {}) });
+         result = this.dependencies.continueTask(latest.id, { idempotencyKey: row['dispatch_key'] as string, parts: pending.parts, ...(pending.instructions ? { instructions: pending.instructions } : {}), ...(pending.launch ? { launch: pending.launch } : {}) });
          this.db.exec('RELEASE pending_promotion');
        } catch (error) {
          this.db.exec('ROLLBACK TO pending_promotion; RELEASE pending_promotion');

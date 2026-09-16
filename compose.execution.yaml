@@ -13,6 +13,7 @@ services:
     cpus: "${CODEVO_EXECUTION_CPUS:-2.0}"
     environment:
       CODEVO_EXECUTION_ENABLED: "true"
+      CODEVO_EXECUTION_TIMEOUT_MS: "${CODEVO_EXECUTION_TIMEOUT_MS-43200000}"
       # This trusted single-user container is the isolation boundary, not each task.
       CODEVO_EXECUTION_ISOLATION: container
       CODEVO_PROJECTS_FILE: /run/config/projects.json

@@ -1,3 +1,4 @@
+import type { QuestionService } from '../application/question-service.js';
 import type { ArtifactApplication } from '../application/artifact-ports.js';
 import type { HistorySearchApplication } from '../application/history-search.js';
 import type { RunnerChangeSource } from '../application/runner-changes.js';
@@ -6,6 +7,7 @@ import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 
 export interface RunnerServices {
+  readonly questions?: QuestionService;
   readonly artifacts?: ArtifactApplication;
   readonly historySearch?: HistorySearchApplication;
   readonly changes?: RunnerChangeSource;

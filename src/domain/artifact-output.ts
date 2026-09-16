@@ -1,6 +1,5 @@
 import { ARTIFACT_LIMITS, artifactMediaType, parseArtifactPath } from './artifact.js';
 
-const STREAM_BYTES = 1024 * 1024;
 const LINE_BYTES = 256 * 1024;
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -9,7 +8,8 @@ function record(value: unknown): Record<string, unknown> | null {
 /** Only completed assistant text can nominate workspace files for capture. */
 export class ProviderArtifactReferences {
   private pending = '';
-  private bytes = 0;
+  private droppingLine = false;
+  private incomplete = false;
   private stopped = false;
   private finished = false;
   private readonly paths = new Set<string>();
@@ -17,35 +17,38 @@ export class ProviderArtifactReferences {
 
   push(stdout: string): void {
     if (this.stopped || this.finished) return;
-    this.bytes += Buffer.byteLength(stdout);
-    if (this.bytes > STREAM_BYTES) { this.stop(); return; }
     let offset = 0;
     while (offset < stdout.length) {
       const newline = stdout.indexOf('\n', offset);
       const end = newline < 0 ? stdout.length : newline;
-      const fragment = stdout.slice(offset, end);
-      if (Buffer.byteLength(this.pending) + Buffer.byteLength(fragment) > LINE_BYTES) { this.stop(); return; }
-      this.pending += fragment;
+      // Discard only the oversized frame; a later assistant frame can still
+      // nominate an artifact. Check character length before allocating bytes.
+      if (!this.droppingLine) {
+        if (end - offset > LINE_BYTES || Buffer.byteLength(this.pending) + Buffer.byteLength(stdout.slice(offset, end)) > LINE_BYTES) {
+          this.pending = '';
+          this.droppingLine = true;
+          this.incomplete = true;
+        } else {
+          this.pending += stdout.slice(offset, end);
+        }
+      }
       if (newline < 0) break;
-      this.line(this.pending);
+      if (!this.droppingLine) this.line(this.pending);
       this.pending = '';
+      this.droppingLine = false;
+      if (this.stopped) return;
       offset = newline + 1;
     }
   }
 
   finish(): readonly string[] {
-    if (!this.finished && !this.stopped && this.pending) this.line(this.pending);
+    if (!this.finished && !this.stopped && !this.droppingLine && this.pending) this.line(this.pending);
     this.pending = '';
     this.finished = true;
     return [...this.paths];
   }
 
-  isComplete(): boolean { return !this.stopped; }
-
-  private stop(): void {
-    this.pending = '';
-    this.stopped = true;
-  }
+  isComplete(): boolean { return !this.stopped && !this.incomplete; }
 
   private line(line: string): void {
     let parsed: unknown;

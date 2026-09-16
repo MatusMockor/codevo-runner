@@ -14,6 +14,10 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'createQuestion': value = db.questions.createQuestion(...request.args); break;
+        case 'listQuestions': value = db.questions.listQuestions(...request.args); break;
+        case 'answerQuestion': value = db.questions.answerQuestion(...request.args); break;
+        case 'expireQuestions': value = db.questions.expireQuestions(...request.args); break;
         case 'listArtifactIds': value = db.artifacts.listArtifactIds(); break;
         case 'putArtifact': value = db.artifacts.putArtifact(...request.args); break;
         case 'findArtifact': value = db.artifacts.findArtifact(...request.args); break;

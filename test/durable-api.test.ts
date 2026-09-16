@@ -255,3 +255,24 @@ test('slow attachment downloads retain admission slots until clients disconnect'
     for (const client of clients) client.destroy();
   }
 });
+
+test('instruction payloads accept bounded JSON expansion and never enter task responses', async t => {
+  const state = await fixture(t);
+  const url = await state.start();
+  const files = Array.from({ length: 8 }, (_, i) => ({ scope: 'project', path: `${i}.md`, content: '\u0001'.repeat(65_536) }));
+  const instructions = { version: 1, files };
+  const request = { ...input(), instructions };
+  const created = await post(url, '/v1/tasks', request);
+  assert.equal(created.status, 201);
+  const result = await created.json() as { task: Task };
+  assert.equal(Object.hasOwn(result.task, 'instructions'), false);
+  for (const response of [await get(url, `/v1/tasks/${result.task.id}`), await get(url, '/v1/tasks'), await fetch(`${url}/v1/tasks/${result.task.id}/cancel`, { method: 'POST', headers: { authorization } })]) {
+    assert.equal(response.status, 200);
+    assert.equal(JSON.stringify(await response.json()).includes('instructions'), false);
+  }
+  assert.equal((await post(url, '/v1/tasks', { ...request, instructions: { version: 1, files: [] } })).status, 409);
+  assert.equal((await post(url, '/v1/tasks', { ...input(), instructions: { version: 2, files: [] } })).status, 400);
+  assert.equal((await post(url, '/v1/tasks', { ...input(), instructions: { version: 1, files: [...files, { scope: 'project', path: 'extra.md', content: 'x' }] } })).status, 413);
+  const descriptor = await (await get(url, '/v1/runner')).json() as { capabilities: { instructionSync: boolean } };
+  assert.equal(descriptor.capabilities.instructionSync, false);
+});

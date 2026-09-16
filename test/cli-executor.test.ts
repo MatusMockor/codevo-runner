@@ -287,3 +287,22 @@ test('invalid persisted launch fails before provider spawn', async () => {
     await assert.rejects(readFile(join(f.cwd, 'spawned')));
   } finally { await f.close(); }
 });
+
+for (const provider of ['codex', 'claude'] as const) {
+  test(`${provider} refreshes instruction snapshot on resume through stdin without large argv`, async () => {
+    const f = await fixture(`let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
+      require('node:fs').writeFileSync('instructions.json',JSON.stringify({args:process.argv.slice(2),stdin}));
+      ${providerSuccess(provider)}
+    });`);
+    try {
+      const instructions = { version: 1 as const, files: [{ scope: 'global' as const, path: 'CLAUDE.md', content: 'Updated global instruction' }] };
+      const result = await new CliProviderExecutor(provider, { executable: f.executable }).execute({ ...f.request,
+        resumeSessionId: sessionId, task: { ...f.request.task, provider, instructions } });
+      assert.equal(result.error, undefined);
+      const observed = JSON.parse(await readFile(join(f.cwd, 'instructions.json'), 'utf8'));
+      assert.match(observed.stdin, /Updated global instruction/);
+      assert.match(observed.stdin, /replace earlier synchronized instruction snapshots/);
+      assert.ok(!observed.args.some((arg: string) => arg.includes('Updated global instruction')));
+    } finally { await f.close(); }
+  });
+}

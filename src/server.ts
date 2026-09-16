@@ -1,3 +1,4 @@
+import { QuestionController } from './transport/question-controller.js';
 import { ArtifactController } from './transport/artifact-controller.js';
 import { HistorySearchController } from './history-search-controller.js';
 import { RunnerChangeTransport } from './transport/changes.js';
@@ -17,9 +18,12 @@ import { AUTHORIZE, DESCRIPTOR, EXTENDED, SERVICES, type Authorize, type RunnerS
 
 export type RunnerDescriptor = Readonly<{
   protocolVersion: 1;
+  executionTimeoutMs?: number;
   runnerId: string;
   name: string;
   capabilities: Readonly<{
+    interactiveQuestions?: boolean;
+    instructionSync?: boolean;
     taskExecution: boolean;
     outputArtifacts?: boolean;
     taskContinuation?: boolean;
@@ -78,12 +82,12 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
+    capabilities: { interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
   } : descriptor;
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
+    controllers: [RunnerController, ...(services ? [QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),

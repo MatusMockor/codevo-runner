@@ -1,3 +1,7 @@
+import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
+import { outputRetentionMetadata, retainOutputWindow, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
+export { SQLITE_EXECUTION_STORAGE } from './output-retention.js';
+import { parseInstructionSnapshot } from '../../domain/instructions.js';
 import { ArtifactDatabase, ARTIFACT_SCHEMA } from './artifact-database.js';
 import { PendingDatabase, PENDING_SCHEMA } from './pending-database.js';
 import { searchHistory } from './history-search.js';
@@ -10,16 +14,16 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { LIMITS, RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
+import { LIMITS, RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 
 import { EXECUTION_LIMITS, type ExecutionResult, type OutputChannel } from '../../domain/execution.js';
 
-/** Bulk data leaves room for every admitted task's bounded terminal records. */
-export const SQLITE_EXECUTION_STORAGE = Object.freeze({ outputBytes: 8 * 1024 * 1024, outputEvents: 8192, reserveBytes: 16 * 1024 * 1024, errorBytes: 1024 });
+
 
 export class RepositoryDatabase {
   private readonly db!: DatabaseSync;
   private readonly lease!: DatabaseSync;
+  readonly questions: QuestionDatabase;
   readonly artifacts: ArtifactDatabase;
   readonly clones: CloneDatabase;
   readonly resumes: ResumeDatabase;
@@ -32,6 +36,7 @@ export class RepositoryDatabase {
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=16384; PRAGMA journal_size_limit=4194304;');
       this.migrate();
+      this.questions = new QuestionDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
       this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
@@ -44,7 +49,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -56,11 +61,14 @@ export class RepositoryDatabase {
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
       if (version === 0 || version === 1) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
       this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
-        PRAGMA user_version=6;`);
+        PRAGMA user_version=8;`);
+      if (!this.db.prepare('PRAGMA table_info(task_execution)').all().some(column => column['name'] === 'output_truncated_before_sequence')) this.db.exec(`ALTER TABLE task_execution ADD COLUMN output_truncated_before_sequence INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE task_execution ADD COLUMN output_starts_at_line_boundary INTEGER NOT NULL DEFAULT 1;`);
       this.db.exec(CLONE_SCHEMA);
       this.db.exec(RESUME_SCHEMA);
       this.db.exec(PENDING_SCHEMA);
       this.db.exec(ARTIFACT_SCHEMA);
+      this.db.exec(QUESTION_SCHEMA);
     });
   }
   private transaction<T>(action: () => T): T {
@@ -94,8 +102,9 @@ export class RepositoryDatabase {
   continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } { return this.resumes.continueTask(id, input); }
   setTaskSession(id: string, sessionId: string): void { this.resumes.setTaskSession(id, sessionId); }
   createTask(input: CreateTask): { task: Task; created: boolean } {
+    const instructions = input.instructions === undefined ? undefined : parseInstructionSnapshot(input.instructions);
     const launch = input.launch === undefined ? undefined : parseLaunchOptions(input.launch, input.provider);
-    const normalized = { ...(launch ? { launch } : {}), provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
+    const normalized = { ...(instructions ? { instructions } : {}), ...(launch ? { launch } : {}), provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
     const fingerprint = JSON.stringify(normalized);
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT sequence,payload,fingerprint FROM tasks WHERE key=?').get(input.idempotencyKey);
@@ -108,7 +117,7 @@ export class RepositoryDatabase {
       for (const id of refs) this.getAttachment(id);
       const count = Number(this.db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']);
       if (count >= LIMITS.tasks) throw new RunnerError('quota_exceeded');
-      const task: Task = { id: randomUUID(), sequence: 0, runnerId: this.runnerId, provider: input.provider, status: 'draft', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
+      const task: Task = { ...(instructions ? { instructions } : {}), id: randomUUID(), sequence: 0, runnerId: this.runnerId, provider: input.provider, status: 'draft', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const id of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, id);
       this.event(task.id, 'task.created');
@@ -128,6 +137,7 @@ export class RepositoryDatabase {
     return this.transaction(() => {
       const task = this.getTask(id);
       this.pending.pauseTask(id);
+      this.questions.settlePending(id, 'cancelled');
       if (!['draft', 'queued', 'running'].includes(task.status)) return task;
       return this.save({ ...task, status: 'cancelled' }, 'task.cancelled');
     });
@@ -153,16 +163,12 @@ export class RepositoryDatabase {
     if (channel !== 'stdout' && channel !== 'stderr') throw new RunnerError('invalid_input');
     this.transaction(() => {
       if (this.getTask(id).status !== 'running' || !text) return;
-      const usage = this.db.prepare('SELECT output_bytes,output_events FROM task_execution WHERE task_id=?').get(id)!;
-      if (Number(usage['output_events']) >= EXECUTION_LIMITS.outputEvents) throw new RunnerError('quota_exceeded');
-      const global = this.db.prepare('SELECT coalesce(sum(output_bytes),0) AS bytes,coalesce(sum(output_events),0) AS events FROM task_execution').get()!;
-      if (Number(global['events']) >= SQLITE_EXECUTION_STORAGE.outputEvents) throw new RunnerError('quota_exceeded');
-      const available = Math.min(EXECUTION_LIMITS.outputEventBytes, EXECUTION_LIMITS.outputBytes - Number(usage['output_bytes']), SQLITE_EXECUTION_STORAGE.outputBytes - Number(global['bytes']));
-      if (available <= 0 || Buffer.byteLength(text) > available) throw new RunnerError('quota_exceeded');
+      if (Buffer.byteLength(text) > EXECUTION_LIMITS.outputEventBytes) throw new RunnerError('quota_exceeded');
       const output = text;
       this.requireBulkCapacity();
       this.event(id, 'task.output', { channel, text: output });
       this.db.prepare('UPDATE task_execution SET output_bytes=output_bytes+?,output_events=output_events+1 WHERE task_id=?').run(Buffer.byteLength(output), id);
+      retainOutputWindow(this.db, id);
       this.requireBulkCapacity();
     });
   }
@@ -175,6 +181,7 @@ export class RepositoryDatabase {
       const cleanupFailed = task.status === 'cancelled' && result.error === 'process_cleanup_failed'
         && this.db.prepare("SELECT 1 FROM events WHERE task_id=? AND type='task.running' LIMIT 1").get(id);
       if (task.status !== 'running' && !cleanupFailed) return task;
+      this.questions.settlePending(id, 'expired');
       const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
       if (status === 'failed') this.pending.pauseTask(id);
       const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };
@@ -184,6 +191,7 @@ export class RepositoryDatabase {
   interruptRunningTasks(): void {
     this.transaction(() => {
       this.pending.pauseAll();
+      this.questions.settlePending(undefined, 'expired');
       const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence").all();
       for (const row of rows) this.save({ ...this.task(row), status: 'interrupted' }, 'task.interrupted');
     });
@@ -195,9 +203,9 @@ export class RepositoryDatabase {
   listTasks(after: number): Page<Task> {
     return this.page(this.db.prepare('SELECT sequence,payload FROM tasks WHERE sequence>? ORDER BY sequence LIMIT ?').all(after, LIMITS.pageSize + 1).map(row => this.task(row)));
   }
-  listEvents(taskId: string, after: number): Page<TaskEvent> {
+  listEvents(taskId: string, after: number): EventPage {
     this.getTask(taskId);
-    return this.page(this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1).map(row => ({ sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string, ...(row['data'] ? JSON.parse(row['data'] as string) as object : {}) })));
+    return { ...outputRetentionMetadata(this.db, taskId), ...this.page(this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1).map(row => ({ sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string, ...(row['data'] ? JSON.parse(row['data'] as string) as object : {}) }))) };
   }
   getAttachment(id: string): Attachment {
     const row = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(id);

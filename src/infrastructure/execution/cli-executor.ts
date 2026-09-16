@@ -1,3 +1,8 @@
+import { executeClaudeInteractive } from './claude-interactive.js';
+import { executeCodexInteractive } from './codex-interactive.js';
+import { DEFAULT_EXECUTION_TIMEOUT_MS, MAX_EXECUTION_TIMEOUT_MS } from '../../domain/execution-policy.js';
+import { instructionContext } from '../../domain/instruction-context.js';
+import { parseInstructionSnapshot } from '../../domain/instructions.js';
 import { ARTIFACT_HINT } from '../../domain/artifact-hint.js';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -13,6 +18,7 @@ import { runProcess } from './process-runner.js';
 export type CliExecutorOptions = Readonly<{
   /** Trusted operator configuration; never HTTP request fields. */
   executable?: string; timeoutMs?: number; outputBytes?: number;
+  interactiveQuestions?: boolean;
   sandbox?: 'workspace-write' | 'external-sandbox';
 }>;
 
@@ -24,19 +30,21 @@ export class CliProviderExecutor implements ProviderExecutor {
   readonly supportsAttachments = true;
   private readonly executable: string;
   private readonly timeoutMs: number;
-  private readonly outputBytes: number;
+  private readonly outputBytes: number | undefined;
   private readonly sandbox: 'workspace-write' | 'external-sandbox';
+  private readonly interactiveQuestions: boolean;
 
   constructor(readonly provider: 'codex' | 'claude', options: CliExecutorOptions = {}) {
     this.executable = options.executable ?? provider;
-    this.timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
-    this.outputBytes = options.outputBytes ?? 1_048_576;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
+    this.outputBytes = options.outputBytes;
+    this.interactiveQuestions = options.interactiveQuestions ?? false;
     this.sandbox = options.sandbox ?? 'workspace-write';
     if (!['workspace-write', 'external-sandbox'].includes(this.sandbox)) throw new Error('invalid_sandbox');
     if (!this.executable || this.executable.includes('\0')) throw new Error('invalid_provider_executable');
     if (this.executable !== provider && !isAbsolute(this.executable)) throw new Error('invalid_provider_executable');
-    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 86_400_000) throw new Error('invalid_execution_timeout');
-    if (!Number.isSafeInteger(this.outputBytes) || this.outputBytes < 1 || this.outputBytes > 1_048_576) throw new Error('invalid_output_limit');
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > MAX_EXECUTION_TIMEOUT_MS) throw new Error('invalid_execution_timeout');
+    if (this.outputBytes !== undefined && (!Number.isSafeInteger(this.outputBytes) || this.outputBytes < 1 || this.outputBytes > 1_048_576)) throw new Error('invalid_output_limit');
   }
 
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
@@ -52,7 +60,11 @@ export class CliProviderExecutor implements ProviderExecutor {
       return { exitCode: null, error: 'attachment_input_invalid' };
     }
     const rawPrompt = request.task.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
-    const prompt = launch ? launchPrompt(launch, rawPrompt) : rawPrompt;
+    const userPrompt = launch ? launchPrompt(launch, rawPrompt) : rawPrompt;
+    let context = '';
+    try { if (request.task.instructions !== undefined) context = instructionContext(parseInstructionSnapshot(request.task.instructions)); }
+    catch { return { exitCode: null, error: 'instruction_snapshot_invalid' }; }
+    const prompt = context ? `${context}[User request]\n${userPrompt || 'Inspect the attached images.'}` : userPrompt;
     const images: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [];
     try {
       for (const attachment of request.attachments) {
@@ -91,10 +103,16 @@ export class CliProviderExecutor implements ProviderExecutor {
     })}\n`;
     const env: NodeJS.ProcessEnv = {};
     for (const key of ENVIRONMENT_KEYS) if (process.env[key]) env[key] = process.env[key];
+    if (this.interactiveQuestions) {
+      const plan = { executable: this.executable, cwd: request.cwd, env, signal: request.signal, timeoutMs: this.timeoutMs, request, prompt };
+      return this.provider === 'codex'
+        ? executeCodexInteractive({ ...plan, sandbox: this.sandbox })
+        : executeClaudeInteractive({ ...plan, args, images });
+    }
     const parser = new ProviderOutputParser(this.provider, request.resumeSessionId);
     let sessionPublished = false;
     const result = await runProcess({ executable: this.executable, args, cwd: request.cwd, stdin, env,
-      signal: request.signal, timeoutMs: this.timeoutMs, outputBytes: this.outputBytes, onOutput: async (channel, text) => {
+      signal: request.signal, timeoutMs: this.timeoutMs, ...(this.outputBytes === undefined ? {} : { outputBytes: this.outputBytes }), onOutput: async (channel, text) => {
         if (channel === 'stdout') parser.push(text);
         const sessionId = parser.currentSessionId();
         if (sessionId && !sessionPublished) {

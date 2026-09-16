@@ -1,3 +1,4 @@
+import type { AgentQuestion, AgentQuestionResponse } from './questions.js';
 import type { Task } from './contracts.js';
 
 export type TaskStatus = 'draft' | 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled';
@@ -9,6 +10,7 @@ export const EXECUTION_LIMITS = Object.freeze({ outputBytes: 1_048_576, outputEv
 export type ExecutionRequest = Readonly<{
   task: Task;
   resumeSessionId?: string;
+  onQuestion?: (questions: readonly AgentQuestion[]) => Promise<AgentQuestionResponse>;
   onSession?: (sessionId: string) => Promise<void>;
   attachments: readonly StagedExecutionAttachment[];
   cwd: string;

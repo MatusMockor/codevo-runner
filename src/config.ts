@@ -1,3 +1,4 @@
+import { parseExecutionTimeoutMs } from './domain/execution-policy.js';
 import { homedir } from 'node:os';
 import { isIP } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
@@ -25,6 +26,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     throw new Error('CODEVO_PROJECTS_ROOT must be an absolute path');
   return Object.freeze({ host, port: Number(portText), name,
     executionEnabled: executionText === 'true',
+    executionTimeoutMs: parseExecutionTimeoutMs(env.CODEVO_EXECUTION_TIMEOUT_MS),
     executionIsolation,
     projectsRoot: resolve(env.CODEVO_PROJECTS_ROOT ?? `${homedir()}/Developer`),
     projectsFile: env.CODEVO_PROJECTS_FILE ? resolve(env.CODEVO_PROJECTS_FILE) : undefined,

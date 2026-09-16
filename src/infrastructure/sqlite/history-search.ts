@@ -1,3 +1,4 @@
+import { outputRetentionMetadata } from './output-retention.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Task } from '../../domain/contracts.js';
 import { parseHistorySearch, type HistorySearchPage, type HistorySearchQuery, type HistorySearchMatch } from '../../domain/history-search.js';
@@ -15,6 +16,9 @@ export function searchHistory(db: DatabaseSync, input: HistorySearchQuery): Hist
     const user = task.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
     const userSnippet = snippet(user, query.q);
     if (userSnippet !== null) items.push({ ...base, role: 'user', eventSequence: null, snippet: userSnippet });
+    const retention = outputRetentionMetadata(db, task.id);
+    if (retention.outputTruncatedBeforeSequence) incomplete = true;
+    let skipPartial = retention.outputStartsAtLineBoundary === false;
     const events = db.prepare("SELECT sequence,data FROM events WHERE task_id=? AND type='task.output' ORDER BY sequence LIMIT 1025").all(task.id);
     if (events.length > 1024) incomplete = true;
     let pending = ''; let lineSequence = 0; let matched = false; let stdoutBytes = 0;
@@ -35,7 +39,14 @@ export function searchHistory(db: DatabaseSync, input: HistorySearchQuery): Hist
       stdoutBytes += Buffer.byteLength(data.text);
       if (stdoutBytes > 1_048_576) { incomplete = true; pending = ''; break; }
       if (!pending) lineSequence = Number(event['sequence']);
-      pending += data.text;
+      let text = data.text;
+      if (skipPartial) {
+        const newline = text.indexOf('\n');
+        if (newline < 0) continue;
+        text = text.slice(newline + 1);
+        skipPartial = false;
+      }
+      pending += text;
       let newline: number;
       while ((newline = pending.indexOf('\n')) >= 0) {
         inspect(pending.slice(0, newline), lineSequence);

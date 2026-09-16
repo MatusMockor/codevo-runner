@@ -53,7 +53,7 @@ test('invalid IDs, malformed JSON and excessive lines fail closed', () => {
   const parser = new ProviderOutputParser('codex');
   const line = JSON.stringify({ type: 'item.completed', text: 'x'.repeat(8000) }) + '\n';
   for (let i = 0; i < 140; i++) parser.push(line);
-  assert.equal(parser.finish().error, 'provider_output_limit_exceeded');
+  assert.equal(parser.finish().error, 'provider_session_missing');
 });
 
 test('Claude result alone cannot establish identity', () => {

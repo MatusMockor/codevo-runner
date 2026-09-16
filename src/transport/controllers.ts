@@ -1,8 +1,14 @@
 import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { LIMITS, RunnerError } from '../domain/contracts.js';
+import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
 import { cursor, handle, jsonBody, send } from './http.js';
+import type { PendingMessage } from '../domain/pending-message.js';
 import { SERVICES, type RunnerServices } from './services.js';
+
+function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions'> {
+  const { instructions: _instructions, ...publicValue } = record;
+  return publicValue;
+}
 
 @Controller('v1/tasks')
 export class TaskController {
@@ -12,25 +18,28 @@ export class TaskController {
   create(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const result = await this.services.tasks.create(await jsonBody(request));
-      send(response, result.created ? 201 : 200, result);
+      send(response, result.created ? 201 : 200, { ...result, task: publicRecord(result.task) });
     });
   }
 
   @Get()
   list(@Req() request: Request, @Res() response: Response) {
-    return handle(response, async () => send(response, 200, await this.services.tasks.list(cursor(request))));
+    return handle(response, async () => {
+      const page = await this.services.tasks.list(cursor(request));
+      send(response, 200, { ...page, items: page.items.map(publicRecord) });
+    });
   }
 
   @Get(':id')
   get(@Param('id') id: string, @Res() response: Response) {
-    return handle(response, async () => send(response, 200, await this.services.tasks.get(id)));
+    return handle(response, async () => send(response, 200, publicRecord(await this.services.tasks.get(id))));
   }
 
   @Post(':id/cancel')
   cancel(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       const tasks = this.services.execution ?? this.services.tasks;
-      send(response, 200, await tasks.cancel(id));
+      send(response, 200, publicRecord(await tasks.cancel(id)));
     });
   }
 
@@ -39,7 +48,7 @@ export class TaskController {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
       const task = await this.services.execution.start(id, await jsonBody(request));
-      send(response, 202, task);
+      send(response, 202, publicRecord(task));
     });
   }
 
@@ -56,7 +65,7 @@ export class TaskController {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
       const result = await this.services.execution.continue(id, await jsonBody(request));
-      send(response, result.created ? 202 : 200, result);
+      send(response, result.created ? 202 : 200, { ...result, task: publicRecord(result.task) });
     });
   }
 
@@ -64,7 +73,8 @@ export class TaskController {
   pending(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      send(response, 200, await this.services.execution.pending(id));
+      const page = await this.services.execution.pending(id);
+      send(response, 200, { items: page.items.map(publicRecord) });
     });
   }
 
@@ -73,7 +83,7 @@ export class TaskController {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
       const result = await this.services.execution.enqueue(id, await jsonBody(request));
-      send(response, result.created ? 202 : 200, result);
+      send(response, result.created ? 202 : 200, { ...result, pending: publicRecord(result.pending) });
     });
   }
 
@@ -81,7 +91,7 @@ export class TaskController {
   removePending(@Param('id') id: string, @Param('pendingId') pendingId: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      send(response, 200, await this.services.execution.removePending(id, pendingId));
+      send(response, 200, publicRecord(await this.services.execution.removePending(id, pendingId)));
     });
   }
 
@@ -89,7 +99,8 @@ export class TaskController {
   resumePending(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      send(response, 200, await this.services.execution.resumePending(id));
+      const page = await this.services.execution.resumePending(id);
+      send(response, 200, { items: page.items.map(publicRecord) });
     });
   }
 

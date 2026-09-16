@@ -6,11 +6,9 @@ export function isProviderSessionId(value: unknown): value is string {
 export type ProviderOutputResult = Readonly<{ sessionId?: string; error?: string }>;
 const encoder = new TextEncoder();
 const MAX_LINE_BYTES = 65_536;
-const MAX_STREAM_BYTES = 1_048_576;
 
 export class ProviderOutputParser {
   private pending = '';
-  private bytes = 0;
   private sessionId?: string;
   private error?: string;
   private succeeded = false;
@@ -22,13 +20,14 @@ export class ProviderOutputParser {
 
   push(text: string): void {
     if (this.finished || this.error) return;
-    this.bytes += encoder.encode(text).byteLength;
-    if (this.bytes > MAX_STREAM_BYTES) { this.error = 'provider_output_limit_exceeded'; return; }
     // Scan chunks without building an unbounded array of lines.
     let offset = 0;
     while (offset < text.length) {
       const newline = text.indexOf('\n', offset);
       const end = newline < 0 ? text.length : newline;
+      if (end - offset > MAX_LINE_BYTES) {
+        this.error = 'provider_output_limit_exceeded'; this.pending = ''; return;
+      }
       const fragment = text.slice(offset, end);
       if (encoder.encode(this.pending).byteLength + encoder.encode(fragment).byteLength > MAX_LINE_BYTES) {
         this.error = 'provider_output_limit_exceeded'; this.pending = ''; return;

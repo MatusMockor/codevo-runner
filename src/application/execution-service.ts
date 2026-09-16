@@ -1,9 +1,10 @@
+import type { QuestionService } from './question-service.js';
 import { ProviderArtifactReferences } from '../domain/artifact-output.js';
 import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
 import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
-import type { ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
+import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 
 /** A single runner owns durable admission and one detached worker, independent of HTTP. */
@@ -23,6 +24,8 @@ export class ExecutionService implements ExecutionApplication {
     private readonly providers: readonly ProviderExecutor[],
     private readonly attachments?: ExecutionAttachmentStager,
     private readonly captureArtifacts?: (taskId: string, paths: readonly string[]) => Promise<boolean>,
+    private readonly instructions?: InstructionWorkspace,
+    private readonly questions?: QuestionService,
   ) {}
 
   async initialize(): Promise<void> {
@@ -185,6 +188,7 @@ export class ExecutionService implements ExecutionApplication {
     this.active = { taskId: task.id, abort };
     if (this.closing) abort.abort();
     let inputs: StagedExecutionInputs | undefined;
+    let syncingInstructions = false;
     try {
       if ((await this.tasks.getTask(task.id)).status !== 'running') return;
       if (!task.projectId) throw new RunnerError('invalid_input');
@@ -196,13 +200,25 @@ export class ExecutionService implements ExecutionApplication {
         ? await this.workspaces.resume(project, session.workspaceTaskId, abort.signal)
         : await this.workspaces.prepare(project, task.id, abort.signal);
       abort.signal.throwIfAborted();
+      if (task.instructions !== undefined) {
+        syncingInstructions = true;
+        if (!this.instructions) throw new RunnerError('invalid_input');
+        await this.instructions.apply(session.workspaceTaskId, cwd, task.instructions, abort.signal);
+        syncingInstructions = false;
+        abort.signal.throwIfAborted();
+      }
       const ids = task.parts.flatMap((part) => part.type === 'attachment' ? [part.attachmentId] : []);
       if (ids.length > 0) inputs = await this.attachments!.stage(task.id, ids);
       abort.signal.throwIfAborted();
       const artifactReferences = new ProviderArtifactReferences(task.provider);
       const result = await executor.execute({ task, cwd, ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
-        onSession: (sessionId) => this.executions.setTaskSession(task.id, sessionId),
+        ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
+        onSession: async (sessionId) => {
+          abort.signal.throwIfAborted();
+          await this.executions.setTaskSession(task.id, sessionId);
+        },
         onOutput: async (channel, text) => {
+          abort.signal.throwIfAborted();
           if (channel === 'stdout') artifactReferences.push(text);
           await this.executions.appendTaskOutput(task.id, channel, text);
         },
@@ -216,9 +232,13 @@ export class ExecutionService implements ExecutionApplication {
       if (!this.closing) await this.executions.finishTask(task.id, result);
     } catch {
       // Do not persist raw exception strings: they may contain credentials or host paths.
-      if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: 'execution_failed' });
+      if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: syncingInstructions ? 'instruction_sync_failed' : 'execution_failed' });
     } finally {
-      try { await inputs?.cleanup(); }
+      abort.abort();
+      try {
+        try { await this.questions?.expire(task.id); }
+        finally { await inputs?.cleanup(); }
+      }
       finally { this.active = undefined; }
     }
   }

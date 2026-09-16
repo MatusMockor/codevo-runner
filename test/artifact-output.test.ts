@@ -42,7 +42,7 @@ test('artifact references reject URLs, traversal and unsupported paths and cap u
   assert.deepEqual(parser.finish(), Array.from({ length: 32 }, (_, i) => `image-${i}.png`));
 });
 
-test('artifact discovery fails closed at stream and line byte budgets', () => {
+test('artifact discovery reports oversized lines without a lifetime stream budget', () => {
   const line = new ProviderArtifactReferences('codex');
   line.push(codex('[Good](good.png)') + '\n');
   line.push('x'.repeat(256 * 1024 + 1));
@@ -52,7 +52,7 @@ test('artifact discovery fails closed at stream and line byte budgets', () => {
   stream.push(claude('[Good](good.png)') + '\n');
   for (let i = 0; i < 1100; i++) stream.push('x'.repeat(1024) + '\n');
   assert.deepEqual(stream.finish(), ['good.png']);
-  assert.equal(stream.isComplete(), false);
+  assert.equal(stream.isComplete(), true);
   const path = new ProviderArtifactReferences('codex');
   path.push(codex(`[Long](<${'á'.repeat(2100)}.png>)`));
   assert.deepEqual(path.finish(), []);

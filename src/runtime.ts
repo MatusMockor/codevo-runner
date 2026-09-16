@@ -1,3 +1,6 @@
+import { executionTimeoutMs } from './domain/execution-policy.js';
+import { QuestionService } from './application/question-service.js';
+import { FileInstructionWorkspace } from './infrastructure/files/instruction-workspace.js';
 import { ArtifactService } from './application/artifact-service.js';
 import { FileArtifactBlobs } from './infrastructure/artifacts/blobs.js';
 import { WorkspaceArtifactReader } from './infrastructure/artifacts/workspace.js';
@@ -20,15 +23,19 @@ import { createExecutionAttachmentStager } from './infrastructure/files/executio
 export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
   projectsRoot?: string;
+  executionTimeoutMs?: number;
   providers?: readonly ProviderExecutor[];
   isolation?: 'provider' | 'container';
 }>;
 
 /** Composition root: concrete infrastructure is wired only at the outside edge. */
 export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions) {
+  const timeoutMs = executionTimeoutMs(options?.executionTimeoutMs);
   const changes = new RunnerChanges();
   const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish());
   try {
+    const questions = new QuestionService(repository);
+    await questions.expire();
     // Recovery is truthful even when an operator disables execution after a crash.
     await repository.interruptRunningTasks();
     await repository.interruptClones();
@@ -41,7 +48,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         const configured = new ConfiguredProjectRegistry(options.projects);
         clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured);
         await clones.initialize();
-        const cliOptions = { sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
+        const cliOptions = { timeoutMs, interactiveQuestions: true, sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
         artifacts = new ArtifactService(repository, repository,
           new WorkspaceArtifactReader(repository, repository, new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), join(dataDir, 'workspaces')),
           await FileArtifactBlobs.open(dataDir, await repository.listArtifactIds()));
@@ -49,7 +56,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir),
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths));
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), new FileInstructionWorkspace(dataDir), questions);
         await execution.initialize();
 
       }
@@ -62,6 +69,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
+      questions: execution ? questions : undefined,
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts,
       close(): Promise<void> {
         closing ??= (async () => {

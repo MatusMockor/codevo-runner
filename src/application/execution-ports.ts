@@ -1,3 +1,4 @@
+import type { InstructionSnapshot } from '../domain/instructions.js';
 import type { PendingMessage, PendingMessages } from '../domain/pending-message.js';
 import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
@@ -64,4 +65,8 @@ export interface StagedExecutionInputs {
 }
 export interface ExecutionAttachmentStager {
   stage(taskId: string, attachmentIds: readonly string[]): Promise<StagedExecutionInputs>;
+}
+
+export interface InstructionWorkspace {
+  apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal): Promise<void>;
 }
