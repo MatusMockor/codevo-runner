@@ -1,3 +1,4 @@
+import { ArtifactDatabase, ARTIFACT_SCHEMA } from './artifact-database.js';
 import { PendingDatabase, PENDING_SCHEMA } from './pending-database.js';
 import { searchHistory } from './history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
@@ -19,6 +20,7 @@ export const SQLITE_EXECUTION_STORAGE = Object.freeze({ outputBytes: 8 * 1024 * 
 export class RepositoryDatabase {
   private readonly db!: DatabaseSync;
   private readonly lease!: DatabaseSync;
+  readonly artifacts: ArtifactDatabase;
   readonly clones: CloneDatabase;
   readonly resumes: ResumeDatabase;
   readonly pending: PendingDatabase;
@@ -30,6 +32,7 @@ export class RepositoryDatabase {
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=16384; PRAGMA journal_size_limit=4194304;');
       this.migrate();
+      this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
       this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
       this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
@@ -41,7 +44,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -53,10 +56,11 @@ export class RepositoryDatabase {
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
       if (version === 0 || version === 1) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
       this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
-        PRAGMA user_version=5;`);
+        PRAGMA user_version=6;`);
       this.db.exec(CLONE_SCHEMA);
       this.db.exec(RESUME_SCHEMA);
       this.db.exec(PENDING_SCHEMA);
+      this.db.exec(ARTIFACT_SCHEMA);
     });
   }
   private transaction<T>(action: () => T): T {

@@ -30,6 +30,7 @@ async function fixture(t: TestContext) {
 let prompt = '';
 process.stdin.on('data', chunk => prompt += chunk);
 process.stdin.on('end', () => {
+  prompt = prompt.split('[User request]\\n').at(-1);
   console.log(JSON.stringify({ type: 'thread.started', thread_id: '${randomUUID()}' }));
   if (prompt === 'hold') {
     console.log(JSON.stringify({ type: 'item.completed', text: 'started:' + process.pid }));

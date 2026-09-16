@@ -48,9 +48,13 @@ for (const provider of ['codex', 'claude'] as const) {
       assert.equal(observed.secret, undefined);
       if (provider === 'codex') {
         assert.deepEqual(observed.args.slice(-4), ['-i', path, '--', '-']);
-        assert.equal(observed.stdin, 'inspect $(touch bad); --dangerous');
+        assert.ok(observed.stdin.endsWith('[User request]\ninspect $(touch bad); --dangerous'));
+        assert.match(observed.stdin, /^\[Codevo presentation capability\]/);
       }
       if (provider === 'claude') {
+        const hintIndex = observed.args.indexOf('--append-system-prompt');
+        assert.ok(hintIndex > 0);
+        assert.match(observed.args[hintIndex + 1], /workspace-relative Markdown/);
         const frame = JSON.parse(observed.stdin);
         assert.equal(frame.message.content[0].source.data, 'iVBORw==');
         assert.equal(frame.message.content[1].text, 'inspect $(touch bad); --dangerous');
@@ -110,7 +114,7 @@ test('Codex image-only task supplies the prompt required by exec', async () => {
       task: { ...f.request.task, parts: [{ type: 'attachment', attachmentId: id }] },
       attachments: [{ id, path, mediaType: 'image/png' }] });
     assert.equal(result.exitCode, 0);
-    assert.equal(f.output(), 'Inspect the attached images.');
+    assert.ok(f.output().endsWith('[User request]\nInspect the attached images.'));
   } finally { await f.close(); }
 });
 
@@ -181,7 +185,8 @@ for (const provider of ['codex', 'claude'] as const) {
         assert.deepEqual(observed.args.slice(0, 3), ['exec', 'resume', '--json']);
         assert.deepEqual(observed.args.slice(-5), ['-i', path, '--', sessionId, '-']);
         assert.ok(observed.args.includes('sandbox_mode="workspace-write"'));
-        assert.equal(observed.stdin, 'inspect $(touch bad); --dangerous');
+        assert.ok(observed.stdin.endsWith('[User request]\ninspect $(touch bad); --dangerous'));
+        assert.match(observed.stdin, /^\[Codevo presentation capability\]/);
       }
       if (provider === 'claude') {
         assert.deepEqual(observed.args.slice(-2), ['--resume', sessionId]);
@@ -264,7 +269,7 @@ for (const resumed of [false, true]) {
           assert.ok(!observed.args.includes('sandbox_mode="workspace-write"'));
         }
         if (provider === 'claude') {
-          assert.deepEqual(observed.args.slice(6, 14), ['--model', 'opus[1m]', '--permission-mode', 'plan', '--effort', 'high', '--settings', '{"fastMode":true}']);
+          assert.deepEqual(observed.args.slice(8, 16), ['--model', 'opus[1m]', '--permission-mode', 'plan', '--effort', 'high', '--settings', '{"fastMode":true}']);
           assert.ok(!observed.args.includes('--allowedTools'));
           assert.ok(!observed.args.includes('acceptEdits'));
         }

@@ -414,3 +414,35 @@ restart pause undispatched messages. Restart does not replay the interrupted tur
 Explicit queue resume is required after a pause; sending an unrelated continuation
 or adding another pending message does not silently release a paused queue. Admission
 failures such as task quota pause the affected queue without stopping unrelated tasks.
+
+## Output artifacts
+
+Execution-enabled runners advertise `outputArtifacts: true`. Both Codex and Claude
+assistant Markdown references to PNG, JPEG, WebP or self-contained HTML workspace
+files are captured before a task finishes and before a subsequent turn starts.
+Snapshots are immutable and remain available after restart or worktree deletion.
+This feature transports generated files; it does not supply an image-generation tool.
+
+- `POST /v1/tasks/:taskId/artifacts`, JSON `{ "path": "design.html" }`: replay an
+  existing snapshot or capture a terminal task's file. Absolute paths are accepted
+  only inside its assigned worktree. Returns `{ artifact, created }` with 201 or 200.
+- `GET /v1/tasks/:taskId/artifacts`: `{ items: [...] }`, at most 32 snapshots.
+- `GET /v1/tasks/:taskId/artifacts/:artifactId/content`: authenticated original
+  bytes, with attachment disposition, no-store, nosniff and restrictive CSP.
+
+Metadata fields are `id`, `taskId`, `name`, `mediaType`, `sizeBytes`, and `sha256`.
+Requests use the same runner identity/authentication rules as other task endpoints.
+Limits are 8 MiB per image, 2 MiB per UTF-8 HTML file, 8,192 pixels per dimension,
+16 million image pixels, 32 files per task and 1 GiB total stored output. Animated
+images, SVG, arbitrary downloads, symlink/hardlink sources and path escapes are
+unsupported. The editor must render HTML in an isolated, network-free sandbox.
+At most two downloads and one capture are admitted concurrently. Automatic capture
+has a 30-second admission budget; failures add a bounded stderr notice and do not
+turn a successful provider response into a failed task. Explicit capture returns
+conflict for running tasks or uncaptured obsolete turns; existing snapshots replay.
+
+SQLite migration 6 adds artifact metadata. Private blobs live in `artifacts/`
+beside the database; back up both. Startup reconciles uncommitted files left by a
+crash. Automatic discovery is limited to 1 MiB of structured provider output,
+256 KiB per frame, and inline Markdown links/images, excluding tool/user/subagent
+messages. Legacy turns without a saved snapshot still require their source files.

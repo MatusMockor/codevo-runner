@@ -1,3 +1,4 @@
+import { ProviderArtifactReferences } from '../domain/artifact-output.js';
 import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
 import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
@@ -21,6 +22,7 @@ export class ExecutionService implements ExecutionApplication {
     private readonly workspaces: ProjectWorkspace,
     private readonly providers: readonly ProviderExecutor[],
     private readonly attachments?: ExecutionAttachmentStager,
+    private readonly captureArtifacts?: (taskId: string, paths: readonly string[]) => Promise<boolean>,
   ) {}
 
   async initialize(): Promise<void> {
@@ -197,11 +199,20 @@ export class ExecutionService implements ExecutionApplication {
       const ids = task.parts.flatMap((part) => part.type === 'attachment' ? [part.attachmentId] : []);
       if (ids.length > 0) inputs = await this.attachments!.stage(task.id, ids);
       abort.signal.throwIfAborted();
+      const artifactReferences = new ProviderArtifactReferences(task.provider);
       const result = await executor.execute({ task, cwd, ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         onSession: (sessionId) => this.executions.setTaskSession(task.id, sessionId),
-        onOutput: (channel, text) => this.executions.appendTaskOutput(task.id, channel, text),
+        onOutput: async (channel, text) => {
+          if (channel === 'stdout') artifactReferences.push(text);
+          await this.executions.appendTaskOutput(task.id, channel, text);
+        },
       });
       if (result.sessionId) await this.executions.setTaskSession(task.id, result.sessionId);
+      if (!this.closing && this.captureArtifacts) {
+        let complete = false;
+        try { complete = await this.captureArtifacts(task.id, artifactReferences.finish()); complete = complete && artifactReferences.isComplete(); } catch { /* Artifact failure does not falsify provider completion. */ }
+        if (!complete) await this.executions.appendTaskOutput(task.id, 'stderr', '[Codevo] Some output previews could not be saved.\n');
+      }
       if (!this.closing) await this.executions.finishTask(task.id, result);
     } catch {
       // Do not persist raw exception strings: they may contain credentials or host paths.

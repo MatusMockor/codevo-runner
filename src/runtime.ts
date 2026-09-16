@@ -1,3 +1,6 @@
+import { ArtifactService } from './application/artifact-service.js';
+import { FileArtifactBlobs } from './infrastructure/artifacts/blobs.js';
+import { WorkspaceArtifactReader } from './infrastructure/artifacts/workspace.js';
 import { HistorySearchService } from './application/history-search.js';
 import { RunnerChanges } from './application/runner-changes.js';
 import { homedir } from 'node:os';
@@ -31,6 +34,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     await repository.interruptClones();
     const attachments = await createAttachmentStore(dataDir, runnerId, repository);
     let execution: ExecutionService | undefined;
+    let artifacts: ArtifactService | undefined;
     let clones: ProjectCloneService | undefined;
     try {
       if (options) {
@@ -38,11 +42,16 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured);
         await clones.initialize();
         const cliOptions = { sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
+        artifacts = new ArtifactService(repository, repository,
+          new WorkspaceArtifactReader(repository, repository, new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), join(dataDir, 'workspaces')),
+          await FileArtifactBlobs.open(dataDir, await repository.listArtifactIds()));
         execution = new ExecutionService(repository, repository,
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir),
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
-          await createExecutionAttachmentStager(dataDir, attachments));
+          await createExecutionAttachmentStager(dataDir, attachments),
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths));
         await execution.initialize();
+
       }
     } catch (error) {
       try {
@@ -53,7 +62,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes,
+      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts,
       close(): Promise<void> {
         closing ??= (async () => {
           try {

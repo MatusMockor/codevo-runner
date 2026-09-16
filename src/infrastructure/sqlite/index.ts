@@ -1,3 +1,5 @@
+import type { Artifact } from '../../domain/artifact.js';
+import type { ArtifactRepository } from '../../application/artifact-ports.js';
 import type { PendingMessage, PendingMessages } from '../../domain/pending-message.js';
 import type { HistorySearchRepository } from '../../application/history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
@@ -12,7 +14,7 @@ import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository {
+class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -53,6 +55,11 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  listArtifactIds(): Promise<readonly string[]> { return this.call({ method: 'listArtifactIds', args: [] }); }
+  putArtifact(artifact: Artifact, path: string): Promise<{ artifact: Artifact; created: boolean }> { return this.call({ method: 'putArtifact', args: [artifact, path] }); }
+  findArtifact(taskId: string, path: string): Promise<Artifact | null> { return this.call({ method: 'findArtifact', args: [taskId, path] }); }
+  getArtifact(taskId: string, id: string): Promise<Artifact> { return this.call({ method: 'getArtifact', args: [taskId, id] }); }
+  listArtifacts(taskId: string): Promise<readonly Artifact[]> { return this.call({ method: 'listArtifacts', args: [taskId] }); }
   enqueuePending(id: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }> { return this.call({ method: 'enqueuePending', args: [id, input] }); }
   listPending(id: string): Promise<PendingMessages> { return this.call({ method: 'listPending', args: [id] }); }
   removePending(id: string, pendingId: string): Promise<PendingMessage> { return this.call({ method: 'removePending', args: [id, pendingId] }); }
@@ -91,7 +98,7 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -101,12 +108,13 @@ export async function openSqliteRepository(dataDir: string, runnerId: string, ch
 function changesInventory(operation: Operation, value: unknown): boolean {
   switch (operation.method) {
     // A promotion attempt may pause a blocked queue without creating a task.
-    case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
+    case 'putArtifact': case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
     case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
     case 'continueTask': case 'setTaskSession': case 'createTask': case 'cancelTask':
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
     case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory': return false;

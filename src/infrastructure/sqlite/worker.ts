@@ -14,6 +14,11 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'listArtifactIds': value = db.artifacts.listArtifactIds(); break;
+        case 'putArtifact': value = db.artifacts.putArtifact(...request.args); break;
+        case 'findArtifact': value = db.artifacts.findArtifact(...request.args); break;
+        case 'getArtifact': value = db.artifacts.getArtifact(...request.args); break;
+        case 'listArtifacts': value = db.artifacts.listArtifacts(...request.args); break;
         case 'enqueuePending': value = db.pending.enqueuePending(...request.args); break;
         case 'listPending': value = db.pending.listPending(...request.args); break;
         case 'removePending': value = db.pending.removePending(...request.args); break;

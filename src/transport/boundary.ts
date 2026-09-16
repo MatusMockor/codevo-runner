@@ -9,7 +9,10 @@ const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
 const continueRoute = new RegExp(`^/v1/tasks/${uuid}/continue$`);
 const pendingRoute = new RegExp(`^/v1/tasks/${uuid}/pending$`);
 const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
+const artifactRoute = new RegExp(`^/v1/tasks/${uuid}/artifacts$`);
 const routes = [
+  { pattern: artifactRoute, methods: ['GET', 'POST'] },
+  { pattern: new RegExp(`^/v1/tasks/${uuid}/artifacts/${uuid}/content$`), methods: ['GET'] },
   { pattern: pendingRoute, methods: ['GET', 'POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/pending/resume$`), methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/pending/${uuid}$`), methods: ['DELETE'] },
@@ -57,7 +60,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'POST' &&
-      (request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url)));
+      (request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

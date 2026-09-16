@@ -1,3 +1,4 @@
+import { ARTIFACT_HINT } from '../../domain/artifact-hint.js';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
@@ -81,10 +82,11 @@ export class CliProviderExecutor implements ProviderExecutor {
         '-c', 'approval_policy="never"']), ...request.attachments.flatMap(image => ['-i', image.path]), '--',
         ...(request.resumeSessionId ? [request.resumeSessionId] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json',
+        '--append-system-prompt', ARTIFACT_HINT,
         ...(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash']),
         ...(request.resumeSessionId ? ['--resume', request.resumeSessionId] : [])];
     // Codex exec requires nonempty stdin even when image flags are present.
-    const stdin = this.provider === 'codex' ? (prompt || 'Inspect the attached images.') : `${JSON.stringify({
+    const stdin = this.provider === 'codex' ? `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${prompt || 'Inspect the attached images.'}` : `${JSON.stringify({
       type: 'user', message: { role: 'user', content: [...images, ...(prompt ? [{ type: 'text', text: prompt }] : [])] },
     })}\n`;
     const env: NodeJS.ProcessEnv = {};
