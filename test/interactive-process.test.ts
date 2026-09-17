@@ -63,3 +63,60 @@ test('outbound bound admits full attachment contract after base64 expansion and 
   assert.ok(bytes > 64 * 1024 * 1024);
   assert.ok(bytes < INTERACTIVE_INPUT_BYTES);
 });
+
+
+test('provider-exit completion drains background output and later results after initial success', async () => {
+  const f = await fixture(`process.stdin.resume();console.log(JSON.stringify({phase:'initial'}));
+    process.stdin.on('end',()=>setTimeout(()=>{
+      console.log(JSON.stringify({phase:'background'}));
+      console.log(JSON.stringify({phase:'final'}));
+    },80));`);
+  const phases: unknown[] = [];
+  try {
+    const result = await runInteractiveProcess({ ...f, completion: 'provider-exit' }, {
+      start: async () => {}, receive: async frame => {
+        phases.push(frame.phase);
+        return frame.phase === 'background' ? undefined : { exitCode: 0, sessionId: String(frame.phase) };
+      } });
+    assert.deepEqual(phases, ['initial', 'background', 'final']);
+    assert.deepEqual(result, { exitCode: 0, sessionId: 'final' });
+  } finally { await f.close(); }
+});
+
+for (const reason of ['cancelled', 'execution_timeout'] as const) {
+  test(`provider-exit ${reason} remains authoritative after an early successful result`, async () => {
+    const f = await fixture(`process.stdin.resume();console.log('{}');setInterval(()=>{},1000);`);
+    const abort = new AbortController();
+    let received = false;
+    try {
+      const result = await runInteractiveProcess({ ...f, completion: 'provider-exit', signal: abort.signal, timeoutMs: reason === 'cancelled' ? 15_000 : 3_000 }, {
+        start: async () => {}, receive: async () => {
+          received = true;
+          if (reason === 'cancelled') setTimeout(() => abort.abort(), 20);
+          return { exitCode: 0 };
+        } });
+      assert.equal(received, true);
+      assert.equal(result.error, reason);
+    } finally { await f.close(); }
+  });
+}
+
+test('provider-exit nonzero exit cannot disguise an early success', async () => {
+  const f = await fixture(`process.stdin.resume();console.log('{}');process.stdin.on('end',()=>process.exit(9));`);
+  try {
+    const result = await runInteractiveProcess({ ...f, completion: 'provider-exit' }, {
+      start: async () => {}, receive: async () => ({ exitCode: 0 }) });
+    assert.deepEqual(result, { exitCode: 9, error: 'provider_reported_failure' });
+  } finally { await f.close(); }
+});
+
+test('provider-exit protocol failure remains terminal after an early success', async () => {
+  const f = await fixture(`process.stdin.resume();console.log(JSON.stringify({phase:'initial'}));
+    process.stdin.on('end',()=>console.log(JSON.stringify({phase:'failed'})));setInterval(()=>{},1000);`);
+  try {
+    const result = await runInteractiveProcess({ ...f, completion: 'provider-exit' }, {
+      start: async () => {}, receive: async frame => frame.phase === 'initial'
+        ? { exitCode: 0 } : { exitCode: null, error: 'provider_question_cancelled' } });
+    assert.deepEqual(result, { exitCode: null, error: 'provider_question_cancelled' });
+  } finally { await f.close(); }
+});

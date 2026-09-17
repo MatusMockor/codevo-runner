@@ -11,10 +11,13 @@ export const LIMITS = Object.freeze({
 export type MediaType = 'image/png' | 'image/jpeg';
 export type MessagePart = Readonly<{ type: 'text'; text: string }> |
   Readonly<{ type: 'attachment'; attachmentId: string }>;
+export type TaskIsolation = 'in-place' | 'worktree';
 export type CreateTask = Readonly<{
+  isolation?: TaskIsolation;
   instructions?: InstructionSnapshot; idempotencyKey: string; provider: 'codex' | 'claude'; launch?: AgentLaunchOptions; parts: readonly MessagePart[];
 }>;
 export type Task = Readonly<{
+  isolation?: TaskIsolation;
   instructions?: InstructionSnapshot; id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
   launch?: AgentLaunchOptions; status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;

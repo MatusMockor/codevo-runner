@@ -11,7 +11,17 @@ const pendingRoute = new RegExp(`^/v1/tasks/${uuid}/pending$`);
 const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
 const artifactRoute = new RegExp(`^/v1/tasks/${uuid}/artifacts$`);
 const answerRoute = new RegExp(`^/v1/tasks/${uuid}/questions/${uuid}/answer$`);
+const surfaceRoute = /^\/v1\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\/surface\/(tree|read|write|history|commit-files|commit-diff)$/;
+const terminalBase = '/v1/projects/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}/terminals';
+const terminalOpenRoute = new RegExp(`^${terminalBase}$`);
+const terminalActionRoute = new RegExp(`^${terminalBase}/${uuid}/(input|resize)(?:\\?taskId=${uuid})?$`);
 const routes = [
+  { pattern: /^\/v1\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\/surface\/capabilities$/, methods: ['GET'] },
+  { pattern: terminalOpenRoute, methods: ['POST'] },
+  { pattern: terminalActionRoute, methods: ['POST'] },
+  { pattern: new RegExp(`^${terminalBase}/${uuid}(?:\\?(?:after=[0-9]+(?:&taskId=${uuid})?|taskId=${uuid}(?:&after=[0-9]+)?))?$`), methods: ['GET'] },
+  { pattern: new RegExp(`^${terminalBase}/${uuid}(?:\\?taskId=${uuid})?$`), methods: ['DELETE'] },
+  { pattern: surfaceRoute, methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/questions$`), methods: ['GET'] },
   { pattern: answerRoute, methods: ['POST'] },
   { pattern: artifactRoute, methods: ['GET', 'POST'] },
@@ -57,13 +67,14 @@ export class RequestBoundary implements NestMiddleware {
       return this.discovery(request, response, next);
     if (!this.authorized(request.headers.authorization)) return send(response, 401, { error: 'unauthorized' });
     if (!this.matchesIdentity(request, response)) return;
-    const route = routes.find(candidate => candidate.pattern.test(request.url));
+    const matching = routes.filter(candidate => candidate.pattern.test(request.url));
+    const route = matching.find(candidate => candidate.methods.includes(request.method)) ?? matching[0];
     if (!route) return send(response, 404, { error: 'not_found' });
     if (!route.methods.includes(request.method)) return send(response, 405, { error: 'method_not_allowed' });
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'POST' &&
-      (request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
+      (terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

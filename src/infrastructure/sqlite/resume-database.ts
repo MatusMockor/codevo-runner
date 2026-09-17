@@ -98,7 +98,7 @@ export class ResumeDatabase {
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const ref of refs) this.dependencies.getAttachment(ref);
       const root = parent.conversationId ?? parent.id;
-      const task: Task = { ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
+      const task: Task = { ...(parent.isolation === undefined ? {} : { isolation: parent.isolation }), ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const ref of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, ref);
       this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(task.id);

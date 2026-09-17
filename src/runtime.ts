@@ -1,3 +1,8 @@
+import { FileSystemSurfaceOperations } from './infrastructure/projects/surface-operations.js';
+import { TerminalService } from './application/terminal-service.js';
+import { NodePtyFactory } from './infrastructure/terminal/node-pty.js';
+import { SurfaceService } from './application/surface-service.js';
+import { RegisteredSurfaceWorkspaceResolver } from './infrastructure/projects/surface-workspace.js';
 import { executionTimeoutMs } from './domain/execution-policy.js';
 import { QuestionService } from './application/question-service.js';
 import { FileInstructionWorkspace } from './infrastructure/files/instruction-workspace.js';
@@ -41,6 +46,8 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     await repository.interruptClones();
     const attachments = await createAttachmentStore(dataDir, runnerId, repository);
     let execution: ExecutionService | undefined;
+    let surfaces: SurfaceService | undefined;
+    let terminals: TerminalService | undefined;
     let artifacts: ArtifactService | undefined;
     let clones: ProjectCloneService | undefined;
     try {
@@ -48,6 +55,10 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         const configured = new ConfiguredProjectRegistry(options.projects);
         clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured);
         await clones.initialize();
+        const surfaceResolver = new RegisteredSurfaceWorkspaceResolver(
+          new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), repository, repository);
+        surfaces = new SurfaceService(surfaceResolver, new FileSystemSurfaceOperations());
+        terminals = new TerminalService(surfaceResolver, new NodePtyFactory());
         const cliOptions = { timeoutMs, interactiveQuestions: true, sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
         artifacts = new ArtifactService(repository, repository,
           new WorkspaceArtifactReader(repository, repository, new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), join(dataDir, 'workspaces')),
@@ -62,20 +73,27 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       }
     } catch (error) {
       try {
-        try { await clones?.close(); }
-        finally { await execution?.close(); }
+        try { await terminals?.close(); }
+        finally {
+          try { await clones?.close(); }
+          finally { await execution?.close(); }
+        }
       } finally { await attachments.close(); }
       throw error;
     }
     let closing: Promise<void> | undefined;
     return {
+      surfaces, terminals,
       questions: execution ? questions : undefined,
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts,
       close(): Promise<void> {
         closing ??= (async () => {
           try {
-            try { await clones?.close(); }
-            finally { await execution?.close(); }
+            try { await terminals?.close(); }
+            finally {
+              try { await clones?.close(); }
+              finally { await execution?.close(); }
+            }
           } finally {
             try { await attachments.close(); }
             finally { await repository.close(); }

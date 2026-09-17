@@ -1,0 +1,11 @@
+[Unit]
+Description=Check native provider CLI updates hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Unit=codevo-provider-updates.service
+
+[Install]
+WantedBy=timers.target

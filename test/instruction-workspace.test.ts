@@ -146,3 +146,69 @@ fsTest('uppercase Markdown imports remain managed across resumed reconciliation'
   await f.apply({});
   await assert.rejects(readFile(join(f.cwd,'docs/RULES.MD')), {code:'ENOENT'});
 });
+
+fsTest('in-place ownership follows checkout across conversations and service restarts', async t => {
+  const f = await fixture(t);
+  const apply = (service: FileInstructionWorkspace, files: Record<string, string>) =>
+    service.apply(randomUUID(), f.cwd, snapshot(files), new AbortController().signal, 'in-place');
+  await apply(f.service, { 'CLAUDE.local.md': 'first', 'remove.md': 'old' });
+  await apply(new FileInstructionWorkspace(f.data), { 'CLAUDE.local.md': 'second' });
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'second');
+  await assert.rejects(readFile(join(f.cwd, 'remove.md')), { code: 'ENOENT' });
+  await apply(f.service, {});
+  await assert.rejects(readFile(join(f.cwd, 'CLAUDE.local.md')), { code: 'ENOENT' });
+});
+
+fsTest('in-place never adopts matching user files or removes them on an empty snapshot', async t => {
+  const f = await fixture(t);
+  const apply = (files: Record<string, string>) => f.service.apply(randomUUID(), f.cwd, snapshot(files), new AbortController().signal, 'in-place');
+  await writeFile(join(f.cwd, 'CLAUDE.md'), 'user rules');
+  await apply({ 'CLAUDE.md': 'user rules', 'CLAUDE.local.md': 'managed' });
+  await apply({});
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.md'), 'utf8'), 'user rules');
+  await assert.rejects(readFile(join(f.cwd, 'CLAUDE.local.md')), { code: 'ENOENT' });
+  await assert.rejects(apply({ 'CLAUDE.md': 'different' }), { code: 'conflict' });
+});
+
+fsTest('in-place rejects replacing pristine tracked instructions before writing other files', async t => {
+  const f = await fixture(t);
+  const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: f.cwd });
+  await git('init');
+  await writeFile(join(f.cwd, 'CLAUDE.md'), 'committed');
+  await git('add', 'CLAUDE.md');
+  await git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+  await assert.rejects(f.service.apply(f.id, f.cwd, snapshot({ 'new.md': 'new', 'CLAUDE.md': 'replacement' }), new AbortController().signal, 'in-place'), { code: 'conflict' });
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.md'), 'utf8'), 'committed');
+  await assert.rejects(readFile(join(f.cwd, 'new.md')), { code: 'ENOENT' });
+});
+
+fsTest('in-place root replacement does not inherit old managed file ownership', async t => {
+  const f = await fixture(t);
+  const apply = (files: Record<string, string>) => f.service.apply(f.id, f.cwd, snapshot(files), new AbortController().signal, 'in-place');
+  await apply({ 'CLAUDE.md': 'original' });
+  await fs.rename(f.cwd, join(f.base, 'old-root'));
+  await mkdir(f.cwd);
+  await writeFile(join(f.cwd, 'CLAUDE.md'), 'original');
+  await apply({});
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.md'), 'utf8'), 'original');
+  await assert.rejects(apply({ 'CLAUDE.md': 'replacement' }), { code: 'conflict' });
+});
+
+test('non-Linux in-place checkout allows only empty instruction reconciliation', { skip: process.platform === 'linux' }, async t => {
+  const f = await fixture(t);
+  await f.service.apply(f.id, f.cwd, snapshot({}), new AbortController().signal, 'in-place');
+  await assert.rejects(f.service.apply(f.id, f.cwd, snapshot({ 'CLAUDE.md': 'new' }), new AbortController().signal, 'in-place'), { code: 'storage_unavailable' });
+  await assert.rejects(f.service.apply(f.id, f.cwd, snapshot({}), new AbortController().signal), { code: 'storage_unavailable' });
+  const abort = new AbortController(); abort.abort();
+  await assert.rejects(f.service.apply(f.id, f.cwd, snapshot({}), abort.signal, 'in-place'), { name: 'AbortError' });
+});
+
+fsTest('in-place refuses root replaced after workspace preparation before creating sync state', async t => {
+  const f = await fixture(t);
+  const expectedIdentity = await fs.lstat(f.cwd);
+  await fs.rename(f.cwd, join(f.base, 'prepared-root'));
+  await mkdir(f.cwd);
+  await assert.rejects(f.service.apply(f.id, f.cwd, snapshot({ 'CLAUDE.md': 'new' }), new AbortController().signal, 'in-place', expectedIdentity), { code: 'conflict' });
+  await assert.rejects(readFile(join(f.cwd, 'CLAUDE.md')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.data, 'instruction-manifests')), { code: 'ENOENT' });
+});

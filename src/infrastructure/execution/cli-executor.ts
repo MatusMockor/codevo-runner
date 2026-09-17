@@ -103,15 +103,18 @@ export class CliProviderExecutor implements ProviderExecutor {
     })}\n`;
     const env: NodeJS.ProcessEnv = {};
     for (const key of ENVIRONMENT_KEYS) if (process.env[key]) env[key] = process.env[key];
+    // The CLI's default 10-minute background wait can terminate unfinished agents.
+    // Runner cancellation and the finite execution deadline remain authoritative.
+    if (this.provider === 'claude') env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = '0';
     if (this.interactiveQuestions) {
-      const plan = { executable: this.executable, cwd: request.cwd, env, signal: request.signal, timeoutMs: this.timeoutMs, request, prompt };
+      const plan = { executable: this.executable, cwd: request.cwd, ...(request.cwdIdentity ? { cwdIdentity: request.cwdIdentity } : {}), env, signal: request.signal, timeoutMs: this.timeoutMs, request, prompt };
       return this.provider === 'codex'
         ? executeCodexInteractive({ ...plan, sandbox: this.sandbox })
         : executeClaudeInteractive({ ...plan, args, images });
     }
     const parser = new ProviderOutputParser(this.provider, request.resumeSessionId);
     let sessionPublished = false;
-    const result = await runProcess({ executable: this.executable, args, cwd: request.cwd, stdin, env,
+    const result = await runProcess({ executable: this.executable, args, cwd: request.cwd, ...(request.cwdIdentity ? { cwdIdentity: request.cwdIdentity } : {}), stdin, env,
       signal: request.signal, timeoutMs: this.timeoutMs, ...(this.outputBytes === undefined ? {} : { outputBytes: this.outputBytes }), onOutput: async (channel, text) => {
         if (channel === 'stdout') parser.push(text);
         const sessionId = parser.currentSessionId();

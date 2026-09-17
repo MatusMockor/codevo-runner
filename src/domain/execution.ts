@@ -14,6 +14,7 @@ export type ExecutionRequest = Readonly<{
   onSession?: (sessionId: string) => Promise<void>;
   attachments: readonly StagedExecutionAttachment[];
   cwd: string;
+  cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   signal: AbortSignal;
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;

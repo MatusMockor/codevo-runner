@@ -1,11 +1,12 @@
 import { constants } from 'node:fs';
-import { mkdir, realpath, lstat, writeFile, readFile, open } from 'node:fs/promises';
+import { mkdir, realpath, lstat, writeFile, open } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { ProjectRegistry, ProjectWorkspace } from '../../application/execution-ports.js';
 import { isId, RunnerError } from '../../domain/contracts.js';
 import type { RegisteredProject } from '../../domain/execution.js';
 
 import { git } from './git-command.js';
+import { captureWorkspace, loadMetadata, saveMetadata, validateWorkspace } from './workspace-metadata.js';
 import { listWorkspaceFiles, readWorkspaceFileDiff } from './workspace-files.js';
 import { validateWorkspacePath } from '../../domain/workspace-files.js';
 
@@ -32,17 +33,21 @@ export class ConfiguredProjectRegistry implements ProjectRegistry {
 export class GitProjectWorkspace implements ProjectWorkspace {
   private readonly root: string;
   private readonly baselines: string;
+  private readonly metadata: string;
   private reviews = 0;
   constructor(dataDir: string) {
     this.root = resolve(dataDir, 'workspaces');
     this.baselines = resolve(dataDir, 'workspace-baselines');
+    this.metadata = resolve(dataDir, 'workspace-metadata');
   }
 
-  async prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<string> {
+  async prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation: 'in-place' | 'worktree' = 'worktree'): Promise<string> {
     const cwd = this.taskPath(taskId);
+    if (isolation !== 'in-place' && isolation !== 'worktree') throw new RunnerError('invalid_input');
     signal?.throwIfAborted();
-    const source = await realpath(project.path);
-    const top = (await git(source, ['rev-parse', '--show-toplevel'], signal)).text.trim();
+    const metadata = await captureWorkspace(project, isolation, signal);
+    const source = metadata.source;
+    const top = (await git(source, ['rev-parse', '--show-toplevel'], signal, metadata.sourceIdentity)).text.trim();
     if (await realpath(top) !== source) throw new Error('Registered project must be a Git working tree root');
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     if ((await lstat(this.root)).isSymbolicLink()) throw new Error('Workspace root must not contain symlinks');
@@ -52,25 +57,33 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }
-    const base = (await git(source, ['rev-parse', '--verify', 'HEAD'], signal)).text.trim();
+    const base = (await git(source, ['rev-parse', '--verify', 'HEAD'], signal, metadata.sourceIdentity)).text.trim();
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new Error('Invalid Git revision');
     await mkdir(this.baselines, { recursive: true, mode: 0o700 });
     if ((await lstat(this.baselines)).isSymbolicLink()) throw new Error('Baseline root must not contain symlinks');
     await writeFile(join(this.baselines, taskId), base, { flag: 'wx', mode: 0o600 });
-    // Detached HEAD keeps task edits/commits away from the source branch.
-    await git(source, ['worktree', 'add', '--detach', '--', cwd, base], signal);
+    await validateWorkspace(metadata, project, signal);
+    await saveMetadata(this.metadata, taskId, metadata);
+    // In-place deliberately preserves every tracked and untracked source edit.
+    if (isolation === 'worktree') await git(source, ['worktree', 'add', '--detach', '--', cwd, base], signal, metadata.sourceIdentity);
+    await validateWorkspace(metadata, project, signal);
     signal?.throwIfAborted();
-    return cwd;
+    return isolation === 'in-place' ? source : cwd;
   }
 
   async resume(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<string> {
-    const cwd = this.taskPath(workspaceTaskId);
+    let cwd = this.taskPath(workspaceTaskId);
+    const metadata = await loadMetadata(this.metadata, workspaceTaskId);
+    if (metadata) {
+      await validateWorkspace(metadata, project, signal);
+      if (metadata.mode === 'in-place') cwd = metadata.source;
+    }
     signal?.throwIfAborted();
     const source = await realpath(project.path);
     if ((await lstat(this.root)).isSymbolicLink() || (await lstat(this.baselines)).isSymbolicLink() ||
         !(await lstat(cwd)).isDirectory() || (await lstat(cwd)).isSymbolicLink()) throw new RunnerError('conflict');
     const canonicalCwd = await realpath(cwd);
-    if (canonicalCwd !== join(await realpath(this.root), workspaceTaskId)) throw new RunnerError('conflict');
+    if (metadata?.mode !== 'in-place' && canonicalCwd !== join(await realpath(this.root), workspaceTaskId)) throw new RunnerError('conflict');
     const top = (await git(cwd, ['rev-parse', '--show-toplevel'], signal)).text.trim();
     if (await realpath(top) !== canonicalCwd) throw new RunnerError('conflict');
     const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal)).text.trim();
@@ -81,22 +94,43 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     const base = await readBaseline(basePath);
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('conflict');
     await git(cwd, ['cat-file', '-e', `${base}^{commit}`], signal);
+    if (metadata) await validateWorkspace(metadata, project, signal);
     signal?.throwIfAborted();
     return cwd;
   }
 
-  async diff(taskId: string): Promise<{ patch: string; truncated: boolean; untrackedFiles: readonly string[] }> {
-    const cwd = this.taskPath(taskId);
+  async identity(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<{ dev: number; ino: number }> {
+    this.taskPath(taskId);
+    const metadata = await loadMetadata(this.metadata, taskId);
+    const cwd = await this.resume(project, taskId, signal);
+    const before = await lstat(cwd);
+    await this.resume(project, taskId, signal);
+    const after = await lstat(cwd);
+    const expected = metadata?.mode === 'in-place' ? metadata.sourceIdentity : before;
+    if (!before.isDirectory() || before.isSymbolicLink() || !after.isDirectory() || after.isSymbolicLink() ||
+        before.dev !== expected.dev || before.ino !== expected.ino || after.dev !== expected.dev || after.ino !== expected.ino)
+      throw new RunnerError('conflict');
+    signal?.throwIfAborted();
+    return { dev: expected.dev, ino: expected.ino };
+  }
+
+  async diff(taskId: string, registeredProject?: RegisteredProject): Promise<{ patch: string; truncated: boolean; untrackedFiles: readonly string[] }> {
+    let cwd = this.taskPath(taskId);
+    const metadata = await loadMetadata(this.metadata, taskId);
+    const project = registeredProject ?? (metadata ? { id: metadata.projectId, name: metadata.projectId, path: metadata.source } : undefined);
+    if (project) cwd = await this.resume(project, taskId);
     try {
       if (!(await lstat(cwd)).isDirectory()) throw new RunnerError('not_found');
     } catch { throw new RunnerError('not_found'); }
-    const base = await readFile(join(this.baselines, taskId), 'utf8');
+    const base = await readBaseline(join(this.baselines, taskId));
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('storage_unavailable');
-    const patch = await git(cwd, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', base, '--']);
-    const untracked = await git(cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--']);
+    const identity = project ? await this.identity(project, taskId) : await lstat(cwd);
+    const patch = await git(cwd, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', base, '--'], undefined, identity);
+    const untracked = await git(cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--'], undefined, identity);
     const filenames = untracked.text.split('\0');
     // A truncated last name is not a real filename.
     filenames.pop();
+    if (project) await this.resume(project, taskId);
     return { patch: patch.text, truncated: patch.truncated || untracked.truncated, untrackedFiles: filenames };
   }
 

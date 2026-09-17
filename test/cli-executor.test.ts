@@ -31,7 +31,7 @@ async function fixture(script: string) {
 for (const provider of ['codex', 'claude'] as const) {
   test(`${provider} sends literal prompts/images and executes in assigned workspace`, async () => {
     const f = await fixture(`let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
-      console.log(JSON.stringify({args:process.argv.slice(2),stdin,cwd:process.cwd(),secret:process.env.CODEVO_RUNNER_TOKEN,type:'diagnostic'}));
+      console.log(JSON.stringify({args:process.argv.slice(2),stdin,cwd:process.cwd(),secret:process.env.CODEVO_RUNNER_TOKEN,bgWait:process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS,type:'diagnostic'}));
       ${providerSuccess(provider)}
     });`);
     try {
@@ -46,6 +46,7 @@ for (const provider of ['codex', 'claude'] as const) {
       const observed = JSON.parse(f.output().split('\n')[0]!);
       assert.equal(observed.cwd, await realpath(f.cwd));
       assert.equal(observed.secret, undefined);
+      assert.equal(observed.bgWait, provider === 'claude' ? '0' : undefined);
       if (provider === 'codex') {
         assert.deepEqual(observed.args.slice(-4), ['-i', path, '--', '-']);
         assert.ok(observed.stdin.endsWith('[User request]\ninspect $(touch bad); --dangerous'));
@@ -306,3 +307,36 @@ for (const provider of ['codex', 'claude'] as const) {
     } finally { await f.close(); }
   });
 }
+
+
+test('interactive Claude waits for background completion after an early result', async () => {
+  const f = await fixture(`
+    const session = '${sessionId}';
+    const emit = frame => console.log(JSON.stringify(frame));
+    let input = '';
+    process.stdin.on('data', chunk => {
+      input += chunk;
+      let index;
+      while ((index = input.indexOf('\\n')) >= 0) {
+        const frame = JSON.parse(input.slice(0,index)); input = input.slice(index+1);
+        if (frame.type === 'control_request') emit({type:'control_response',response:{subtype:'success',request_id:'codevo-initialize'}});
+        if (frame.type === 'user') {
+          if (process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS !== '0') process.exit(8);
+          emit({type:'system',subtype:'init',session_id:session});
+          emit({type:'result',subtype:'success',is_error:false,session_id:session,result:''});
+        }
+      }
+    });
+    process.stdin.on('end',()=>setTimeout(()=>{
+      emit({type:'system',subtype:'task_notification',status:'completed',task_id:'background-1'});
+      emit({type:'result',subtype:'success',is_error:false,session_id:session,result:'Final background answer'});
+    },100));
+  `);
+  try {
+    const result = await new CliProviderExecutor('claude', { executable: f.executable, interactiveQuestions: true, timeoutMs: 15_000 })
+      .execute({ ...f.request, task: { ...f.request.task, provider: 'claude' } });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.error, undefined);
+    assert.match(f.output(), /Final background answer/);
+  } finally { await f.close(); }
+});

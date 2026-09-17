@@ -1,0 +1,11 @@
+[Unit]
+Description=Update native Codex and Claude Code CLIs
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+ExecStart=/usr/bin/python3 %h/Developer/codevo-runner/scripts/update-provider-clis.py
+TimeoutStartSec=12min
+TimeoutStopSec=10s
+KillMode=control-group
+UMask=0077

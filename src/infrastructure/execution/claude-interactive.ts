@@ -117,5 +117,5 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   };
 }
 export function executeClaudeInteractive(plan: ClaudePlan): Promise<ExecutionResult> {
-  return runInteractiveProcess({ ...plan, args: [...plan.args, '--permission-prompt-tool', 'stdio'], onOutput: plan.request.onOutput }, createClaudeProtocol(plan));
+  return runInteractiveProcess({ ...plan, completion: 'provider-exit', args: [...plan.args, '--permission-prompt-tool', 'stdio'], onOutput: plan.request.onOutput }, createClaudeProtocol(plan));
 }

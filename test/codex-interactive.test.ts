@@ -192,3 +192,30 @@ test('canonical assistant frame retains cross-boundary artifacts and excludes fe
     assert.equal(collector.isComplete(), true);
   }
 });
+
+
+test('resume ignores historical usage before new turn ownership without retaining old totals', async () => {
+  const f = fixture({ resumeSessionId: thread });
+  await f.protocol.start(f.send);
+  await f.receive({ id: 1, result: {} });
+  const usage = { method: 'thread/tokenUsage/updated', params: { threadId: thread, turnId: 'previous-turn', tokenUsage: { last: { inputTokens: 999, outputTokens: 777 } } } };
+  await f.receive(usage);
+  await f.receive({ id: 2, result: { thread: { id: thread } } });
+  await f.receive(usage);
+  await f.receive({ id: 3, result: { turn: { id: turn } } });
+  await f.receive({ method: 'turn/completed', params: { threadId: thread, turn: { id: turn, status: 'completed' } } });
+  const completed = JSON.parse(f.output().trim().split('\n').at(-1)!);
+  assert.deepEqual(completed, { type: 'turn.completed' });
+});
+
+test('resume still rejects foreign bootstrap usage and stale usage after turn ownership', async () => {
+  const f = fixture({ resumeSessionId: thread });
+  await f.protocol.start(f.send);
+  await f.receive({ id: 1, result: {} });
+  await assert.rejects(f.receive({ method: 'thread/tokenUsage/updated', params: { threadId: 'foreign', turnId: 'old' } }), /owner_mismatch/);
+  await f.receive({ id: 2, result: { thread: { id: thread } } });
+  await f.receive({ method: 'turn/started', params: { threadId: thread, turn: { id: turn } } });
+  await assert.rejects(f.receive({ method: 'thread/tokenUsage/updated', params: { threadId: thread, turnId: 'old' } }), /owner_mismatch/);
+  await f.receive({ id: 3, result: { turn: { id: turn } } });
+  await assert.rejects(f.receive({ method: 'thread/tokenUsage/updated', params: { threadId: thread, turnId: 'old' } }), /owner_mismatch/);
+});

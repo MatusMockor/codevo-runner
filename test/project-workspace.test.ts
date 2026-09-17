@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, rename, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -113,3 +113,57 @@ for (const redirection of ['>/dev/null 2>&1', '>&2']) {
     assert.fail('Git filter descendant remains alive after prepare resolved');
   });
 }
+
+
+test('in-place preserves dirty and untracked source files, resumes after restart and reviews original baseline', async t => {
+  const { workspace, project, source, root, git } = await fixture(t);
+  await writeFile(join(source, 'tracked.txt'), 'dirty before task\n');
+  await writeFile(join(source, 'keep.txt'), 'private local file\n');
+  const taskId = randomUUID();
+  assert.equal(await workspace.prepare(project, taskId, undefined, 'in-place'), await realpath(source));
+  assert.equal(await readFile(join(source, 'tracked.txt'), 'utf8'), 'dirty before task\n');
+  assert.equal(await readFile(join(source, 'keep.txt'), 'utf8'), 'private local file\n');
+  await git('commit', '-am', 'task edit');
+  const restarted = new GitProjectWorkspace(join(root, 'data'));
+  assert.equal(await restarted.resume(project, taskId), await realpath(source));
+  assert.match((await restarted.diff(taskId)).patch, /dirty before task/);
+  const files = await restarted.files(project, taskId);
+  assert.ok(JSON.stringify(files).includes('tracked.txt'));
+  assert.ok(JSON.stringify(await restarted.fileDiff(project, taskId, 'tracked.txt')).includes('dirty before task'));
+  await assert.rejects(restarted.prepare(project, taskId, undefined, 'in-place'));
+});
+
+test('in-place rejects changed project registration and replaced repository identity', async t => {
+  const { workspace, project, source } = await fixture(t);
+  const taskId = randomUUID();
+  await workspace.prepare(project, taskId, undefined, 'in-place');
+  await assert.rejects(workspace.resume({ ...project, id: 'other' }, taskId), /conflict/);
+  await assert.rejects(workspace.diff(taskId, { ...project, id: 'other' }), /conflict/);
+  await assert.rejects(workspace.identity({ ...project, id: 'other' }, taskId), /conflict/);
+  await rename(source, source + '-old');
+  await mkdir(source);
+  await exec('git', ['init'], { cwd: source });
+  await assert.rejects(workspace.resume(project, taskId), /conflict/);
+  await assert.rejects(workspace.diff(taskId), /conflict/);
+  await assert.rejects(workspace.identity(project, taskId), /conflict/);
+});
+
+test('legacy workspace without metadata continues as worktree', async t => {
+  const { workspace, project, root } = await fixture(t);
+  const taskId = randomUUID();
+  const cwd = await workspace.prepare(project, taskId);
+  await rm(join(root, 'data', 'workspace-metadata', taskId));
+  assert.equal(await workspace.resume(project, taskId), cwd);
+});
+
+test('workspace metadata rejects oversized and symlink records', async t => {
+  const { workspace, project, root } = await fixture(t);
+  const taskId = randomUUID();
+  await workspace.prepare(project, taskId, undefined, 'in-place');
+  const record = join(root, 'data', 'workspace-metadata', taskId);
+  await writeFile(record, ' '.repeat(17000));
+  await assert.rejects(workspace.resume(project, taskId), /conflict/);
+  await rm(record);
+  await symlink(join(root, 'data', 'workspace-baselines', taskId), record);
+  await assert.rejects(workspace.resume(project, taskId));
+});

@@ -54,6 +54,12 @@ export class WorkspaceArtifactReader implements ArtifactWorkspace {
   }
   async normalize(taskId: string, path: string) {
     if (!isAbsolute(path)) return validateWorkspacePath(path.replace(/^\.\//, ''));
+    const task = await this.tasks.getTask(taskId);
+    if (task.isolation === 'in-place') {
+      const cwd = await this.root(taskId);
+      const lexical = relative(cwd, path);
+      return validateWorkspacePath(lexical.startsWith('../') ? relative(await realpath(cwd), path) : lexical);
+    }
     const { workspaceTaskId } = await this.executions.getTaskSession(taskId);
     const cwd = join(this.workspaceRoot, workspaceTaskId);
     const lexical = relative(cwd, path);

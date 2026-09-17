@@ -118,7 +118,7 @@ export class ExecutionService implements ExecutionApplication {
   async diff(taskId: string) {
     const task = await this.tasks.getTask(validateId(taskId));
     if (!task.projectId) throw new RunnerError('conflict');
-    return this.workspaces.diff((await this.executions.getTaskSession(taskId)).workspaceTaskId);
+    return this.workspaces.diff((await this.executions.getTaskSession(taskId)).workspaceTaskId, await this.registry.get(task.projectId));
   }
 
   async files(taskId: string) {
@@ -198,20 +198,24 @@ export class ExecutionService implements ExecutionApplication {
       if (task.parentTaskId && !session.sessionId) throw new RunnerError('conflict');
       const cwd = task.parentTaskId
         ? await this.workspaces.resume(project, session.workspaceTaskId, abort.signal)
-        : await this.workspaces.prepare(project, task.id, abort.signal);
+        : await this.workspaces.prepare(project, task.id, abort.signal, task.isolation);
       abort.signal.throwIfAborted();
-      if (task.instructions !== undefined) {
+      const cwdIdentity = await this.workspaces.identity?.(project, session.workspaceTaskId, abort.signal);
+      if (task.isolation === 'in-place' && !cwdIdentity) throw new RunnerError('conflict');
+      if (task.instructions !== undefined || task.isolation === 'in-place') {
         syncingInstructions = true;
         if (!this.instructions) throw new RunnerError('invalid_input');
-        await this.instructions.apply(session.workspaceTaskId, cwd, task.instructions, abort.signal);
+        await this.instructions.apply(session.workspaceTaskId, cwd, task.instructions ?? { version: 1, files: [] }, abort.signal, task.isolation, cwdIdentity);
         syncingInstructions = false;
         abort.signal.throwIfAborted();
       }
       const ids = task.parts.flatMap((part) => part.type === 'attachment' ? [part.attachmentId] : []);
       if (ids.length > 0) inputs = await this.attachments!.stage(task.id, ids);
       abort.signal.throwIfAborted();
+      if (task.isolation === 'in-place') await this.workspaces.resume(project, session.workspaceTaskId, abort.signal);
+      abort.signal.throwIfAborted();
       const artifactReferences = new ProviderArtifactReferences(task.provider);
-      const result = await executor.execute({ task, cwd, ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
+      const result = await executor.execute({ task, cwd, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
         onSession: async (sessionId) => {
           abort.signal.throwIfAborted();

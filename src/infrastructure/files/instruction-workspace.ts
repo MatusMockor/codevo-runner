@@ -131,14 +131,21 @@ function parseManifest(value: unknown, root: string): Manifest {
 export class FileInstructionWorkspace {
   constructor(private readonly dataDir: string) {}
 
-  async apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal): Promise<void> {
+  async apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal, isolation: 'in-place' | 'worktree' = 'worktree', expectedIdentity?: Readonly<{ dev: number; ino: number }>): Promise<void> {
     signal.throwIfAborted();
+    if (isolation !== 'in-place' && isolation !== 'worktree') throw new RunnerError('invalid_input');
     snapshot = parseInstructionSnapshot(snapshot);
-    if (process.platform !== 'linux') throw new RunnerError('storage_unavailable');
+    // This adapter cannot materialize rules on these platforms, so an empty shared-checkout
+    // reconciliation has no owned state to remove. Keep nonempty requests fail-closed.
+    if (process.platform !== 'linux') {
+      if (isolation === 'in-place' && snapshot.files.length === 0) return;
+      throw new RunnerError('storage_unavailable');
+    }
     if (!isId(workspaceTaskId)) throw new RunnerError('invalid_input');
     const root = await realpath(cwd);
     if (resolve(cwd) !== root) conflict();
     const rootIdentity = await lstat(root);
+    if (expectedIdentity && (rootIdentity.dev !== expectedIdentity.dev || rootIdentity.ino !== expectedIdentity.ino)) conflict();
     if (active.has(root)) throw new RunnerError('busy');
     active.add(root);
     let workspace: FileHandle | undefined;
@@ -158,25 +165,34 @@ export class FileInstructionWorkspace {
       if (dataRoot === root || dataRoot.startsWith(root + sep)) conflict();
       storage = await openDirectory(dataRoot);
       manifests = await parentHandle(storage, 'instruction-manifests/entry', true);
-      const manifestPath = `${workspaceTaskId}.json`;
+      // Shared checkouts share ownership across conversations, but never across root replacement.
+      const manifestPath = isolation === 'in-place'
+        ? `checkout-${digest(JSON.stringify([root, String(openedRoot.dev), String(openedRoot.ino)]))}.json`
+        : `${workspaceTaskId}.json`;
       let previous: Manifest = { version: 1, root, files: {} };
       const manifestBytes = await readRegular(manifests, manifestPath, 256 * 1024);
       if (manifestBytes !== undefined) previous = parseManifest(JSON.parse(manifestBytes.toString('utf8')), root);
       const all = new Set([...Object.keys(previous.files), ...Object.keys(previous.pending ?? {}), ...contents.keys()]);
       const observed = new Map<string, string | undefined>();
+      const borrowed = new Set<string>();
       for (const path of all) {
         signal.throwIfAborted();
         const current = await fileHash(workspace, path);
         const owned = Object.hasOwn(previous.files, path) || Object.hasOwn(previous.pending ?? {}, path);
         if (owned) {
           if (current !== previous.files[path] && (previous.pending === undefined || current !== previous.pending[path])) conflict();
-        } else if (current !== undefined && current !== next[path] && !await pristineTracked(root, path, current, signal)) conflict();
+        } else if (current !== undefined) {
+          if (current !== next[path] && (isolation === 'in-place' || !await pristineTracked(root, path, current, signal))) conflict();
+          // Identical user files are usable, but must never become ours to remove or overwrite.
+          if (isolation === 'in-place') borrowed.add(path);
+        }
         observed.set(path, current);
       }
       signal.throwIfAborted();
       // The durable journal permits only exact old/new bytes after interruption.
-      const baseline = Object.fromEntries([...observed].filter((entry): entry is [string, string] => entry[1] !== undefined));
-      await durableWrite(manifests, manifestPath, JSON.stringify({ version: 1, root, files: baseline, pending: next }));
+      const baseline = Object.fromEntries([...observed].filter((entry): entry is [string, string] => entry[1] !== undefined && !borrowed.has(entry[0])));
+      const managedNext = Object.fromEntries(Object.entries(next).filter(([path]) => !borrowed.has(path)));
+      await durableWrite(manifests, manifestPath, JSON.stringify({ version: 1, root, files: baseline, pending: managedNext }));
       for (const path of all) {
         signal.throwIfAborted();
         const identity = await lstat(root);
@@ -198,7 +214,7 @@ export class FileInstructionWorkspace {
       const finalIdentity = await lstat(cwd);
       if (finalIdentity.dev !== rootIdentity.dev || finalIdentity.ino !== rootIdentity.ino ||
           await realpath(cwd) !== root) conflict();
-      await durableWrite(manifests, manifestPath, JSON.stringify({ version: 1, root, files: next }));
+      await durableWrite(manifests, manifestPath, JSON.stringify({ version: 1, root, files: managedNext }));
       const committedIdentity = await lstat(cwd);
       if (committedIdentity.dev !== rootIdentity.dev || committedIdentity.ino !== rootIdentity.ino ||
           await realpath(cwd) !== root) conflict();

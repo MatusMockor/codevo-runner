@@ -2,7 +2,7 @@ import type { InstructionSnapshot } from '../domain/instructions.js';
 import type { PendingMessage, PendingMessages } from '../domain/pending-message.js';
 import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
-import type { Task } from '../domain/contracts.js';
+import type { Task, TaskIsolation } from '../domain/contracts.js';
 import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
 
 /** Each state change and its event must commit atomically. Terminal state wins races. */
@@ -30,8 +30,9 @@ export interface ProjectRegistry {
 }
 /** Creates a task-owned checkout and returns its server-local working directory. */
 export interface ProjectWorkspace {
-  prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<string>;
-  diff(taskId: string): Promise<WorkspaceDiff>;
+  prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation?: TaskIsolation): Promise<string>;
+  diff(taskId: string, project?: RegisteredProject): Promise<WorkspaceDiff>;
+  identity?(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<Readonly<{ dev: number; ino: number }>>;
   files(project: RegisteredProject, taskId: string): Promise<WorkspaceFiles>;
   fileDiff(project: RegisteredProject, taskId: string, path: string): Promise<WorkspaceFileDiff>;
   resume(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<string>;
@@ -68,5 +69,5 @@ export interface ExecutionAttachmentStager {
 }
 
 export interface InstructionWorkspace {
-  apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal): Promise<void>;
+  apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal, isolation?: TaskIsolation, expectedIdentity?: Readonly<{ dev: number; ino: number }>): Promise<void>;
 }

@@ -1,3 +1,4 @@
+import { pinnedSpawnPlan } from './pinned-spawn.js';
 import { spawn } from 'node:child_process';
 import { LinuxProcessTree } from './linux-process-tree.js';
 import { StringDecoder } from 'node:string_decoder';
@@ -6,6 +7,7 @@ import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 /** Internal launch plan: never construct arguments/environment from HTTP fields. */
 export type ProcessPlan = Readonly<{
   executable: string; args: readonly string[]; cwd: string; stdin: string;
+  cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   env: NodeJS.ProcessEnv; signal: AbortSignal; timeoutMs: number; outputBytes?: number;
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;
@@ -13,9 +15,11 @@ export type ProcessPlan = Readonly<{
 export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
   if (process.platform === 'win32') return { exitCode: null, error: 'unsupported_platform' };
   if (plan.signal.aborted) return { exitCode: null, error: 'cancelled' };
+  let launch;
+  try { launch = pinnedSpawnPlan(plan); } catch { return { exitCode: null, error: 'workspace_identity_invalid' }; }
   return new Promise((resolve) => {
-    const child = spawn(plan.executable, [...plan.args], {
-      cwd: plan.cwd, env: plan.env, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+    const child = spawn(launch.executable, [...launch.args], {
+      cwd: launch.cwd, env: plan.env, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let failure: string | undefined;
     let bytes = 0;

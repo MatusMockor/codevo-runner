@@ -399,3 +399,95 @@ they are not a sandbox against another malicious process running as the same Uni
 Synchronized tracked files are ordinary worktree edits and can appear in review diffs.
 
 See [execution deadlines and disconnected clients](docs/execution-policy.md) for the configurable task runtime policy.
+
+### Automatic provider CLI updates on a direct Linux host
+
+For native installations, `scripts/update-provider-clis.py` invokes `codex update`
+and `claude update` independently, then records before/after versions in the journal.
+It requires Python 3.9+ and the same Unix user as the runner, with these launchers:
+
+- `~/.local/bin/codex`, resolving inside `~/.codex/packages/standalone/`;
+- `~/.local/bin/claude`, resolving inside `~/.local/share/claude/versions/`.
+
+Other install layouts (including npm and Docker) are rejected. The provider's own
+updater chooses the release according to its configured channel and handles installation;
+this script does not download installers or rewrite binaries. Configure the provider's
+latest channel if you want the newest release rather than a stable/delayed channel.
+Each update has a five-minute deadline and 64 KiB output limit. A failed provider
+update does not prevent attempting the other provider; any failure marks the service
+failed and is retried at the next scheduled run. Update output is not copied to the
+journal because it may contain private diagnostics. The runner environment file is
+not loaded. Authentication remains in the provider's existing home-directory files.
+
+Install the examples as **user** units (adjust `ExecStart` if the checkout is elsewhere):
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp deploy/codevo-provider-updates.service.example ~/.config/systemd/user/codevo-provider-updates.service
+cp deploy/codevo-provider-updates.timer.example ~/.config/systemd/user/codevo-provider-updates.timer
+systemctl --user daemon-reload
+systemctl --user enable --now codevo-provider-updates.timer
+systemctl --user start codevo-provider-updates.service
+systemctl --user list-timers codevo-provider-updates.timer
+journalctl --user -u codevo-provider-updates.service -n 50
+```
+
+The timer checks hourly, with up to five minutes of jitter, and shortly after boot.
+The user manager must run while logged out (configure lingering for the runner user
+with the host administrator). The timer does not restart the runner or cancel tasks.
+Already-running provider processes keep their loaded version; subsequent launches
+use the updated installation. This is periodic best-effort updating, not a guarantee
+of immediate release availability or access to a particular model. To disable it:
+`systemctl --user disable --now codevo-provider-updates.timer`.
+
+Test the updater without network access or real installations:
+`python3 -m unittest discover -s scripts -p 'test_update_provider_clis.py'`.
+
+### Task checkout mode
+
+New clients can use the `taskIsolation` runner capability and include `isolation`
+with value `in-place` or `worktree` when creating a task. Omitted values retain the
+legacy detached-worktree behavior. The choice is immutable for the conversation;
+continued and queued turns inherit it.
+
+`in-place` runs in the registered server checkout and preserves its existing dirty
+and untracked files. Its diff includes preexisting changes relative to HEAD when
+the conversation started. Other conversations using that checkout see the same
+files; the runner serializes executions. Stop terminates the provider but does not
+undo edits. `worktree` continues to isolate the conversation from the source checkout.
+
+In-place instruction synchronization only changes files managed by Codevo.
+Matching preexisting instruction files remain user-owned, and differing existing
+files cause a synchronization conflict. Removing a snapshot removes only unchanged
+Codevo-managed instruction files. Workspace registration and filesystem identities
+are checked when resuming or reviewing a conversation.
+
+### Remote workspace panels
+
+Authenticated clients discover panel support with
+`GET /v1/projects/:projectId/surface/capabilities`. This is separate from the
+version-1 runner descriptor, so older clients remain compatible.
+
+Files and Git history use `POST /v1/projects/:projectId/surface/` operations:
+`tree`, `read`, `write`, `history`, `commit-files`, and `commit-diff`.
+Requests optionally include `taskId` to select the exact task checkout; without
+it they use the registered project checkout. They never accept an arbitrary
+absolute workspace path. Text editing is bounded to 64 KiB and saves require the
+version returned by read. Stale saves report conflict; external processes may
+still race a final filesystem replacement, so this is optimistic conflict detection.
+Symlinks and binary/oversized files are not editable through this interface.
+
+The terminal API opens a real shell with `POST /v1/projects/:projectId/terminals`
+(`cols`, `rows`, optional `taskId`). Reopening the same project/task attaches its
+existing running primary terminal. Poll `GET /terminals/:id?after=N`, send input with
+`POST /terminals/:id/input`, resize with `POST /terminals/:id/resize`, and close
+with `DELETE /terminals/:id`, under the same project prefix. All subsequent
+operations must repeat the original optional `taskId` query parameter.
+Disconnecting a client does not close the terminal. A runner restart does;
+clients must explicitly reconnect to create a replacement shell.
+
+Terminal replay is bounded to 1 MiB, pages to 256 KiB, retained terminal sessions to 16,
+and idle retention to 24 hours. Replay gaps are reported explicitly. Terminals
+run as the runner user in the selected checkout, with the same host permissions.
+Linux startup requires Python 3 for descriptor-pinned workspace entry and the
+native `node-pty` dependency installed by `npm ci` on that host.

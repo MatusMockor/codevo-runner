@@ -1,15 +1,22 @@
-FROM node:24.13.1-bookworm-slim AS build
+FROM node:24.13.1-bookworm-slim AS native-build-base
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM native-build-base AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY scripts/prepare-node-pty.mjs ./scripts/prepare-node-pty.mjs
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY test ./test
 RUN npm run build
 
-FROM node:24.13.1-bookworm-slim AS production-dependencies
+FROM native-build-base AS production-dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY scripts/prepare-node-pty.mjs ./scripts/prepare-node-pty.mjs
 RUN npm ci --omit=dev && npm cache clean --force
 
 FROM node:24.13.1-bookworm-slim AS runtime-base

@@ -1,3 +1,4 @@
+import { pinnedSpawnPlan } from './pinned-spawn.js';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
@@ -14,9 +15,12 @@ export interface InteractiveProcessPlan {
   readonly executable: string;
   readonly args: readonly string[];
   readonly cwd: string;
+  readonly cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly timeoutMs: number;
+  /** Claude print results may precede background-agent completion and later results. */
+  readonly completion?: 'provider-exit';
   readonly onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }
 const FRAME_BYTES = 8 * 1024 * 1024;
@@ -27,10 +31,13 @@ export const INTERACTIVE_INPUT_BYTES = LIMITS.attachmentsPerTask * 4 * Math.ceil
 export async function runInteractiveProcess(plan: InteractiveProcessPlan, protocol: InteractiveProtocol): Promise<ExecutionResult> {
   if (plan.signal.aborted) return { exitCode: null, error: 'cancelled' };
   if (process.platform === 'win32') return { exitCode: null, error: 'unsupported_platform' };
+  let launch;
+  try { launch = pinnedSpawnPlan(plan); } catch { return { exitCode: null, error: 'workspace_identity_invalid' }; }
   return new Promise(resolve => {
-    const child = spawn(plan.executable, [...plan.args], { cwd: plan.cwd, env: plan.env,
+    const child = spawn(launch.executable, [...launch.args], { cwd: launch.cwd, env: plan.env,
       shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let result: ExecutionResult | undefined;
+    let providerResult: ExecutionResult | undefined;
     let closed = false;
     let pending = '';
     let pendingBytes = 0;
@@ -85,7 +92,13 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
           const frame: unknown = JSON.parse(line);
           if (!frame || typeof frame !== 'object' || Array.isArray(frame)) throw new Error('invalid_frame');
           const completed = await protocol.receive(frame as Record<string, unknown>, send, fail);
-          if (completed) finish(completed);
+          if (completed) {
+            if (plan.completion === 'provider-exit' && !completed.error && completed.exitCode === 0) {
+              const first = providerResult === undefined;
+              providerResult = completed;
+              if (first) child.stdin.end();
+            } else finish(completed);
+          }
         }
       })().catch(() => fail('provider_protocol_failed')).finally(() => { if (!closed && !result) child.stdout.resume(); });
     });
@@ -105,7 +118,9 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
       void Promise.race([Promise.all([stdoutDelivery, stderrDelivery]), boundedDrain]).finally(() => {
         clearTimeout(drainTimer); closed = true; pending = '';
         plan.signal.removeEventListener('abort', abort);
-        resolve(result ?? { exitCode, error: 'provider_result_missing' });
+        resolve(result ?? (providerResult
+          ? { ...providerResult, ...(exitCode === 0 ? {} : { exitCode, error: providerResult.error ?? 'provider_reported_failure' }) }
+          : { exitCode, error: 'provider_result_missing' }));
       });
     });
   });

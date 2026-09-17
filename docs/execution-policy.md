@@ -30,3 +30,12 @@ It does not raise CPU/RAM limits, provider usage quotas, output retention budget
 or process concurrency. Provider inference still runs at the provider. Local
 builds and tests use the server's CPU, RAM and disk, subject to any limits imposed
 by systemd, containers or the host administrator.
+
+Claude print mode also has a separate background-agent wait ceiling. The runner
+sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for Claude launches so that the CLI's
+default ten-minute background wait does not terminate unfinished agents. This does
+not disable the runner's finite deadline or explicit Stop. An intermediate Claude
+`result` closes this invocation's input but does not mark the task finished: the
+runner continues recording background output and subsequent results until the CLI
+exits. A later nonzero exit or runner cancellation cannot become a successful task
+because an earlier result was successful.

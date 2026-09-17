@@ -1,3 +1,4 @@
+import { lstat, realpath } from 'node:fs/promises';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
 import { ARTIFACT_HINT } from '../../domain/artifact-hint.js';
 import { isProviderSessionId } from '../../domain/provider-output.js';
@@ -7,6 +8,7 @@ import { emitInteractiveOutput, runInteractiveProcess, type InteractiveProtocol,
 export interface CodexInteractivePlan {
   readonly executable: string;
   readonly cwd: string;
+  readonly cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly timeoutMs: number;
@@ -59,6 +61,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
         if (stage === 'initialize' && frame.id === 1) {
           stage = 'thread';
           await send({ method: 'initialized', params: {} });
+          await validateProtocolWorkspace(plan);
           await call(send, 2, plan.request.resumeSessionId ? 'thread/resume' : 'thread/start', {
             cwd: plan.cwd, ...model, ...(sandbox ? { sandbox } : {}), approvalPolicy: 'never',
             ...(plan.request.resumeSessionId ? { threadId: plan.request.resumeSessionId, excludeTurns: true } : {}),
@@ -71,6 +74,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           if (plan.signal.aborted) return { exitCode: null, error: 'cancelled' };
           await emit({ type: 'thread.started', thread_id: id });
           stage = 'turn';
+          await validateProtocolWorkspace(plan);
           await call(send, 3, 'turn/start', {
             threadId, cwd: plan.cwd, ...model, approvalPolicy: 'never', ...(sandboxPolicy ? { sandboxPolicy } : {}),
             input: [{ type: 'text', text: `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${plan.prompt || 'Inspect the attached images.'}` },
@@ -163,6 +167,10 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           await emit({ type: eventType, item: { id, type: 'web_search', query: boundedSummary(item.query) } });
         } else if (completed && item.type === 'contextCompaction') await emit({ type: 'item.completed', item: { id, type: 'context_compaction' } });
       } else if (frame.method === 'thread/tokenUsage/updated') {
+        // Resume replays the previous turn's usage before the new turn is started.
+        // It is history, not usage owned by this execution; never publish or aggregate it.
+        if (plan.request.resumeSessionId && (stage === 'thread' || stage === 'turn') && !turnId &&
+          params.threadId === plan.request.resumeSessionId) return;
         owner(params);
         const last = object(object(params.tokenUsage).last);
         if (typeof last.inputTokens === 'number' && Number.isSafeInteger(last.inputTokens) && last.inputTokens >= 0 && typeof last.outputTokens === 'number' && Number.isSafeInteger(last.outputTokens) && last.outputTokens >= 0) {
@@ -203,4 +211,19 @@ function* outputSegments(text: string): Generator<string> {
     yield text.slice(offset, end);
     offset = end;
   }
+}
+
+/** Fence awaited initialization/session persistence before pathname-bearing RPCs. */
+async function validateProtocolWorkspace(plan: CodexInteractivePlan): Promise<void> {
+  const identity = plan.request.cwdIdentity;
+  if (identity) {
+    if (plan.cwd !== plan.request.cwd || Buffer.byteLength(plan.cwd) > 32_768) throw new Error('workspace_identity_changed');
+    const canonical = await realpath(plan.cwd);
+    const resolved = await lstat(canonical);
+    const current = await lstat(plan.cwd);
+    if (!resolved.isDirectory() || !current.isDirectory() ||
+      resolved.dev !== identity.dev || resolved.ino !== identity.ino ||
+      current.dev !== identity.dev || current.ino !== identity.ino) throw new Error('workspace_identity_changed');
+  }
+  if (plan.signal.aborted) throw new Error('cancelled');
 }

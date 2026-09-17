@@ -11,9 +11,11 @@ function record(value: unknown, keys: readonly string[]): Record<string, unknown
 }
 
 export function parseTaskInput(value: unknown): CreateTask {
+  const hasIsolation = typeof value === 'object' && value !== null && Object.hasOwn(value, 'isolation');
   const hasInstructions = typeof value === 'object' && value !== null && Object.hasOwn(value, 'instructions');
   const hasLaunch = typeof value === 'object' && value !== null && Object.hasOwn(value, 'launch');
-  const input = record(value, ['idempotencyKey', 'provider', 'parts', ...(hasLaunch ? ['launch'] : []), ...(hasInstructions ? ['instructions'] : [])]);
+  const input = record(value, ['idempotencyKey', 'provider', 'parts', ...(hasIsolation ? ['isolation'] : []), ...(hasLaunch ? ['launch'] : []), ...(hasInstructions ? ['instructions'] : [])]);
+  if (hasIsolation && input.isolation !== 'in-place' && input.isolation !== 'worktree') throw new RunnerError('invalid_input');
   if (!isId(input.idempotencyKey) || (input.provider !== 'codex' && input.provider !== 'claude'))
     throw new RunnerError('invalid_input');
   if (!Array.isArray(input.parts) || input.parts.length < 1 || input.parts.length > LIMITS.parts)
@@ -41,7 +43,7 @@ export function parseTaskInput(value: unknown): CreateTask {
     }
     throw new RunnerError('invalid_input');
   });
-  return Object.freeze({ ...(hasInstructions ? { instructions: parseInstructionSnapshot(input.instructions) } : {}), idempotencyKey: input.idempotencyKey, provider: input.provider, parts: Object.freeze(parts), ...(hasLaunch ? { launch: parseLaunchOptions(input.launch, input.provider) } : {}) });
+  return Object.freeze({ ...(hasIsolation ? { isolation: input.isolation as 'in-place' | 'worktree' } : {}), ...(hasInstructions ? { instructions: parseInstructionSnapshot(input.instructions) } : {}), idempotencyKey: input.idempotencyKey, provider: input.provider, parts: Object.freeze(parts), ...(hasLaunch ? { launch: parseLaunchOptions(input.launch, input.provider) } : {}) });
 }
 
 export function validateCursor(after: number): number {
