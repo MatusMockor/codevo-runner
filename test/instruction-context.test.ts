@@ -50,3 +50,25 @@ test('relative imported Markdown supports case-insensitive extensions consistent
   assert.match(instructionContext(snapshot), /Uppercase extension/);
   assert.equal(materializedInstructionFiles(snapshot).length, 2);
 });
+
+test('prose annotations survive materialization and context expansion alongside genuine imports', () => {
+  const prose = 'Only tooling annotations (e.g. @param/@var type annotations, @throws) are allowed.';
+  const rules: InstructionSnapshot = { version: 1, files: [
+    { scope: 'global', path: 'CLAUDE.md', content: `${prose}\n@docs/general.md\n@param.md\n@throws.md` },
+    { scope: 'global', path: 'docs/general.md', content: 'General rules' },
+    { scope: 'global', path: 'param.md', content: 'Parameter rules' },
+    { scope: 'global', path: 'throws.md', content: 'Exception rules' },
+  ] };
+  assert.equal(materializedInstructionFiles(rules)[0]?.content, rules.files[0]?.content);
+  const context = instructionContext(rules);
+  assert.ok(context.includes(prose));
+  assert.match(context, /General rules\nParameter rules\nException rules/);
+});
+
+test('quoted and standalone annotation-shaped imports still fail closed', () => {
+  for (const content of ['@param', '@"param"', 'Import @"param"', '@param/secret.txt']) {
+    const rules: InstructionSnapshot = { version: 1, files: [{ scope: 'global', path: 'CLAUDE.md', content }] };
+    assert.throws(() => materializedInstructionFiles(rules));
+    assert.throws(() => instructionContext(rules));
+  }
+});

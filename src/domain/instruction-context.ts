@@ -30,7 +30,11 @@ function imports(content: string, replace: (path: string) => string): string {
     if (fenced) return line;
     return line.split(/(`[^`]*`)/u).map((part, index) => index % 2 ? part : part.replace(
       /(^|[\s(])@(?:"([^"\n]+)"|([^\s<>"`)'\]]*))(?=[\s)'\]]|$)/gu,
-      (_match, prefix: string, quoted: string | undefined, bare: string | undefined) => `${prefix}${replace(quoted ?? bare!)}`,
+      (match, prefix: string, quoted: string | undefined, bare: string | undefined) => {
+        const annotation = quoted === undefined && !line.trimStart().startsWith('@') &&
+          bare !== undefined && bare.split('/').every(tag => ['param', 'var', 'throws'].includes(tag.replace(/^@+/u, '')));
+        return annotation ? match : `${prefix}${replace(quoted ?? bare!)}`;
+      },
     )).join('');
   }).join('\n');
 }
