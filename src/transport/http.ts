@@ -13,7 +13,7 @@ export function send(response: ServerResponse, status: number, body: unknown) {
 }
 
 const statusCodes: Record<ErrorCode, number> = {
-  invalid_input: 400, not_found: 404, conflict: 409, quota_exceeded: 429,
+  delivery_uncertain: 409, invalid_input: 400, not_found: 404, conflict: 409, quota_exceeded: 429,
   unsupported_media: 415, too_large: 413, busy: 503, storage_unavailable: 503,
 };
 

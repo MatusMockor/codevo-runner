@@ -1,3 +1,4 @@
+import { SteeringNotSent } from '../src/domain/steering.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createClaudeProtocol, parseClaudeQuestions } from '../src/infrastructure/execution/claude-interactive.js';
@@ -5,11 +6,11 @@ import type { ExecutionRequest } from '../src/domain/execution.js';
 const session = '01998cf0-1111-7111-8111-111111111111';
 const input = { questions: [{ header: 'Database', question: 'Which database?', multiSelect: false,
   options: [{ label: 'SQLite', description: 'Local' }, { label: 'Postgres', description: 'Remote' }] }] };
-function fixture() {
+function fixture(overrides: Partial<ExecutionRequest> = {}) {
   const sent: unknown[] = [];
   const request: ExecutionRequest = { task: { id: session, runnerId: session, sequence: 1, provider: 'claude', status: 'running', parts: [], createdAt: new Date().toISOString() },
     cwd: '/tmp', signal: new AbortController().signal, attachments: [], onOutput: async () => {},
-    onQuestion: async questions => ({ answers: [{ questionId: questions[0]!.id, optionIds: ['o0'], text: 'with backups' }] }) };
+    onQuestion: async questions => ({ answers: [{ questionId: questions[0]!.id, optionIds: ['o0'], text: 'with backups' }] }), ...overrides };
   return { sent, send: async (value: unknown) => { sent.push(value); }, protocol: createClaudeProtocol({ executable: 'claude', args: [], cwd: '/tmp', env: {}, signal: request.signal, timeoutMs: 1000, request, prompt: 'Hello', images: [] }) };
 }
 test('Claude waits initialize, maps structured AskUserQuestion answer to original question', async () => {
@@ -82,4 +83,101 @@ test('Claude retains paused work because it can resume before the delayed final 
   assert.equal(await f.protocol.receive(success, f.send), undefined);
   await f.protocol.receive({ type: 'system', subtype: 'task_updated', task_id: 'monitor', patch: { status: 'completed' } }, f.send);
   assert.deepEqual(await f.protocol.receive(success, f.send), { exitCode: 0, sessionId: session });
+});
+
+
+async function steeringReady(f: ReturnType<typeof fixture>) {
+  await f.protocol.receive({ type: 'control_response', response: { subtype: 'success', request_id: 'codevo-initialize' } }, f.send);
+  const initial = f.sent.at(-1) as { uuid: string };
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  await f.protocol.receive({ type: 'command_lifecycle', command_uuid: initial.uuid, session_id: session, state: 'started' }, f.send);
+}
+async function acknowledgeSteer(f: ReturnType<typeof fixture>) {
+  await new Promise(resolve => setImmediate(resolve));
+  const frame = f.sent.at(-1) as { uuid: string };
+  await f.protocol.receive({ type: 'command_lifecycle', command_uuid: frame.uuid, session_id: session, state: 'started' }, f.send);
+  return frame.uuid;
+}
+
+test('Claude steering preserves active session and rejects completed ownership', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+  await steeringReady(f);
+  const pending = steer!({ idempotencyKey: 'now', prompt: 'Change direction', attachments: [] });
+  const uuid = await acknowledgeSteer(f); await pending;
+  assert.deepEqual(f.sent.at(-1), { type: 'user', uuid, session_id: session, message: { role: 'user', content: [{ type: 'text', text: 'Change direction' }] } });
+  await f.protocol.receive({ type: 'command_lifecycle', command_uuid: uuid, session_id: session, state: 'completed' }, f.send);
+  await f.protocol.receive({ type: 'result', subtype: 'success', is_error: false, session_id: session }, f.send);
+  await assert.rejects(steer!({ idempotencyKey: 'late', prompt: 'late', attachments: [] }), SteeringNotSent);
+});
+
+test('Claude steering reads bounded staged image bytes and rejects symlinks', async () => {
+  const { mkdtemp, writeFile, symlink, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'claude-steer-'));
+  try {
+    const path = join(root, 'image.png');
+    await writeFile(path, Buffer.from('image-bytes'));
+    await symlink(path, join(root, 'link.png'));
+    let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+    const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+    await steeringReady(f);
+    const pending = steer!({ idempotencyKey: 'image', prompt: '', attachments: [{ id: 'image', path, mediaType: 'image/png' }] });
+    // Filesystem reads precede the actual stdin write.
+    while (!(f.sent.at(-1) as { session_id?: string }).session_id) await new Promise(resolve => setImmediate(resolve));
+    await acknowledgeSteer(f); await pending;
+    assert.match(JSON.stringify(f.sent.at(-1)), /aW1hZ2UtYnl0ZXM=/);
+    await assert.rejects(steer!({ idempotencyKey: 'link', prompt: '', attachments: [{ id: 'link', path: join(root, 'link.png'), mediaType: 'image/png' }] }));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('Claude lifecycle protects queued steer from old result and completes in either event order', async () => {
+  for (const completedFirst of [false, true]) {
+    let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+    const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+    await steeringReady(f);
+    const pending = steer!({ idempotencyKey: 'race', prompt: 'followup', attachments: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    const uuid = (f.sent.at(-1) as { uuid: string }).uuid;
+    const lifecycle = (state: string) => f.protocol.receive({ type: 'command_lifecycle', command_uuid: uuid, session_id: session, state }, f.send);
+    const result = () => f.protocol.receive({ type: 'result', subtype: 'success', is_error: false, session_id: session }, f.send);
+    await lifecycle('queued'); await pending;
+    assert.equal(await result(), undefined);
+    await lifecycle('started');
+    assert.equal(await (completedFirst ? lifecycle('completed') : result()), undefined);
+    assert.deepEqual(await (completedFirst ? result() : lifecycle('completed')), { exitCode: 0, sessionId: session });
+  }
+});
+
+test('older Claude without correlated lifecycle cannot advertise live steering', async () => {
+  let advertised = false;
+  const f = fixture({ onSteeringReady: handler => { advertised ||= !!handler; } });
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  assert.equal(advertised, false);
+});
+
+test('Claude cancellation after queue acceptance fails the task rather than losing accepted input', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+  await steeringReady(f);
+  const pending = steer!({ idempotencyKey: 'cancel', prompt: 'followup', attachments: [] });
+  const uuid = await acknowledgeSteer(f); await pending;
+  assert.deepEqual(await f.protocol.receive({ type: 'command_lifecycle', command_uuid: uuid, session_id: session, state: 'cancelled' }, f.send), { exitCode: 1, error: 'provider_steering_failed', sessionId: session });
+});
+
+test('Claude refused unaccepted followup releases stored foreground result without hanging', async () => {
+ for (const state of ['refused', 'discarded', 'cancelled']) {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+  const f = fixture({onSteeringReady:handler=>{if(handler)steer=handler;}});
+  await steeringReady(f);
+  const pending=steer!({idempotencyKey:'refused',prompt:'follow up',attachments:[]});
+  const rejected=assert.rejects(pending,SteeringNotSent);
+  await new Promise(resolve=>setImmediate(resolve));
+  const uuid=(f.sent.at(-1) as {uuid:string}).uuid;
+  assert.equal(await f.protocol.receive({type:'result',subtype:'success',is_error:false,session_id:session},f.send),undefined);
+  assert.deepEqual(await f.protocol.receive({type:'command_lifecycle',command_uuid:uuid,session_id:session,state},f.send),{exitCode:0,sessionId:session});
+  await rejected;
+ }
 });

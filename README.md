@@ -491,3 +491,43 @@ and idle retention to 24 hours. Replay gaps are reported explicitly. Terminals
 run as the runner user in the selected checkout, with the same host permissions.
 Linux startup requires Python 3 for descriptor-pinned workspace entry and the
 native `node-pty` dependency installed by `npm ci` on that host.
+
+### Messages during an active run
+
+`taskSteering` advertises the immediate-input API. `POST /v1/tasks/:id/steer`
+accepts only `{ idempotencyKey, parts }`; parts use the existing text/uploaded-image
+contract. `POST /v1/tasks/:id/pending/:pendingId/steer` submits an existing queued
+message without creating another one. Both return `{ taskId, messageId,
+status: "accepted" }` only after provider acceptance. The active provider, model,
+workspace and instruction snapshot cannot be replaced by these requests.
+
+The runner keeps durable single-use delivery claims. Retrying an acknowledged
+request with the same identity returns its receipt; an uncertain write is never
+sent again automatically. An uncertain queued message remains visible as
+`uncertain` and can be dismissed. Provider rejection proven to occur before
+acceptance releases the claim so the original message can be retried. Accepted
+input is recorded as a `task.input` event (`messageId`, `parts`), independently of
+output retention, so reconnecting does not erase the user's follow-up.
+
+Compatible queued messages can advance at provider tool boundaries while the run
+continues. Pending questions, Stop, owner replacement and unavailable provider
+input block delivery. Existing terminal continuation remains the fallback for
+queued messages with changed launch options or instruction snapshots. Delivery is
+bounded to 32 messages per task and 1,000 retained claims; staged follow-up images
+are bounded to eight image files (at most 64 MiB) over a live run and cleaned after
+that run finishes. These bounds do not depend on transcript output truncation.
+
+Claude live delivery additionally requires its correlated `command_lifecycle`
+protocol. The runner verifies that capability against the initial command before
+registering input; an older CLI without that evidence keeps messages queued.
+Claude receipt means the exact command was queued/started by the provider, while
+Codex receipt means the exact `turn/steer` request was acknowledged. A provider may
+subsequently fail or cancel accepted work; this remains a task failure rather than
+being presented as successful completion.
+
+Event replay also carries optional `subagentLifecycle` metadata when
+`subagentTelemetry` is advertised. Up to 32 normalized child identities, states
+and progress summaries are persisted separately from the rolling raw output.
+The snapshot survives reconnects and restarts; it never invents child completion
+from completion of the parent turn. Older tasks without a saved snapshot cannot
+recover lifecycle data already evicted from their output.

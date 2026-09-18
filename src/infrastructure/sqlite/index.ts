@@ -1,3 +1,5 @@
+import type { AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
+import type { SteerInput, SteerClaim, SteerReceipt } from '../../domain/steering.js';
 import type { QuestionRepository } from '../../application/question-ports.js';
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../domain/questions.js';
 import type { Artifact } from '../../domain/artifact.js';
@@ -57,6 +59,13 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  claimSteer(id: string, input: SteerInput): Promise<SteerClaim> { return this.call({ method: 'claimSteer', args: [id, input] }); }
+  findSteer(id: string, input: SteerInput): Promise<SteerReceipt | null> { return this.call({ method: 'findSteer', args: [id, input] }); }
+  findPendingSteer(id: string, pendingId: string): Promise<SteerReceipt | null> { return this.call({ method: 'findPendingSteer', args: [id, pendingId] }); }
+  claimPendingSteer(id: string, pendingId?: string): Promise<SteerClaim | null> { return this.call({ method: 'claimPendingSteer', args: pendingId === undefined ? [id] : [id, pendingId] }); }
+  releaseSteer(id: string, messageId: string): Promise<void> { return this.call({ method: 'releaseSteer', args: [id, messageId] }); }
+  acceptSteer(id: string, messageId: string): Promise<SteerReceipt> { return this.call({ method: 'acceptSteer', args: [id, messageId] }); }
+  setTaskSubagents(taskId: string, snapshot: AgentSubagentLifecycle): Promise<void> { return this.call({ method: 'setTaskSubagents', args: [taskId, snapshot] }); }
   createQuestion(request: AgentQuestionRequest): Promise<AgentQuestionRequest> { return this.call({ method: 'createQuestion', args: [request] }); }
   listQuestions(taskId: string): Promise<readonly AgentQuestionRequest[]> { return this.call({ method: 'listQuestions', args: [taskId] }); }
   answerQuestion(taskId: string, id: string, response: AgentQuestionResponse): Promise<AgentQuestionRequest> { return this.call({ method: 'answerQuestion', args: [taskId, id, response] }); }
@@ -114,6 +123,8 @@ export async function openSqliteRepository(dataDir: string, runnerId: string, ch
 function changesInventory(operation: Operation, value: unknown): boolean {
   switch (operation.method) {
     // A promotion attempt may pause a blocked queue without creating a task.
+    case 'setTaskSubagents':
+    case 'releaseSteer': case 'claimSteer': case 'claimPendingSteer': case 'acceptSteer':
     case 'createQuestion': case 'answerQuestion': case 'expireQuestions':
     case 'putArtifact': case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
     case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
@@ -121,6 +132,7 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'findSteer': case 'findPendingSteer':
     case 'listQuestions':
     case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':

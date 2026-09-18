@@ -1,3 +1,5 @@
+import type { AgentSubagentLifecycle } from '../domain/subagent-lifecycle.js';
+import type { SteerInput, SteerReceipt, SteerClaim } from '../domain/steering.js';
 import type { InstructionSnapshot } from '../domain/instructions.js';
 import type { PendingMessage, PendingMessages } from '../domain/pending-message.js';
 import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
@@ -7,6 +9,13 @@ import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, 
 
 /** Each state change and its event must commit atomically. Terminal state wins races. */
 export interface ExecutionRepository {
+  setTaskSubagents?(taskId: string, snapshot: AgentSubagentLifecycle): Promise<void>;
+  findSteer?(taskId: string, input: SteerInput): Promise<SteerReceipt | null>;
+  findPendingSteer?(taskId: string, pendingId: string): Promise<SteerReceipt | null>;
+  claimSteer?(taskId: string, input: SteerInput): Promise<SteerClaim>;
+  claimPendingSteer?(taskId: string, pendingId?: string): Promise<SteerClaim | null>;
+  releaseSteer?(taskId: string, messageId: string): Promise<void>;
+  acceptSteer?(taskId: string, messageId: string): Promise<SteerReceipt>;
   enqueuePending(taskId: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }>;
   listPending(taskId: string): Promise<PendingMessages>;
   removePending(taskId: string, pendingId: string): Promise<PendingMessage>;
@@ -44,6 +53,8 @@ export interface ProviderExecutor {
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
 export interface ExecutionApplication {
+  steer(taskId: string, input: unknown): Promise<SteerReceipt>;
+  steerPending(taskId: string, pendingId: string): Promise<SteerReceipt>;
   enqueue(taskId: string, input: unknown): Promise<{ pending: PendingMessage; created: boolean }>;
   pending(taskId: string): Promise<PendingMessages>;
   removePending(taskId: string, pendingId: string): Promise<PendingMessage>;

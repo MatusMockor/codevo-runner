@@ -1,3 +1,4 @@
+import type { AgentSubagentLifecycle } from './subagent-lifecycle.js';
 import type { InstructionSnapshot } from './instructions.js';
 import type { AgentLaunchOptions } from './launch.js';
 import type { TaskStatus } from './execution.js';
@@ -26,12 +27,13 @@ export type Attachment = Readonly<{
   sha256: string; width: number; height: number; createdAt: string;
 }>;
 export type TaskEvent = Readonly<{
-  sequence: number; taskId: string; type: 'task.created' | 'task.cancelled' | 'task.queued' | 'task.running' | 'task.succeeded' | 'task.failed' | 'task.interrupted' | 'task.output'; createdAt: string;
+  sequence: number; taskId: string; type: 'task.created' | 'task.cancelled' | 'task.queued' | 'task.running' | 'task.succeeded' | 'task.failed' | 'task.interrupted' | 'task.output' | 'task.input'; createdAt: string;
+  messageId?: string; parts?: readonly MessagePart[];
   channel?: 'stdout' | 'stderr'; text?: string; exitCode?: number | null; error?: string;
 }>;
 export type Page<T> = Readonly<{ items: readonly T[]; nextCursor: number | null }>;
-export type EventPage = Page<TaskEvent> & Readonly<{ outputTruncatedBeforeSequence?: number; outputStartsAtLineBoundary?: boolean }>;
-export type ErrorCode = 'invalid_input' | 'not_found' | 'conflict' | 'quota_exceeded' |
+export type EventPage = Page<TaskEvent> & Readonly<{ subagentLifecycle?: AgentSubagentLifecycle; outputTruncatedBeforeSequence?: number; outputStartsAtLineBoundary?: boolean }>;
+export type ErrorCode = 'delivery_uncertain' | 'invalid_input' | 'not_found' | 'conflict' | 'quota_exceeded' |
   'unsupported_media' | 'too_large' | 'busy' | 'storage_unavailable';
 export class RunnerError extends Error {
   constructor(readonly code: ErrorCode) { super(code); this.name = 'RunnerError'; }

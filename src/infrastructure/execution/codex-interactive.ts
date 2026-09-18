@@ -1,3 +1,4 @@
+import { SteeringNotSent } from '../../domain/steering.js';
 import { lstat, realpath } from 'node:fs/promises';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
 import { ARTIFACT_HINT } from '../../domain/artifact-hint.js';
@@ -32,7 +33,14 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
   let turnId: string | undefined;
   let usage: { input_tokens: number; output_tokens: number } | undefined;
   const requestIds = new Set<string>();
+  const children = new Map<string, string | undefined>();
+  const childTurns = new Set<string>();
   let pendingQuestion: string | undefined;
+  let steeringSequence = 3;
+  let pendingSteer: { id: number; resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } | undefined;
+  const rejectSteer = () => { if (pendingSteer) { clearTimeout(pendingSteer.timer); pendingSteer.reject(new Error('steering_unavailable')); pendingSteer = undefined; } };
+  const dispose = () => { stage = 'done'; rejectSteer(); plan.request.onSteeringReady?.(undefined); };
+
   const launch = plan.request.task.launch;
   if (launch && launch.provider !== 'codex') throw new Error('provider_mismatch');
   const model = launch && launch.model !== 'default' ? { model: launch.model } : {};
@@ -49,12 +57,25 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
     if (!threadId || !turnId || params.threadId !== threadId || params.turnId !== turnId) throw new Error('provider_owner_mismatch');
   };
   return {
+    dispose,
     async start(send) {
       await call(send, 1, 'initialize', { clientInfo: { name: 'codevo_runner', title: 'Codevo Runner', version: '0.1.0' }, capabilities: { experimentalApi: true } });
     },
     async receive(frame, send, fail): Promise<ExecutionResult | undefined> {
       if (plan.signal.aborted) return { exitCode: null, error: 'cancelled' };
       if (stage === 'done') throw new Error('provider_protocol_finished');
+      if (frame.method === undefined && pendingSteer && pendingSteer.id === frame.id) {
+        const pending = pendingSteer; pendingSteer = undefined; clearTimeout(pending.timer);
+        if (frame.error !== undefined) {
+          const error = frame.error;
+          if (error && typeof error === 'object' && !Array.isArray(error) && Number.isSafeInteger((error as Record<string, unknown>).code) && typeof (error as Record<string, unknown>).message === 'string') pending.reject(new SteeringNotSent('provider_steering_rejected'));
+          else pending.reject(new Error('provider_steering_reply_invalid'));
+        }
+        else if (!frame.result || typeof frame.result !== 'object' || (frame.result as Record<string, unknown>).turnId !== turnId) pending.reject(new Error('provider_owner_mismatch'));
+        else pending.resolve();
+        return;
+      }
+      if (frame.method === undefined && typeof frame.id === 'number' && frame.id > 3 && frame.id <= steeringSequence) return;
       if (frame.method === undefined) {
         if (frame.error !== undefined) throw new Error('provider_request_failed');
         const result = object(frame.result);
@@ -85,10 +106,54 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           if (turnId && turnId !== id) throw new Error('provider_turn_mismatch');
           turnId = id; stage = 'running';
           await emit({ type: 'turn.started' });
+          plan.request.onSteeringReady?.(async input => {
+            const ownedTurn = turnId;
+            if (stage !== 'running' || pendingQuestion || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
+            try { await validateProtocolWorkspace(plan); } catch { throw new SteeringNotSent('workspace_identity_changed'); }
+            if (stage !== 'running' || turnId !== ownedTurn || pendingQuestion || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
+            const id = ++steeringSequence;
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(() => { if (pendingSteer?.id === id) { pendingSteer = undefined; reject(new Error('steering_timeout')); } }, 15_000);
+              pendingSteer = { id, resolve, reject, timer };
+              void call(send, id, 'turn/steer', { threadId, expectedTurnId: ownedTurn,
+                input: [{ type: 'text', text: input.prompt || 'Inspect the attached images.' }, ...input.attachments.map(image => ({ type: 'localImage', path: image.path }))] })
+                .catch(error => { if (pendingSteer?.id === id) { clearTimeout(timer); pendingSteer = undefined; reject(error); } });
+            });
+          });
         } else throw new Error('provider_reply_unexpected');
         return;
       }
       const params = object(frame.params ?? {});
+      // Only children explicitly linked by this root's collaboration item may
+      // contribute child telemetry. Their terminal event never ends the root.
+      if (frame.id === undefined && typeof params.threadId === 'string' && children.has(params.threadId)) {
+        const childId = params.threadId;
+        if (frame.method === 'turn/started') {
+          const childTurnId = identifier(object(params.turn).id);
+          const key = `${childId}:${childTurnId}`;
+          if (childTurns.has(key)) return;
+          if (childTurns.size >= 4096) throw new Error('provider_child_turn_limit');
+          childTurns.add(key);
+          children.set(childId, childTurnId);
+          await emit({ v: 1, t: 'subagent', kind: 'interacted', agentThreadId: childId, agentPath: '', clipped: false });
+        } else if (frame.method === 'turn/completed') {
+          const childTurn = object(params.turn);
+          const completedChildTurnId = identifier(childTurn.id);
+          const completedKey = `${childId}:${completedChildTurnId}`;
+          if (!childTurns.has(completedKey)) {
+            if (childTurns.size >= 4096) throw new Error('provider_child_turn_limit');
+            childTurns.add(completedKey);
+          }
+          if (children.get(childId) !== completedChildTurnId) return;
+          children.set(childId, undefined);
+          await emit({ v: 1, t: 'subagentTurnCompleted', agentThreadId: childId, durationMs: null, isError: childTurn.status !== 'completed' });
+        } else if (frame.method === 'thread/closed') {
+          children.set(childId, undefined);
+          await emit({ v: 1, t: 'subagent', kind: 'interrupted', agentThreadId: childId, agentPath: '', clipped: false });
+        }
+        return;
+      }
+
       if (frame.method === 'turn/started' && (stage === 'turn' || stage === 'running')) {
         const id = identifier(object(params.turn).id);
         if (params.threadId !== threadId || (turnId && turnId !== id)) throw new Error('provider_owner_mismatch');
@@ -151,6 +216,26 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           // Preserve item boundaries: artifact discovery tracks Markdown fences and links per item.
           // Transport writes bounded chunks; existing JSONL parsers report oversized frames explicitly.
           await emit({ type: 'item.completed', item: { id, type: item.type === 'agentMessage' ? 'agent_message' : 'reasoning', text } });
+        } else if (item.type === 'collabAgentToolCall') {
+          const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : [];
+          const ids: string[] = [];
+          for (const raw of receivers.slice(0, 257)) {
+            const childId = identifier(raw);
+            if (childId === threadId) continue;
+            if (children.size >= 256 && !children.has(childId)) throw new Error('provider_child_limit');
+            if (!children.has(childId)) children.set(childId, undefined);
+            if (ids.length < 33) ids.push(childId);
+          }
+          const states: Record<string, unknown> = {};
+          const suppliedStates = item.agentsStates && typeof item.agentsStates === 'object' && !Array.isArray(item.agentsStates) ? item.agentsStates as Record<string, unknown> : {};
+          for (const id of ids) {
+            const value = suppliedStates[id];
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+              const status = (value as Record<string, unknown>).status;
+              if (typeof status === 'string') states[id] = { status: boundedSummary(status) };
+            }
+          }
+          await emit({ type: eventType, item: { id, type: 'collab_agent_tool_call', tool: boundedSummary(item.tool), receiverThreadIds: ids, agentsStates: states } });
         } else if (item.type === 'commandExecution') {
           const output = typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : '';
           for (const segment of outputSegments(output)) {
@@ -166,6 +251,10 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
         } else if (item.type === 'webSearch') {
           await emit({ type: eventType, item: { id, type: 'web_search', query: boundedSummary(item.query) } });
         } else if (completed && item.type === 'contextCompaction') await emit({ type: 'item.completed', item: { id, type: 'context_compaction' } });
+        if (completed && ['commandExecution', 'fileChange', 'mcpToolCall', 'webSearch'].includes(String(item.type)) && !pendingQuestion) {
+          // Never await an ACK-dependent callback inside the serial receive loop.
+          void plan.request.onToolBoundary?.().catch(() => {});
+        }
       } else if (frame.method === 'thread/tokenUsage/updated') {
         // Resume replays the previous turn's usage before the new turn is started.
         // It is history, not usage owned by this execution; never publish or aggregate it.
@@ -179,7 +268,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
       } else if (frame.method === 'turn/completed') {
         const turn = object(params.turn);
         owner({ ...params, turnId: turn.id });
-        stage = 'done'; pendingQuestion = undefined;
+        dispose(); pendingQuestion = undefined;
         if (turn.status !== 'completed') {
           const error = turn.error && typeof turn.error === 'object' && !Array.isArray(turn.error) ? turn.error as Record<string, unknown> : undefined;
           await emit({ type: 'turn.failed', error: { message: typeof error?.message === 'string' ? boundedSummary(error.message) : 'Provider turn did not complete' } });

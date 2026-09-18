@@ -1,3 +1,4 @@
+import type { ProviderSteer } from './steering.js';
 import type { AgentQuestion, AgentQuestionResponse } from './questions.js';
 import type { Task } from './contracts.js';
 
@@ -9,6 +10,8 @@ export type ExecutionResult = Readonly<{ exitCode: number | null; error?: string
 export const EXECUTION_LIMITS = Object.freeze({ outputBytes: 1_048_576, outputEventBytes: 8192, outputEvents: 1024 });
 export type ExecutionRequest = Readonly<{
   task: Task;
+  onSteeringReady?: (handler: ProviderSteer | undefined) => void;
+  onToolBoundary?: () => Promise<void>;
   resumeSessionId?: string;
   onQuestion?: (questions: readonly AgentQuestion[]) => Promise<AgentQuestionResponse>;
   onSession?: (sessionId: string) => Promise<void>;

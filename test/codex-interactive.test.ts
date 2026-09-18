@@ -1,3 +1,4 @@
+import { SteeringNotSent } from '../src/domain/steering.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -218,4 +219,73 @@ test('resume still rejects foreign bootstrap usage and stale usage after turn ow
   await assert.rejects(f.receive({ method: 'thread/tokenUsage/updated', params: { threadId: thread, turnId: 'old' } }), /owner_mismatch/);
   await f.receive({ id: 3, result: { turn: { id: turn } } });
   await assert.rejects(f.receive({ method: 'thread/tokenUsage/updated', params: { threadId: thread, turnId: 'old' } }), /owner_mismatch/);
+});
+
+
+test('steer waits for exact-turn ACK, preserves images, and rejects after completion', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+  await f.ready();
+  let settled = false;
+  const pending = steer!({ idempotencyKey: 'message-1', prompt: 'Change direction', attachments: [{ id: 'image', path: '/workspace/a.png', mediaType: 'image/png' }] }).then(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  const rpc = f.sent.at(-1)!;
+  assert.equal(rpc.method, 'turn/steer');
+  assert.deepEqual(rpc.params, { threadId: thread, expectedTurnId: turn, input: [{ type: 'text', text: 'Change direction' }, { type: 'localImage', path: '/workspace/a.png' }] });
+  await f.receive({ id: rpc.id, result: { turnId: turn } });
+  await pending;
+  await f.receive({ method: 'turn/completed', params: { threadId: thread, turn: { id: turn, status: 'completed' } } });
+  await assert.rejects(steer!({ idempotencyKey: 'late', prompt: 'late', attachments: [] }), SteeringNotSent);
+});
+
+test('tool boundary does not block ACK receive and disposal rejects pending steer', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  let pending: Promise<void> | undefined;
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; }, onToolBoundary: async () => {
+    pending = steer!({ idempotencyKey: 'boundary', prompt: 'next', attachments: [] });
+    await pending;
+  } });
+  await f.ready();
+  await f.receive({ method: 'item/completed', params: { threadId: thread, turnId: turn, item: { id: 'tool', type: 'commandExecution', command: 'pwd' } } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(pending);
+  const rejection = assert.rejects(pending, /steering_unavailable/);
+  f.protocol.dispose!();
+  await rejection;
+});
+
+test('pending question refuses steering and provider errors are not accepted', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; }, onQuestion: () => new Promise(() => {}) });
+  await f.ready();
+  const pending = steer!({ idempotencyKey: 'error', prompt: 'next', attachments: [] });
+  const rejection = assert.rejects(pending, SteeringNotSent);
+  await new Promise(resolve => setImmediate(resolve));
+  await f.receive({ id: f.sent.at(-1)!.id, error: { code: -1, message: 'busy' } });
+  await rejection;
+  await f.receive(question());
+  await assert.rejects(steer!({ idempotencyKey: 'question', prompt: 'next', attachments: [] }), SteeringNotSent);
+  f.protocol.dispose!();
+});
+
+test('Codex child lifecycle belongs to linked child and never finishes the root turn', async () => {
+ const f=fixture();await f.ready();
+ await f.receive({method:'item/completed',params:{threadId:thread,turnId:turn,item:{id:'collab',type:'collabAgentToolCall',tool:'spawnAgent',receiverThreadIds:['child'],agentsStates:{child:{status:'running'}}}}});
+ assert.equal(await f.receive({method:'turn/started',params:{threadId:'child',turn:{id:'child-turn'}}}),undefined);
+ assert.equal(await f.receive({method:'turn/completed',params:{threadId:'child',turn:{id:'child-turn',status:'completed'}}}),undefined);
+ const frames=f.output().trim().split('\n').map(value=>JSON.parse(value) as Record<string,unknown>);
+ assert.ok(frames.some(frame=>frame.t==='subagentTurnCompleted'&&frame.agentThreadId==='child'));
+ await assert.rejects(f.receive({method:'turn/completed',params:{threadId:'foreign',turn:{id:'foreign-turn',status:'completed'}}}),/owner_mismatch/);
+ assert.deepEqual(await f.receive({method:'turn/completed',params:{threadId:thread,turn:{id:turn,status:'completed'}}}),{exitCode:0,sessionId:thread});
+});
+
+test('Codex late child completion cannot complete its newer active turn', async () => {
+ const f=fixture();await f.ready();
+ await f.receive({method:'item/completed',params:{threadId:thread,turnId:turn,item:{id:'collab',type:'collabAgentToolCall',tool:'spawnAgent',receiverThreadIds:['child']}}});
+ const start=(id:string)=>f.receive({method:'turn/started',params:{threadId:'child',turn:{id}}});
+ const complete=(id:string)=>f.receive({method:'turn/completed',params:{threadId:'child',turn:{id,status:'completed'}}});
+ await start('a');await complete('a');await start('b');
+ const before=f.output();await start('a');await complete('a');await complete('unseen');await start('unseen');assert.equal(f.output(),before);
+ await complete('b');assert.equal(f.output().split('subagentTurnCompleted').length-1,2);
 });

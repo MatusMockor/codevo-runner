@@ -1,3 +1,5 @@
+import { SubagentLifecycleCollector } from '../domain/subagent-lifecycle.js';
+import { SteeringService } from './steering-service.js';
 import type { QuestionService } from './question-service.js';
 import { ProviderArtifactReferences } from '../domain/artifact-output.js';
 import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
@@ -9,6 +11,7 @@ import type { TaskRepository } from './ports.js';
 
 /** A single runner owns durable admission and one detached worker, independent of HTTP. */
 export class ExecutionService implements ExecutionApplication {
+  private readonly steering: SteeringService;
   private initialized = false;
   private closing = false;
   private worker: Promise<void> | undefined;
@@ -26,7 +29,10 @@ export class ExecutionService implements ExecutionApplication {
     private readonly captureArtifacts?: (taskId: string, paths: readonly string[]) => Promise<boolean>,
     private readonly instructions?: InstructionWorkspace,
     private readonly questions?: QuestionService,
-  ) {}
+  ) { this.steering = new SteeringService(executions, attachments); }
+
+  steer(taskId: string, input: unknown) { this.assertAvailable(); return this.steering.steer(taskId, input); }
+  steerPending(taskId: string, pendingId: string) { this.assertAvailable(); return this.steering.pending(taskId, pendingId); }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -186,6 +192,7 @@ export class ExecutionService implements ExecutionApplication {
   private async run(task: Task): Promise<void> {
     const abort = new AbortController();
     this.active = { taskId: task.id, abort };
+    const steering = this.steering.open(task.id, abort.signal);
     if (this.closing) abort.abort();
     let inputs: StagedExecutionInputs | undefined;
     let syncingInstructions = false;
@@ -215,7 +222,9 @@ export class ExecutionService implements ExecutionApplication {
       if (task.isolation === 'in-place') await this.workspaces.resume(project, session.workspaceTaskId, abort.signal);
       abort.signal.throwIfAborted();
       const artifactReferences = new ProviderArtifactReferences(task.provider);
-      const result = await executor.execute({ task, cwd, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
+      const subagents = new SubagentLifecycleCollector(task.provider);
+      await this.executions.setTaskSubagents?.(task.id, { entries: [], truncated: false });
+      const result = await executor.execute({ task, cwd, onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
         onSession: async (sessionId) => {
           abort.signal.throwIfAborted();
@@ -223,10 +232,17 @@ export class ExecutionService implements ExecutionApplication {
         },
         onOutput: async (channel, text) => {
           abort.signal.throwIfAborted();
-          if (channel === 'stdout') artifactReferences.push(text);
+          if (channel === 'stdout') {
+            artifactReferences.push(text);
+            const snapshot = subagents.feed(text);
+            if (snapshot) await this.executions.setTaskSubagents?.(task.id, snapshot);
+            abort.signal.throwIfAborted();
+          }
           await this.executions.appendTaskOutput(task.id, channel, text);
         },
       });
+      const finalSubagents = subagents.finish();
+      if (finalSubagents) await this.executions.setTaskSubagents?.(task.id, finalSubagents);
       if (result.sessionId) await this.executions.setTaskSession(task.id, result.sessionId);
       if (!this.closing && this.captureArtifacts) {
         let complete = false;
@@ -240,7 +256,10 @@ export class ExecutionService implements ExecutionApplication {
     } finally {
       abort.abort();
       try {
-        try { await this.questions?.expire(task.id); }
+        try {
+          try { await steering.close(); }
+          finally { await this.questions?.expire(task.id); }
+        }
         finally { await inputs?.cleanup(); }
       }
       finally { this.active = undefined; }

@@ -8,6 +8,7 @@ import { LinuxProcessTree } from './linux-process-tree.js';
 
 export type InteractiveSend = (value: unknown) => Promise<void>;
 export interface InteractiveProtocol {
+  dispose?(): void;
   start(send: InteractiveSend, fail?: (error: string) => void): Promise<void>;
   receive(frame: Record<string, unknown>, send: InteractiveSend, fail?: (error: string) => void): Promise<ExecutionResult | undefined>;
 }
@@ -51,7 +52,7 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') result = { exitCode: null, error: 'process_cleanup_failed' }; }
     };
     const finish = (value: ExecutionResult) => { if (!result && !closed) {
-      result = value; kill();
+      result = value; protocol.dispose?.(); kill();
       // A paused pipe may never emit close on Linux while an async receiver is waiting.
       // No further frames are authoritative after a terminal result or cancellation.
       child.stdout.destroy(); child.stderr.destroy(); child.stdin.destroy();
@@ -116,7 +117,7 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
         result ??= { exitCode: null, error: 'output_persistence_failed' }; accept();
       }, 1000); });
       void Promise.race([Promise.all([stdoutDelivery, stderrDelivery]), boundedDrain]).finally(() => {
-        clearTimeout(drainTimer); closed = true; pending = '';
+        clearTimeout(drainTimer); closed = true; protocol.dispose?.(); pending = '';
         plan.signal.removeEventListener('abort', abort);
         resolve(result ?? (providerResult
           ? { ...providerResult, ...(exitCode === 0 ? {} : { exitCode, error: providerResult.error ?? 'provider_reported_failure' }) }

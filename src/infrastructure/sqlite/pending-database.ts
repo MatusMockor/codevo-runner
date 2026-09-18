@@ -1,3 +1,4 @@
+import { STEERING_SCHEMA } from './steering-database.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { RunnerError, type Task } from '../../domain/contracts.js';
@@ -20,7 +21,8 @@ CREATE INDEX IF NOT EXISTS pending_messages_root ON pending_messages(root_id, se
 CREATE TABLE IF NOT EXISTS pending_attachments (
  pending_id TEXT NOT NULL REFERENCES pending_messages(id),
  attachment_id TEXT NOT NULL REFERENCES attachments(id), PRIMARY KEY(pending_id, attachment_id)
-);`;
+);
+${STEERING_SCHEMA}`;
 
 type Dependencies = Readonly<{
  transaction<T>(action: () => T): T;
@@ -45,6 +47,8 @@ export class PendingDatabase {
  }
  private record(row: Record<string, unknown>): PendingMessage {
    const value = JSON.parse(row['payload'] as string) as PendingMessage;
+   const steering = this.db.prepare('SELECT accepted FROM steering_messages WHERE pending_id=?').get(value.id);
+   if (value.status === 'queued' && steering?.['accepted'] === 0) return { ...value, status: 'uncertain' };
    const queue = this.db.prepare('SELECT paused FROM pending_queues WHERE root_id=?').get(value.conversationId);
    return value.status === 'queued' && queue?.['paused'] === 1 ? { ...value, status: 'paused' } : value;
  }
@@ -111,8 +115,8 @@ export class PendingDatabase {
  promotePending(): Task | null {
    return this.dependencies.transaction(() => {
      const queues = this.db.prepare(`SELECT q.root_id,q.allow_terminal FROM pending_queues q
-       WHERE q.paused=0 AND EXISTS(SELECT 1 FROM pending_messages m WHERE m.root_id=q.root_id AND json_extract(m.payload,'$.status')='queued')
-       ORDER BY (SELECT min(sequence) FROM pending_messages m WHERE m.root_id=q.root_id AND json_extract(m.payload,'$.status')='queued') LIMIT ?`).all(PENDING_LIMITS.retained);
+       WHERE q.paused=0 AND EXISTS(SELECT 1 FROM pending_messages m WHERE m.root_id=q.root_id AND json_extract(m.payload,'$.status')='queued' AND m.id NOT IN (SELECT pending_id FROM steering_messages WHERE pending_id IS NOT NULL))
+       ORDER BY (SELECT min(sequence) FROM pending_messages m WHERE m.root_id=q.root_id AND json_extract(m.payload,'$.status')='queued' AND m.id NOT IN (SELECT pending_id FROM steering_messages WHERE pending_id IS NOT NULL)) LIMIT ?`).all(PENDING_LIMITS.retained);
      for (const queue of queues) {
        const root = queue['root_id'] as string;
        const latest = this.latest(root);
@@ -120,7 +124,7 @@ export class PendingDatabase {
        if ((latest.status !== 'succeeded' && queue['allow_terminal'] !== 1) || !this.dependencies.resumeState(latest.id).available) {
          this.pauseTask(latest.id); continue;
        }
-       const row = this.db.prepare("SELECT payload,dispatch_key FROM pending_messages WHERE root_id=? AND json_extract(payload,'$.status')='queued' ORDER BY sequence LIMIT 1").get(root)!;
+       const row = this.db.prepare("SELECT payload,dispatch_key FROM pending_messages WHERE root_id=? AND json_extract(payload,'$.status')='queued' AND id NOT IN (SELECT pending_id FROM steering_messages WHERE pending_id IS NOT NULL) ORDER BY sequence LIMIT 1").get(root)!;
        const pending = this.record(row);
        this.db.exec('SAVEPOINT pending_promotion');
        let result: { task: Task; created: boolean };

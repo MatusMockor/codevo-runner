@@ -1,3 +1,5 @@
+import { parseAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
+import { SteeringDatabase } from './steering-database.js';
 import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
 import { outputRetentionMetadata, retainOutputWindow, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
 export { SQLITE_EXECUTION_STORAGE } from './output-retention.js';
@@ -28,6 +30,7 @@ export class RepositoryDatabase {
   readonly clones: CloneDatabase;
   readonly resumes: ResumeDatabase;
   readonly pending: PendingDatabase;
+  readonly steering: SteeringDatabase;
   constructor(dataDir: string, private readonly runnerId: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     try {
@@ -40,6 +43,7 @@ export class RepositoryDatabase {
       this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
       this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
+      this.steering = new SteeringDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id) });
       this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
     } catch (error) {
       try { this.db?.close(); } finally { this.lease?.close(); }
@@ -69,6 +73,7 @@ export class RepositoryDatabase {
       this.db.exec(PENDING_SCHEMA);
       this.db.exec(ARTIFACT_SCHEMA);
       this.db.exec(QUESTION_SCHEMA);
+      this.db.exec('CREATE TABLE IF NOT EXISTS task_subagents (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)');
     });
   }
   private transaction<T>(action: () => T): T {
@@ -205,9 +210,29 @@ export class RepositoryDatabase {
   listTasks(after: number): Page<Task> {
     return this.page(this.db.prepare('SELECT sequence,payload FROM tasks WHERE sequence>? ORDER BY sequence LIMIT ?').all(after, LIMITS.pageSize + 1).map(row => this.task(row)));
   }
+  setTaskSubagents(taskId: string, snapshot: AgentSubagentLifecycle): void {
+    const parsed = parseAgentSubagentLifecycle(snapshot);
+    if (!parsed) throw new RunnerError('invalid_input');
+    this.transaction(() => {
+      if (this.getTask(taskId).status !== 'running') return;
+      this.requireBulkCapacity();
+      this.db.prepare('INSERT INTO task_subagents(task_id,payload) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET payload=excluded.payload').run(taskId, JSON.stringify(parsed));
+    });
+  }
   listEvents(taskId: string, after: number): EventPage {
     this.getTask(taskId);
-    return { ...outputRetentionMetadata(this.db, taskId), ...this.page(this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1).map(row => ({ sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string, ...(row['data'] ? JSON.parse(row['data'] as string) as object : {}) }))) };
+    const rows = this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1);
+    const items: TaskEvent[] = [];
+    let bytes = 0;
+    for (const row of rows) {
+      const event = { sequence: Number(row['sequence']), taskId: row['task_id'] as string, type: row['type'] as TaskEvent['type'], createdAt: row['created_at'] as string, ...(row['data'] ? JSON.parse(row['data'] as string) as object : {}) };
+      const size = Buffer.byteLength(JSON.stringify(event));
+      if (items.length >= LIMITS.pageSize || (items.length > 0 && bytes + size > 3 * 1024 * 1024)) break;
+      items.push(event); bytes += size;
+    }
+    const saved = this.db.prepare('SELECT payload FROM task_subagents WHERE task_id=?').get(taskId);
+    const subagentLifecycle = saved ? parseAgentSubagentLifecycle(JSON.parse(saved['payload'] as string)) : undefined;
+    return { ...(subagentLifecycle ? { subagentLifecycle } : {}), ...outputRetentionMetadata(this.db, taskId), items, nextCursor: items.length < rows.length ? items.at(-1)!.sequence : null };
   }
   getAttachment(id: string): Attachment {
     const row = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(id);

@@ -7,6 +7,8 @@ import type { RunnerDescriptor } from '../server.js';
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
 const continueRoute = new RegExp(`^/v1/tasks/${uuid}/continue$`);
+const steerRoute = new RegExp(`^/v1/tasks/${uuid}/steer$`);
+const pendingSteerRoute = new RegExp(`^/v1/tasks/${uuid}/pending/${uuid}/steer$`);
 const pendingRoute = new RegExp(`^/v1/tasks/${uuid}/pending$`);
 const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
 const artifactRoute = new RegExp(`^/v1/tasks/${uuid}/artifacts$`);
@@ -26,6 +28,8 @@ const routes = [
   { pattern: answerRoute, methods: ['POST'] },
   { pattern: artifactRoute, methods: ['GET', 'POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/artifacts/${uuid}/content$`), methods: ['GET'] },
+  { pattern: steerRoute, methods: ['POST'] },
+  { pattern: pendingSteerRoute, methods: ['POST'] },
   { pattern: pendingRoute, methods: ['GET', 'POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/pending/resume$`), methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/pending/${uuid}$`), methods: ['DELETE'] },
@@ -74,7 +78,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'POST' &&
-      (terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
+      (terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

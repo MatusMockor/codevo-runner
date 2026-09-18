@@ -14,6 +14,13 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'setTaskSubagents': value = db.setTaskSubagents(...request.args); break;
+        case 'releaseSteer': value = db.steering.releaseSteer(...request.args); break;
+        case 'claimSteer': value = db.steering.claimSteer(...request.args); break;
+        case 'claimPendingSteer': value = db.steering.claimPendingSteer(...request.args); break;
+        case 'acceptSteer': value = db.steering.acceptSteer(...request.args); break;
+        case 'findSteer': value = db.steering.findSteer(...request.args); break;
+        case 'findPendingSteer': value = db.steering.findPendingSteer(...request.args); break;
         case 'createQuestion': value = db.questions.createQuestion(...request.args); break;
         case 'listQuestions': value = db.questions.listQuestions(...request.args); break;
         case 'answerQuestion': value = db.questions.answerQuestion(...request.args); break;

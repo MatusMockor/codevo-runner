@@ -69,6 +69,22 @@ export class TaskController {
     });
   }
 
+  @Post(':id/steer')
+  steer(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.steer(id, await jsonBody(request)));
+    });
+  }
+
+  @Post(':id/pending/:pendingId/steer')
+  steerPending(@Param('id') id: string, @Param('pendingId') pendingId: string, @Res() response: Response) {
+    return handle(response, async () => {
+      if (!this.services.execution) throw new RunnerError('not_found');
+      send(response, 200, await this.services.execution.steerPending(id, pendingId));
+    });
+  }
+
   @Get(':id/pending')
   pending(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
