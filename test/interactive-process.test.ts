@@ -120,3 +120,62 @@ test('provider-exit protocol failure remains terminal after an early success', a
     assert.deepEqual(result, { exitCode: null, error: 'provider_question_cancelled' });
   } finally { await f.close(); }
 });
+
+test('Claude process keeps stdin through background notification and delayed final answer', async () => {
+  const { executeClaudeInteractive } = await import('../src/infrastructure/execution/claude-interactive.js');
+  const session = '01998cf0-1111-7111-8111-111111111111';
+  const f = await fixture(`
+    const emit = value => console.log(JSON.stringify(value));
+    const session = '${session}';
+    let timer;
+    process.stdin.on('data', chunk => {
+      for (const line of chunk.toString().trim().split('\\n')) {
+        const frame = JSON.parse(line);
+        if (frame.type === 'control_request') emit({type:'control_response',response:{subtype:'success',request_id:'codevo-initialize'}});
+        if (frame.type === 'user') {
+          emit({type:'system',subtype:'init',session_id:session});
+          emit({type:'system',subtype:'task_started',task_id:'watch',task_type:'local_bash',session_id:session});
+          emit({type:'result',subtype:'success',is_error:false,session_id:session});
+          timer = setTimeout(() => {
+            emit({type:'system',subtype:'task_notification',task_id:'watch',status:'completed',session_id:session});
+            emit({type:'assistant',message:{content:[{type:'text',text:'Pipeline finished'}]}});
+            emit({type:'result',subtype:'success',is_error:false,session_id:session});
+          },80);
+        }
+      }
+    });
+    process.stdin.on('end',()=>{ clearTimeout(timer); process.exit(0); });
+  `);
+  const output: string[] = [];
+  try {
+    const result = await executeClaudeInteractive({ ...f, prompt: 'watch', images: [], request: {
+      task: { id: session, runnerId: session, sequence: 1, provider: 'claude', status: 'running', parts: [], createdAt: new Date().toISOString() },
+      cwd: f.cwd, signal: f.signal, attachments: [], onOutput: async (_channel, text) => { output.push(text); },
+    } });
+    assert.deepEqual(result, { exitCode: 0, sessionId: session });
+    assert.ok(output.join('').includes('Pipeline finished'));
+    assert.equal(output.filter(line => line.includes('"type":"result"')).length, 2);
+  } finally { await f.close(); }
+});
+
+test('Stop cancels Claude with real background work retained after foreground result', async () => {
+  const { executeClaudeInteractive } = await import('../src/infrastructure/execution/claude-interactive.js');
+  const session = '01998cf0-1111-7111-8111-111111111111';
+  const f = await fixture(`process.stdin.resume();
+    for (const event of [
+      {type:'system',subtype:'init',session_id:'${session}'},
+      {type:'system',subtype:'task_started',task_id:'watch'},
+      {type:'result',subtype:'success',is_error:false,session_id:'${session}'}
+    ]) console.log(JSON.stringify(event));
+    setInterval(()=>{},1000);`);
+  const abort = new AbortController();
+  try {
+    const result = await executeClaudeInteractive({ ...f, signal: abort.signal, prompt: 'watch', images: [], request: {
+      task: { id: session, runnerId: session, sequence: 1, provider: 'claude', status: 'running', parts: [], createdAt: new Date().toISOString() },
+      cwd: f.cwd, signal: abort.signal, attachments: [], onOutput: async (_channel, text) => {
+        if (text.includes('"type":"result"')) setTimeout(() => abort.abort(), 20);
+      },
+    } });
+    assert.equal(result.error, 'cancelled');
+  } finally { await f.close(); }
+});

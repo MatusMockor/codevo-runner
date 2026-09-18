@@ -1,6 +1,7 @@
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
 import type { AgentQuestion } from '../../domain/questions.js';
 import { isProviderSessionId } from '../../domain/provider-output.js';
+import { ClaudeBackgroundTasks } from '../../domain/claude-background-tasks.js';
 import { emitInteractiveOutput, runInteractiveProcess, type InteractiveProcessPlan, type InteractiveProtocol } from './interactive-process.js';
 
 type ClaudePlan = Omit<InteractiveProcessPlan, 'onOutput'> & Readonly<{
@@ -41,6 +42,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   let sessionId: string | undefined;
   let questionId: string | undefined;
   const seen = new Set<string>();
+  const backgroundTasks = new ClaudeBackgroundTasks();
   return {
     async start(send) {
       await send({ type: 'control_request', request_id: 'codevo-initialize', request: { subtype: 'initialize', hooks: {} } });
@@ -106,10 +108,14 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
         await plan.request.onSession?.(sessionId);
       }
       if (!['system', 'assistant', 'user', 'result', 'stream_event', 'tool_progress', 'tool_use_summary', 'rate_limit_event'].includes(String(frame.type))) return;
+      backgroundTasks.observe(frame, sessionId);
       await emitInteractiveOutput(plan.request.onOutput, 'stdout', JSON.stringify(frame) + '\n');
       if (frame.type === 'result') {
         if (questionId) { questionId = undefined; return { exitCode: null, error: 'provider_question_unanswered' }; }
         if (!sessionId || frame.session_id !== sessionId) throw new Error('session_mismatch');
+        // Keep bidirectional stdin alive through the delayed assistant answer. A task's
+        // terminal notification alone is not the final foreground result.
+        if (frame.is_error === false && frame.subtype === 'success' && backgroundTasks.active) return;
         return { exitCode: frame.is_error === false && frame.subtype === 'success' ? 0 : 1, sessionId,
           ...(frame.is_error === false && frame.subtype === 'success' ? {} : { error: 'provider_reported_failure' }) };
       }

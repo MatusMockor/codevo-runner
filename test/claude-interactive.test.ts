@@ -33,3 +33,53 @@ test('Claude rejects duplicate prompt and option label mappings', () => {
   assert.throws(() => parseClaudeQuestions({ questions: [input.questions[0], input.questions[0]] }));
   assert.throws(() => parseClaudeQuestions({ questions: [{ ...input.questions[0], options: [input.questions[0]!.options[0], input.questions[0]!.options[0]] }] }));
 });
+
+test('Claude retains foreground success until real background work and delayed answer finish', async () => {
+  const f = fixture();
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  const success = { type: 'result', subtype: 'success', is_error: false, session_id: session };
+  await f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'watch-1', task_type: 'local_bash', session_id: session }, f.send);
+  assert.equal(await f.protocol.receive(success, f.send), undefined);
+  await f.protocol.receive({ type: 'system', subtype: 'task_notification', task_id: 'watch-1', status: 'completed', session_id: session }, f.send);
+  // A duplicate start or late progress cannot revive completed work.
+  await f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'watch-1', session_id: session }, f.send);
+  await f.protocol.receive({ type: 'system', subtype: 'task_progress', task_id: 'watch-1', session_id: session }, f.send);
+  assert.equal(await f.protocol.receive({ type: 'assistant', message: { content: [{ type: 'text', text: 'Pipeline completed.' }] } }, f.send), undefined);
+  assert.deepEqual(await f.protocol.receive(success, f.send), { exitCode: 0, sessionId: session });
+});
+
+test('Claude task patches settle live work while foreign sessions fail closed', async () => {
+  const f = fixture();
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  await assert.rejects(f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'x', session_id: 'foreign' }, f.send), /session_mismatch/);
+  await f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'x' }, f.send);
+  await f.protocol.receive({ type: 'system', subtype: 'task_updated', task_id: 'x', patch: { status: 'killed' } }, f.send);
+  assert.deepEqual(await f.protocol.receive({ type: 'result', subtype: 'success', is_error: false, session_id: session }, f.send), { exitCode: 0, sessionId: session });
+});
+
+test('Claude error results stay terminal with background work; failed task awaits final result', async () => {
+  const f = fixture();
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  await f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'x' }, f.send);
+  assert.deepEqual(await f.protocol.receive({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: session }, f.send), {
+    exitCode: 1, sessionId: session, error: 'provider_reported_failure',
+  });
+  const second = fixture();
+  await second.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, second.send);
+  await second.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'x' }, second.send);
+  assert.equal(await second.protocol.receive({ type: 'system', subtype: 'task_notification', task_id: 'x', status: 'failed' }, second.send), undefined);
+  assert.deepEqual(await second.protocol.receive({ type: 'result', subtype: 'success', is_error: false, session_id: session }, second.send), { exitCode: 0, sessionId: session });
+});
+
+test('Claude retains paused work because it can resume before the delayed final result', async () => {
+  const f = fixture();
+  const success = { type: 'result', subtype: 'success', is_error: false, session_id: session };
+  await f.protocol.receive({ type: 'system', subtype: 'init', session_id: session }, f.send);
+  await f.protocol.receive({ type: 'system', subtype: 'task_started', task_id: 'monitor' }, f.send);
+  await f.protocol.receive({ type: 'system', subtype: 'task_updated', task_id: 'monitor', patch: { status: 'paused' } }, f.send);
+  assert.equal(await f.protocol.receive(success, f.send), undefined);
+  await f.protocol.receive({ type: 'system', subtype: 'task_updated', task_id: 'monitor', patch: { status: 'running' } }, f.send);
+  assert.equal(await f.protocol.receive(success, f.send), undefined);
+  await f.protocol.receive({ type: 'system', subtype: 'task_updated', task_id: 'monitor', patch: { status: 'completed' } }, f.send);
+  assert.deepEqual(await f.protocol.receive(success, f.send), { exitCode: 0, sessionId: session });
+});
