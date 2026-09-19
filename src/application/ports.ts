@@ -1,5 +1,8 @@
 import type { Attachment, CreateTask, EventPage, Page, Task, TaskEvent } from '../domain/contracts.js';
 
+/** Retained detail is served only to clients that announce support for the newer fields. */
+export type SubagentLifecycleDetail = 'legacy' | 'retained';
+
 /** Implementations own transactions, uniqueness, quotas and runner scoping. */
 export interface TaskRepository {
   createTask(input: CreateTask): Promise<Readonly<{ task: Task; created: boolean }>>;
@@ -29,5 +32,5 @@ export interface TaskApplication {
   get(id: string): Promise<Task>;
   list(after: number): Promise<Page<Task>>;
   cancel(id: string): Promise<Task>;
-  events(id: string, after: number): Promise<EventPage>;
+  events(id: string, after: number, detail?: SubagentLifecycleDetail): Promise<EventPage>;
 }

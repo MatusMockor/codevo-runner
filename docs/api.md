@@ -204,6 +204,21 @@ records may precede the watermark and must still be processed. Show older output
 unavailable and continue consuming new output. Search marks retained-history results
 incomplete when output was evicted. SQLite migration 7 persists these watermarks.
 
+Event pages may also carry `subagentLifecycle`, a bounded snapshot of at most 32 child
+agents kept outside the output window. Entries retain `taskTitle` (the spawn title,
+written once), `batchKey` (frozen at the first sight of the spawn, with the still-open
+batch in the root `openBatchKey`), `nestedCount` and `parentToolId` for nested agents,
+and `countedNestedToolIds` so replays of the 32 most recent nested identities cannot
+inflate the count. Nested entries carry no result frame and stay `running`. Bounds are byte-exact
+and pinned by `test/fixtures/agent-subagent-lifecycle-wire.json`, shared with the
+editor. Those fields are sent only to a client that announces
+`subagentLifecycleRetention` in the `X-Codevo-Client-Capabilities` request header
+(comma-separated, at most 16 printable-ASCII tokens and 512 characters; an absent,
+oversized or non-ASCII header announces nothing). Every other client
+receives the older closed shape: nested entries are removed and `truncated` becomes
+true. The runner advertises `subagentLifecycleRetention` in `GET /v1/runner`. A
+stored snapshot that cannot be read is dropped rather than failing the page.
+
 Provider metadata and artifact discovery process the complete stream independently
 of the retained replay window. There is no default lifetime process-output cutoff;
 chunks use backpressure. Execution defaults to a 12-hour wall-clock deadline,

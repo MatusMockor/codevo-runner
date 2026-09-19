@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "limits": {
+    "entries": 32,
+    "taskTitleBytes": 480,
+    "batchKeyBytes": 272,
+    "parentToolIdBytes": 256,
+    "nestedCount": 999,
+    "countedNestedToolIds": 32
+  },
+  "valid": {
+    "legacy": {
+      "entries": [
+        {
+          "description": "Running grep -n export src/domain/example.ts",
+          "durationMs": 654474,
+          "id": "tool:toolu_legacy_a",
+          "lastToolName": "Bash",
+          "name": "general-purpose",
+          "resultState": "completed",
+          "state": "completed",
+          "steps": 35,
+          "taskId": "task-legacy-a",
+          "telemetryState": "completed",
+          "toolId": "toolu_legacy_a",
+          "totalTokens": 136996
+        }
+      ],
+      "truncated": false
+    },
+    "retained": {
+      "entries": [
+        {
+          "batchKey": "spawn:toolu_parent",
+          "description": "Running npx vitest run",
+          "durationMs": 76099,
+          "id": "tool:toolu_parent",
+          "lastToolName": "Bash",
+          "name": "general-purpose",
+          "nestedCount": 1,
+          "state": "running",
+          "steps": 31,
+          "taskId": "task-parent",
+          "taskTitle": "Fix subagent view findings",
+          "telemetryState": "running",
+          "toolId": "toolu_parent",
+          "totalTokens": 87253
+        },
+        {
+          "description": "Review slice fixes",
+          "id": "tool:toolu_nested",
+          "name": "Agent",
+          "parentToolId": "toolu_parent",
+          "state": "running",
+          "taskTitle": "Review slice fixes",
+          "toolId": "toolu_nested"
+        }
+      ],
+      "countedNestedToolIds": ["toolu_nested_overflow"],
+      "openBatchKey": "spawn:toolu_parent",
+      "truncated": false
+    }
+  },
+  "invalidEntryPatches": [
+    { "taskTitle": "" },
+    { "taskTitle": 7 },
+    { "batchKey": "" },
+    { "batchKey": null },
+    { "nestedCount": 0 },
+    { "nestedCount": 1000 },
+    { "nestedCount": 1.5 },
+    { "nestedCount": "1" },
+    { "parentToolId": "" },
+    { "unknownField": true },
+    { "nestedCount": -1 },
+    {
+      "taskTitle": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    },
+    {
+      "batchKey": "spawn:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "parentToolId": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+    },
+    { "state": "completed" },
+    { "toolId": "toolu_nested" }
+  ],
+  "invalidRootPatches": [
+    { "openBatchKey": "" },
+    { "openBatchKey": 3 },
+    { "countedNestedToolIds": [] },
+    { "countedNestedToolIds": [""] },
+    { "countedNestedToolIds": ["dup", "dup"] },
+    { "countedNestedToolIds": "toolu_nested_overflow" },
+    { "unknownField": true },
+    {
+      "openBatchKey": "spawn:ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+    },
+    {
+      "countedNestedToolIds": [
+        "toolu_overflow_0",
+        "toolu_overflow_1",
+        "toolu_overflow_2",
+        "toolu_overflow_3",
+        "toolu_overflow_4",
+        "toolu_overflow_5",
+        "toolu_overflow_6",
+        "toolu_overflow_7",
+        "toolu_overflow_8",
+        "toolu_overflow_9",
+        "toolu_overflow_10",
+        "toolu_overflow_11",
+        "toolu_overflow_12",
+        "toolu_overflow_13",
+        "toolu_overflow_14",
+        "toolu_overflow_15",
+        "toolu_overflow_16",
+        "toolu_overflow_17",
+        "toolu_overflow_18",
+        "toolu_overflow_19",
+        "toolu_overflow_20",
+        "toolu_overflow_21",
+        "toolu_overflow_22",
+        "toolu_overflow_23",
+        "toolu_overflow_24",
+        "toolu_overflow_25",
+        "toolu_overflow_26",
+        "toolu_overflow_27",
+        "toolu_overflow_28",
+        "toolu_overflow_29",
+        "toolu_overflow_30",
+        "toolu_overflow_31",
+        "toolu_overflow_32"
+      ]
+    },
+    {
+      "countedNestedToolIds": [
+        "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      ]
+    }
+  ]
+}

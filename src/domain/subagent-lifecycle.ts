@@ -1,12 +1,27 @@
-type AgentTurnEvent =
+export type AgentTurnEvent =
  | {kind:'toolCall'; toolId:string; name:string; description?:string; inputSummary:string; parentToolId?:string}
  | {kind:'toolResult'; toolId:string; isError:boolean; parentToolId?:string}
+ | {kind:'assistantText'; text:string; parentToolId?:string}
+ | {kind:'userMessage'}
+ | {kind:'result'}
  | {kind:'subagent'; toolId?:string; taskId?:string; status:'starting'|'running'|'completed'|'failed'|'interrupted'; subagentType?:string; description?:string; durationMs?:number; totalTokens?:number; toolUses?:number; lastToolName?:string}
  | {kind:'subagentActivity'; agentThreadId:string; agentPath:string; activity:'started'|'interacted'|'interrupted'|'completed'}
  | {kind:'subagentTurnDone'; agentThreadId:string; durationMs:number|null; isError:boolean};
 
+type SubagentEventIdentity = Readonly<{ toolId?: string; taskId?: string; agentThreadId?: string }>;
 
+/** Wire contract shared with the editor: test/fixtures/agent-subagent-lifecycle-wire.json. */
 export const MAX_RETAINED_SUBAGENTS = 32;
+export const MAX_SUBAGENT_TASK_TITLE_CHARACTERS = 120;
+export const MAX_SUBAGENT_TASK_TITLE_BYTES = MAX_SUBAGENT_TASK_TITLE_CHARACTERS * 4;
+export const MAX_SUBAGENT_BATCH_KEY_BYTES = 272;
+export const MAX_SUBAGENT_PARENT_TOOL_ID_BYTES = 256;
+export const MAX_SUBAGENT_NESTED_COUNT = 999;
+export const MAX_SUBAGENT_COUNTED_NESTED_IDS = 32;
+/** Clients announcing this capability receive the retained detail fields. */
+export const SUBAGENT_LIFECYCLE_RETENTION = 'subagentLifecycleRetention';
+const MAX_NESTED_ANCESTOR_DEPTH = 8;
+const SPAWN_BATCH_KEY_PREFIX = 'spawn:';
 export type AgentSubagentLifecycleState = "running" | "completed" | "failed" | "interrupted";
 export interface AgentSubagentLifecycleEntry {
   readonly id: string;
@@ -22,10 +37,16 @@ export interface AgentSubagentLifecycleEntry {
   readonly totalTokens?: number;
   readonly steps?: number;
   readonly lastToolName?: string;
+  readonly taskTitle?: string;
+  readonly batchKey?: string;
+  readonly nestedCount?: number;
+  readonly parentToolId?: string;
 }
 export interface AgentSubagentLifecycle {
   readonly entries: ReadonlyArray<AgentSubagentLifecycleEntry>;
   readonly truncated: boolean;
+  readonly openBatchKey?: string;
+  readonly countedNestedToolIds?: ReadonlyArray<string>;
 }
 const encoder = new TextEncoder();
 function clip(value: string, bytes: number): string {
@@ -42,15 +63,158 @@ function spawn(name: string): boolean {
   return name === "Task" || name === "Agent" || name === "SpawnAgent" || name === "spawn_agent";
 }
 
+/** A spawn batch stays open until the assistant step that opened it produces other work. */
+function closesSpawnBatch(event: AgentTurnEvent): boolean {
+  switch (event.kind) {
+    case "toolCall":
+      return event.parentToolId === undefined && !spawn(event.name);
+    case "assistantText":
+      return event.parentToolId === undefined && event.text.trim() !== "";
+    case "toolResult":
+      return event.parentToolId === undefined;
+    case "userMessage":
+    case "result":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function spawnBatchKey(toolId: string | undefined): string | undefined {
+  return validId(toolId) ? `${SPAWN_BATCH_KEY_PREFIX}${toolId}` : undefined;
+}
+
+/** The spawn title is written once; later progress frames only rewrite the description. */
+function taskTitleOf(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const line = value.trim().replace(/\s+/gu, " ");
+  if (line === "") return undefined;
+  return [...line].slice(0, MAX_SUBAGENT_TASK_TITLE_CHARACTERS).join("");
+}
+
+function subagentEventIdentity(event: AgentTurnEvent): SubagentEventIdentity | null {
+  switch (event.kind) {
+    case "toolCall":
+      return event.parentToolId === undefined && spawn(event.name) ? { toolId: event.toolId } : null;
+    case "toolResult":
+      return event.parentToolId === undefined ? { toolId: event.toolId } : null;
+    case "subagent":
+      return { toolId: event.toolId, taskId: event.taskId };
+    case "subagentActivity":
+    case "subagentTurnDone":
+      return { agentThreadId: event.agentThreadId };
+    default:
+      return null;
+  }
+}
+
+function nestedRoot(
+  entries: ReadonlyMap<string, AgentSubagentLifecycleEntry>,
+  parentToolId: string,
+): AgentSubagentLifecycleEntry | undefined {
+  let toolId: string | undefined = parentToolId;
+  for (let depth = 0; depth < MAX_NESTED_ANCESTOR_DEPTH && toolId !== undefined; depth += 1) {
+    const current: string = toolId;
+    const parent = [...entries.values()].find((entry) => entry.toolId === current);
+    if (parent === undefined) return undefined;
+    if (parent.parentToolId === undefined) return parent;
+    toolId = parent.parentToolId;
+  }
+  return undefined;
+}
+
+function rememberCountedNested(counted: Set<string>, toolId: string): void {
+  counted.add(toolId);
+  for (const oldest of counted) {
+    if (counted.size <= MAX_SUBAGENT_COUNTED_NESTED_IDS) break;
+    counted.delete(oldest);
+  }
+}
+
+/** One alias-aware lookup for every path: a second entry for a known identity is unwritable. */
+function resolveAlias(
+  entries: Map<string, AgentSubagentLifecycleEntry>,
+  identity: SubagentEventIdentity,
+): AgentSubagentLifecycleEntry | undefined {
+  const { toolId, taskId, agentThreadId } = identity;
+  const [first, ...aliases] = [...entries.values()].filter(
+    (entry) =>
+      (toolId !== undefined && entry.toolId === toolId) ||
+      (taskId !== undefined && entry.taskId === taskId) ||
+      (agentThreadId !== undefined && entry.agentThreadId === agentThreadId),
+  );
+  if (first === undefined) return undefined;
+  let found = first;
+  for (const alias of aliases) {
+    entries.delete(alias.id);
+    found = mergeAliases(found, alias);
+  }
+  entries.set(found.id, found);
+  return found;
+}
+
+/** Replayed nested spawns must not inflate the ancestor count once the entry cap is reached. */
+function retainNestedSpawn(
+  entries: Map<string, AgentSubagentLifecycleEntry>,
+  counted: Set<string>,
+  event: Extract<AgentTurnEvent, { kind: "toolCall" }>,
+  parentToolId: string,
+): "retained" | "truncated" {
+  if (!validId(event.toolId) || !validId(parentToolId)) return "truncated";
+  const existing = resolveAlias(entries, { toolId: event.toolId });
+  if (existing?.parentToolId !== undefined) return "retained";
+  if (counted.has(event.toolId)) return "retained";
+  const root = nestedRoot(entries, parentToolId);
+  if (root === undefined) return "truncated";
+  if (existing?.id === root.id) return "retained";
+  entries.set(root.id, { ...root, nestedCount: Math.min(MAX_SUBAGENT_NESTED_COUNT, (root.nestedCount ?? 0) + 1) });
+  const description = clip(event.description ?? event.inputSummary, 512);
+  const taskTitle = existing?.taskTitle ?? taskTitleOf(event.description ?? event.inputSummary);
+  if (existing !== undefined) {
+    entries.set(existing.id, {
+      ...existing,
+      parentToolId,
+      description: existing.description || description,
+      ...(taskTitle === undefined ? {} : { taskTitle }),
+    });
+    return "retained";
+  }
+  if (entries.size >= MAX_RETAINED_SUBAGENTS) {
+    rememberCountedNested(counted, event.toolId);
+    return "truncated";
+  }
+  entries.set(`tool:${event.toolId}`, {
+    id: `tool:${event.toolId}`,
+    toolId: event.toolId,
+    parentToolId,
+    name: clip(event.name, 128),
+    description,
+    state: "running",
+    ...(taskTitle === undefined ? {} : { taskTitle }),
+  });
+  return "retained";
+}
+
 /** Lifecycle-only metadata outlives the bounded output window; terminal entries are tombstones. */
 export function retainAgentSubagentLifecycle(
   previous: AgentSubagentLifecycle | undefined,
   events: ReadonlyArray<AgentTurnEvent>,
 ): AgentSubagentLifecycle | undefined {
   const entries = new Map((previous?.entries ?? []).map((entry) => [entry.id, entry]));
+  const counted = new Set(previous?.countedNestedToolIds ?? []);
   let truncated = previous?.truncated ?? false;
+  let openBatchKey = previous?.openBatchKey;
   let changed = false;
   for (const event of events) {
+    if (openBatchKey !== undefined && closesSpawnBatch(event)) {
+      openBatchKey = undefined;
+      changed = true;
+    }
+    if (event.kind === "toolCall" && event.parentToolId !== undefined && spawn(event.name)) {
+      if (retainNestedSpawn(entries, counted, event, event.parentToolId) === "truncated") truncated = true;
+      changed = true;
+      continue;
+    }
     // Codex child thread telemetry is authoritative. Spawn-tool acknowledgements
     // have no child identity and must not count as additional agents.
     if (event.kind === "subagentActivity" || event.kind === "subagentTurnDone") {
@@ -64,29 +228,10 @@ export function retainAgentSubagentLifecycle(
       [...entries.values()].some((entry) => entry.agentThreadId !== undefined)
     )
       continue;
-    let toolId: string | undefined;
-    let taskId: string | undefined;
-    let agentThreadId: string | undefined;
-    if (event.kind === "toolCall" && event.parentToolId === undefined && spawn(event.name))
-      toolId = event.toolId;
-    else if (event.kind === "toolResult" && event.parentToolId === undefined) toolId = event.toolId;
-    else if (event.kind === "subagent") {
-      toolId = event.toolId;
-      taskId = event.taskId;
-    } else if (event.kind === "subagentActivity" || event.kind === "subagentTurnDone")
-      agentThreadId = event.agentThreadId;
-    else continue;
-    const matches = [...entries.values()].filter(
-      (entry) =>
-        (toolId !== undefined && entry.toolId === toolId) ||
-        (taskId !== undefined && entry.taskId === taskId) ||
-        (agentThreadId !== undefined && entry.agentThreadId === agentThreadId),
-    );
-    let found = matches[0];
-    for (const alias of matches.slice(1)) {
-      entries.delete(alias.id);
-      found = mergeAliases(found!, alias);
-    }
+    const identity = subagentEventIdentity(event);
+    if (identity === null) continue;
+    const { toolId, taskId, agentThreadId } = identity;
+    const found = resolveAlias(entries, identity);
     if (event.kind === "toolResult" && found === undefined) continue;
     const key =
       found?.id ??
@@ -119,12 +264,22 @@ export function retainAgentSubagentLifecycle(
       ...(validId(taskId) ? { taskId } : {}),
       ...(validId(agentThreadId) ? { agentThreadId } : {}),
     };
-    if (event.kind === "toolCall")
+    if (event.kind === "toolCall") {
+      const taskTitle = entry.taskTitle ?? taskTitleOf(event.description ?? event.inputSummary);
+      if (entry.batchKey === undefined) openBatchKey ??= spawnBatchKey(toolId);
+      const batchKey = entry.batchKey ?? openBatchKey;
       entry = {
         ...entry,
         name: clip(event.name, 128),
         description: clip(event.description ?? event.inputSummary, 512),
+        ...(taskTitle === undefined ? {} : { taskTitle }),
+        ...(batchKey === undefined ? {} : { batchKey }),
       };
+    }
+    if (event.kind === "subagent" && event.status === "starting" && entry.taskTitle === undefined) {
+      const taskTitle = taskTitleOf(event.description);
+      entry = { ...entry, ...(taskTitle === undefined ? {} : { taskTitle }) };
+    }
     if (event.kind === "toolResult" && entry.resultState === undefined)
       entry = { ...entry, resultState: event.isError ? "failed" : "completed" };
     if (event.kind === "subagent") {
@@ -176,7 +331,21 @@ export function retainAgentSubagentLifecycle(
     entries.set(key, { ...entry, state });
     changed = true;
   }
-  return changed ? { entries: [...entries.values()], truncated } : previous;
+  if (!changed) return previous;
+  return {
+    entries: [...entries.values()],
+    truncated,
+    ...(openBatchKey === undefined ? {} : { openBatchKey }),
+    ...(counted.size === 0 ? {} : { countedNestedToolIds: [...counted] }),
+  };
+}
+
+/** Clients that predate the retained detail reject unknown keys, so serve them the closed legacy shape. */
+export function legacyAgentSubagentLifecycle(lifecycle: AgentSubagentLifecycle): AgentSubagentLifecycle {
+  const entries = lifecycle.entries
+    .filter((entry) => entry.parentToolId === undefined)
+    .map(({ taskTitle: _title, batchKey: _batch, nestedCount: _nested, parentToolId: _parent, ...legacy }) => legacy);
+  return { entries, truncated: lifecycle.truncated || entries.length !== lifecycle.entries.length };
 }
 
 function mergeAliases(
@@ -199,14 +368,27 @@ function mergeAliases(
     first.resultState === "failed" || second.resultState === "failed"
       ? "failed"
       : (first.resultState ?? second.resultState);
+  const { parentToolId: firstParent, ...firstFields } = first;
+  const { parentToolId: secondParent, ...secondFields } = second;
+  const parentToolId = firstParent === secondParent ? firstParent : undefined;
   return {
-    ...second,
-    ...first,
+    ...secondFields,
+    ...firstFields,
     id: first.id,
     description: first.description || second.description,
     ...(telemetryState === undefined ? {} : { telemetryState }),
     ...(resultState === undefined ? {} : { resultState }),
+    ...(parentToolId === undefined ? {} : { parentToolId }),
   };
+}
+
+/** Read leniently: an unknown or invalid record is dropped, never allowed to fail a whole task. */
+export function readAgentSubagentLifecycle(value: unknown): AgentSubagentLifecycle | undefined {
+  try {
+    return parseAgentSubagentLifecycle(value);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Strict optional persistence boundary; old records omit this field. */
@@ -223,14 +405,26 @@ export function parseAgentSubagentLifecycle(value: unknown): AgentSubagentLifecy
     if (typeof item !== "string" || encoder.encode(item).length > max) return fail();
     return item;
   };
+  const presentText = (item: unknown, max: number): string => {
+    const value = text(item, max);
+    if (value === "") return fail();
+    return value;
+  };
+  const countedIds = (item: unknown): ReadonlyArray<string> => {
+    if (!Array.isArray(item) || item.length === 0 || item.length > MAX_SUBAGENT_COUNTED_NESTED_IDS) return fail();
+    const ids = item.map((id) => presentText(id, 256));
+    if (new Set(ids).size !== ids.length) return fail();
+    return ids;
+  };
   const state = (item: unknown): AgentSubagentLifecycleState => {
     if (item !== "running" && item !== "completed" && item !== "failed" && item !== "interrupted")
       return fail();
     return item;
   };
+  const rootFields = ["entries", "truncated", "openBatchKey", "countedNestedToolIds"];
   const record = object(value);
   if (
-    Object.keys(record).some((key) => key !== "entries" && key !== "truncated") ||
+    Object.keys(record).some((key) => !rootFields.includes(key)) ||
     typeof record.truncated !== "boolean" ||
     !Array.isArray(record.entries) ||
     record.entries.length > MAX_RETAINED_SUBAGENTS
@@ -254,6 +448,10 @@ export function parseAgentSubagentLifecycle(value: unknown): AgentSubagentLifecy
       "totalTokens",
       "steps",
       "lastToolName",
+      "taskTitle",
+      "batchKey",
+      "nestedCount",
+      "parentToolId",
     ];
     if (Object.keys(entry).some((key) => !fields.includes(key))) return fail();
     const id = text(entry.id, 272);
@@ -276,6 +474,12 @@ export function parseAgentSubagentLifecycle(value: unknown): AgentSubagentLifecy
         return fail();
       metrics[key] = entry[key];
     }
+    const nestedCount = entry.nestedCount;
+    if (
+      nestedCount !== undefined &&
+      (typeof nestedCount !== "number" || !Number.isSafeInteger(nestedCount) || nestedCount < 1 || nestedCount > MAX_SUBAGENT_NESTED_COUNT)
+    )
+      return fail();
     const telemetryState =
       entry.telemetryState === undefined ? undefined : state(entry.telemetryState);
     const resultState = entry.resultState === undefined ? undefined : state(entry.resultState);
@@ -295,9 +499,18 @@ export function parseAgentSubagentLifecycle(value: unknown): AgentSubagentLifecy
       ...(resultState === undefined ? {} : { resultState }),
       ...metrics,
       ...(entry.lastToolName === undefined ? {} : { lastToolName: text(entry.lastToolName, 128) }),
+      ...(entry.taskTitle === undefined ? {} : { taskTitle: presentText(entry.taskTitle, MAX_SUBAGENT_TASK_TITLE_BYTES) }),
+      ...(entry.batchKey === undefined ? {} : { batchKey: presentText(entry.batchKey, MAX_SUBAGENT_BATCH_KEY_BYTES) }),
+      ...(nestedCount === undefined ? {} : { nestedCount }),
+      ...(entry.parentToolId === undefined ? {} : { parentToolId: presentText(entry.parentToolId, MAX_SUBAGENT_PARENT_TOOL_ID_BYTES) }),
     };
   });
-  return { entries, truncated: record.truncated };
+  return {
+    entries,
+    truncated: record.truncated,
+    ...(record.openBatchKey === undefined ? {} : { openBatchKey: presentText(record.openBatchKey, MAX_SUBAGENT_BATCH_KEY_BYTES) }),
+    ...(record.countedNestedToolIds === undefined ? {} : { countedNestedToolIds: countedIds(record.countedNestedToolIds) }),
+  };
 }
 
 const MAX_LINE_BYTES = 1024 * 1024;
@@ -316,9 +529,12 @@ function normalizeClaudeStatus(value: unknown): 'starting'|'running'|'completed'
   return value === 'starting' || value === 'running' || value === 'completed' || value === 'failed' ? value : undefined;
 }
 function claudeEvents(value: Record<string, unknown>): AgentTurnEvent[] {
-  // Nested child tools cannot create root lifecycle entries.
-  if (value.parent_tool_use_id != null) return [];
+  // Only a nested spawn is meaningful below the top level; other child tools stay invisible.
+  const nested = value.parent_tool_use_id == null ? undefined : id(value.parent_tool_use_id);
+  if (value.parent_tool_use_id != null && nested === undefined) return [];
+  if (value.type === 'result') return nested === undefined ? [{kind:'result'}] : [];
   if (value.type === 'system') {
+    if (nested !== undefined) return [];
     if (value.task_type !== undefined && value.task_type !== 'local_agent') return [];
     const rawStatus = value.subtype === 'task_started' ? 'starting' : value.subtype === 'task_progress' ? 'running'
       : value.subtype === 'task_notification' ? value.status : value.subtype === 'task_updated' ? record(value.patch).status : undefined;
@@ -332,15 +548,25 @@ function claudeEvents(value: Record<string, unknown>): AgentTurnEvent[] {
   const content = record(value.message).content;
   if (!Array.isArray(content) || (value.type !== 'assistant' && value.type !== 'user')) return [];
   const events: AgentTurnEvent[] = [];
+  let results = 0;
   for (const raw of content) {
     const block = record(raw);
     if (value.type === 'assistant' && block.type === 'tool_use' && id(block.id) && typeof block.name === 'string' && spawn(block.name)) {
       const input = record(block.input);
-      events.push({kind:'toolCall',toolId:id(block.id)!,name:block.name,inputSummary:'',description:optionalText(input.description) ?? optionalText(input.prompt)});
+      events.push({kind:'toolCall',toolId:id(block.id)!,name:block.name,inputSummary:'',description:optionalText(input.description) ?? optionalText(input.prompt),
+        ...(nested === undefined ? {} : {parentToolId:nested})});
     }
-    if (value.type === 'user' && block.type === 'tool_result' && id(block.tool_use_id))
+    if (nested !== undefined) continue;
+    if (value.type === 'assistant' && block.type === 'text' && optionalText(block.text))
+      events.push({kind:'assistantText',text:block.text as string});
+    if (value.type === 'user' && block.type === 'tool_result' && id(block.tool_use_id)) {
+      results += 1;
       events.push({kind:'toolResult',toolId:id(block.tool_use_id)!,isError:block.is_error === true});
+    }
   }
+  if (nested !== undefined) return events;
+  // A user turn that answers no tool closes any open spawn batch.
+  if (value.type === 'user' && results === 0) events.push({kind:'userMessage'});
   const result = record(value.tool_use_result);
   const status = normalizeClaudeStatus(result.status);
   if (id(result.agentId) && typeof result.agentType === 'string' && status !== undefined) {
@@ -411,7 +637,7 @@ export class SubagentLifecycleCollector {
     return this.snapshot !== before ? this.snapshot : undefined;
   }
   private markTruncated(): void {
-    if (!this.snapshot?.truncated) this.snapshot = {entries:this.snapshot?.entries ?? [],truncated:true};
+    if (!this.snapshot?.truncated) this.snapshot = {...this.snapshot,entries:this.snapshot?.entries ?? [],truncated:true};
   }
   private excludeNonAgent(value: Record<string, unknown>): boolean {
     if (value.type !== 'system' || value.parent_tool_use_id != null) return false;

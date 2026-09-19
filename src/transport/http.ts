@@ -26,6 +26,18 @@ export async function handle(response: ServerResponse, action: () => Promise<voi
   }
 }
 
+const CLIENT_CAPABILITY_BYTES = 512;
+const CLIENT_CAPABILITIES = 16;
+
+/** Unannounced clients get the oldest contract; an oversized or non-ASCII header announces nothing. */
+export function clientCapabilities(header: string | string[] | undefined): ReadonlySet<string> {
+  if (typeof header !== 'string' || header.length > CLIENT_CAPABILITY_BYTES || /[^\x20-\x7e]/.test(header)) return new Set();
+  const tokens = header.split(',').map(token => token.trim());
+  // Never announce a truncated subset: a client over the budget is treated as silent.
+  if (tokens.length > CLIENT_CAPABILITIES) return new Set();
+  return new Set(tokens.filter(token => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(token)));
+}
+
 export function cursor(request: Request): number {
   const separator = request.url.indexOf('?after=');
   if (separator === -1) return 0;

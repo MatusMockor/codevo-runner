@@ -15,15 +15,18 @@ test('Claude root tool and task aliases retain metrics and completion after chat
   for(let i=0;i<1000;i++) c.feed(line({type:'assistant',message:{content:[{type:'text',text:'chatter'}]}}));
   const snapshot = c.current()!;
   assert.equal(snapshot.entries.length,1);
-  assert.deepEqual(snapshot.entries[0],{id:'tool:tool-1',toolId:'tool-1',taskId:'task-1',name:'Agent',description:'Explore',state:'completed',telemetryState:'completed',resultState:'completed',totalTokens:100,durationMs:20,steps:2,lastToolName:'Read'});
+  assert.deepEqual(snapshot.entries[0],{id:'tool:tool-1',toolId:'tool-1',taskId:'task-1',name:'Agent',description:'Explore',state:'completed',telemetryState:'completed',resultState:'completed',totalTokens:100,durationMs:20,steps:2,lastToolName:'Read',taskTitle:'Explore',batchKey:'spawn:tool-1'});
   assert.deepEqual(parseAgentSubagentLifecycle(snapshot),snapshot);
   assert.equal(c.feed(line({type:'system',subtype:'task_notification',task_id:'task-1',status:'completed'})),undefined);
 });
 test('child tools and shell background telemetry do not count as subagents',()=>{
  const c=new SubagentLifecycleCollector('claude');
+ // A nested spawn with no retained ancestor is reported as lost, never promoted to the top level.
  c.feed(line({type:'assistant',parent_tool_use_id:'parent',message:{content:[{type:'tool_use',id:'nested',name:'Agent'}]}}));
  c.feed(line({type:'system',subtype:'task_started',task_type:'local_bash',task_id:'shell'}));
- assert.equal(c.current(),undefined);
+ assert.deepEqual(c.current(),{entries:[],truncated:true});
+ c.feed(line({type:'assistant',parent_tool_use_id:'parent',message:{content:[{type:'tool_use',id:'child',name:'Bash'}]}}));
+ assert.deepEqual(c.current(),{entries:[],truncated:true});
 });
 test('retains bounded terminal tombstones, overflow explicit and final partial frame handled',()=>{
  const c=new SubagentLifecycleCollector('claude');

@@ -1,4 +1,4 @@
-import { parseAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
+import { parseAgentSubagentLifecycle, readAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import { SteeringDatabase } from './steering-database.js';
 import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
 import { outputRetentionMetadata, retainOutputWindow, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
@@ -231,7 +231,7 @@ export class RepositoryDatabase {
       items.push(event); bytes += size;
     }
     const saved = this.db.prepare('SELECT payload FROM task_subagents WHERE task_id=?').get(taskId);
-    const subagentLifecycle = saved ? parseAgentSubagentLifecycle(JSON.parse(saved['payload'] as string)) : undefined;
+    const subagentLifecycle = readStoredLifecycle(saved?.['payload']);
     return { ...(subagentLifecycle ? { subagentLifecycle } : {}), ...outputRetentionMetadata(this.db, taskId), items, nextCursor: items.length < rows.length ? items.at(-1)!.sequence : null };
   }
   getAttachment(id: string): Attachment {
@@ -261,6 +261,16 @@ export class RepositoryDatabase {
   }
   close(): void {
     try { this.db.close(); } finally { this.lease.close(); }
+  }
+}
+
+/** A lifecycle written by an unknown version is dropped; the task stays readable. */
+function readStoredLifecycle(payload: unknown): AgentSubagentLifecycle | undefined {
+  if (typeof payload !== 'string') return undefined;
+  try {
+    return readAgentSubagentLifecycle(JSON.parse(payload));
+  } catch {
+    return undefined;
   }
 }
 

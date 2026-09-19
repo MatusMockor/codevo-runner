@@ -334,7 +334,8 @@ end-to-end task with your own provider account before relying on the deployment.
 - Opt-in execution: clone and list registered projects, start tasks, continue eligible
   provider sessions and retrieve worktree diffs.
 - Attachments: authenticated raw PNG/JPEG upload, metadata and content retrieval.
-- `taskDrafts`, `imageAttachments` and `eventReplay` are `true`;
+- `taskDrafts`, `imageAttachments`, `eventReplay` and `subagentLifecycleRetention`
+  are `true`;
   `taskExecution` reflects whether execution was enabled for this process.
   `projectCloning` advertises availability of the asynchronous clone API.
   `taskContinuation` advertises explicit follow-up admission and eligibility checks.
@@ -531,3 +532,26 @@ and progress summaries are persisted separately from the rolling raw output.
 The snapshot survives reconnects and restarts; it never invents child completion
 from completion of the parent turn. Older tasks without a saved snapshot cannot
 recover lifecycle data already evicted from their output.
+
+Each entry also retains the spawn task title (`taskTitle`, written once and never
+rewritten by later progress frames), the frozen spawn batch (`batchKey`, with the
+still-open batch in `openBatchKey`), and nested agents (`nestedCount` on the
+top-level ancestor, `parentToolId` on the child, with `countedNestedToolIds`
+deduplicating replays of the 32 most recent nested identities). A nested entry
+carries no result frame, so it stays `running` until its ancestor's snapshot is
+replaced. Bounds are byte-exact and shared with the editor through
+`test/fixtures/agent-subagent-lifecycle-wire.json`. These fields are served only
+to clients that announce `subagentLifecycleRetention` (see
+[Client capabilities](#client-capabilities)); every other client receives the
+older closed shape, with nested entries removed and `truncated` set. A stored
+snapshot that cannot be read is dropped; the task stays readable.
+
+### Client capabilities
+
+A client may announce what it understands with a single
+`X-Codevo-Client-Capabilities` request header: a comma-separated list of at most
+16 printable-ASCII tokens, at most 512 characters in total. Unknown tokens are
+ignored and an absent, oversized or non-ASCII header announces nothing, so an
+older client always receives the oldest contract. The runner advertises the
+capabilities it can serve in `GET /v1/runner`; `subagentLifecycleRetention` is the
+only one currently negotiated per request.
