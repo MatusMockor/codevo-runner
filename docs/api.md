@@ -188,16 +188,16 @@ host, not through this API; a missing or unauthenticated CLI can fail execution.
 The project list exposes IDs and names, not host paths.
 
 After disconnecting, poll events with the largest received sequence to replay
-missed output. Retained output is a rolling window of 1 MiB and 1,024 output events
-per task, with at most 8 KiB per event. Across the runner it is capped at 8 MiB
-and 8,192 output events. Oldest output is evicted without stopping the provider;
-lifecycle records and each task's newest output record remain. Historical final
-answers can age out; this endpoint is not a permanent conversation archive.
+missed output. Persisted output is retained in SQLite without a fixed per-task or
+runner-wide lifetime byte/event quota. Individual events remain limited to 8 KiB;
+read pages contain at most 50 items and 3 MiB of serialized item data. Task reads
+use the same page bounds. Actual disk exhaustion fails truthfully; it never evicts
+old events to make room for new output. Task history has no fixed lifetime count.
 
-After eviction, event pages also include the paired fields
+For output removed by an older runner, event pages still include the paired fields
 `outputTruncatedBeforeSequence` (highest evicted output sequence, inclusive) and
 `outputStartsAtLineBoundary` (whether retained stdout begins at a JSON-line boundary).
-They are absent before eviction. When the caller's last consumed sequence is below
+They are absent for histories with no legacy eviction. When the caller's last consumed sequence is below
 the watermark, reset its partial parser; if the boundary flag is false, discard
 stdout through the next newline before parsing subsequent frames. Retained lifecycle
 records may precede the watermark and must still be processed. Show older output as
@@ -226,8 +226,9 @@ configurable from one minute to seven days; waiting for an answer counts toward
 that deadline. See [execution policy](execution-policy.md). The legacy metadata
 parser rejects individual frames over 64 KiB; interactive provider frames are
 bounded to 8 MiB. Real persistence failures
-still stop execution with `output_persistence_failed`. SQLite reserves 16 MiB of
+still stop execution with `output_persistence_failed`. The runner checks actual filesystem free space and reserves 16 MiB of
 headroom for state transitions; exhausted admission capacity returns a quota error.
+SQLite has no application-specific database size ceiling.
 This is persisted CLI stdout/stderr, not a parsed provider conversation. There is
 no live SSE or approval interaction API.
 Cancellation of a running task aborts its process group. Restart marks formerly
@@ -321,11 +322,11 @@ defensive image-envelope bounds are in `src/infrastructure/files/image-preflight
 | Inflated compressed PNG metadata chunk | 64 KiB |
 | PNG chunks / JPEG markers | 1,024 |
 | Stored attachments / aggregate image bytes | 256 / 256 MiB |
-| Stored tasks | 1,000 |
+| Stored tasks / output history | No fixed lifetime quota; available disk |
 | Concurrent uploads / upload deadline | 2 / 30 seconds |
 | Concurrent attachment-store reads (metadata and content combined) | 2 |
 | Concurrent HTTP image downloads | 2, held until response finish/close |
-| Task or event page | 50 items |
+| Task or event page | 50 items / 3 MiB serialized item data |
 
 Unsupported image structures or metadata fail closed; a PNG/JPEG extension alone
 does not guarantee acceptance. Quotas are runner-wide, not per user. The attachment-store read limit covers file/metadata
@@ -502,3 +503,11 @@ Reconnect and fetch requests again. Cancelling the task cancels pending question
 runner restart or provider exit expires pending questions truthfully. The configured
 task execution deadline still applies while waiting for an answer. Authentication
 and runner identity checks are identical to other task routes.
+
+
+History search remains a bounded scan of the first 1,024 output events and 1 MiB
+per task; it reports `incomplete` when further output exists. This search bound
+never removes data from durable event history. Generated artifacts retain an
+independent admission limit of 32,000 items across the runner, so startup blob
+reconciliation stays bounded even as task history grows. Existing captures remain
+readable and idempotent at that limit.

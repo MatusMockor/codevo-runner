@@ -93,14 +93,14 @@ test('uncertain pending can be dismissed without authorizing redelivery', async 
  await r.finishTask(root.id, { exitCode: 0, sessionId: randomUUID() });
  assert.equal(await r.promotePending(), null);
 });
-test('accepted user input remains replayable after output window fills', async t => {
+test('accepted user input remains replayable beyond the former output limit', async t => {
  const { repository: r, root } = await fixture(t);
  const request = input('Retain this instruction');
  const claim = await r.claimSteer!(root.id, request);
  await r.acceptSteer!(root.id, claim.messageId);
  for (let i = 0; i < 130; i++) await r.appendTaskOutput(root.id, 'stdout', 'x'.repeat(8191) + '\n');
  const events = await r.listEvents(root.id, 0);
- assert.ok(events.outputTruncatedBeforeSequence);
+ assert.equal(events.outputTruncatedBeforeSequence, undefined);
  const accepted = events.items.find(event => event.type === 'task.input');
  assert.deepEqual(accepted?.parts, request.parts);
  assert.equal(accepted?.messageId, request.idempotencyKey);
@@ -120,14 +120,14 @@ test('escaped accepted-input pages stay within transport budget without losing m
  assert.equal(count,16);assert.ok(pages>1);
 });
 
-test('subagent lifecycle survives output eviction and restart independently of raw frames', async t => {
+test('subagent lifecycle survives output beyond the former limit and restart independently of raw frames', async t => {
  const state=await fixture(t);let r=state.repository;
  const snapshot={entries:[{id:'task:child',taskId:'child',name:'Explorer',description:'Inspect project',state:'completed' as const,telemetryState:'completed' as const,steps:4}],truncated:false};
  await r.setTaskSubagents!(state.root.id,snapshot);
  for(let i=0;i<140;i++)await r.appendTaskOutput(state.root.id,'stdout','x'.repeat(8191)+'\n');
  r=await state.reopen();
  const page=await r.listEvents(state.root.id,0);
- assert.deepEqual(page.subagentLifecycle,snapshot);assert.ok(page.outputTruncatedBeforeSequence);
+ assert.deepEqual(page.subagentLifecycle,snapshot);assert.equal(page.outputTruncatedBeforeSequence, undefined);
  await assert.rejects(r.setTaskSubagents!(state.root.id,{entries:[{...snapshot.entries[0]!,state:'failed'}],truncated:false}));
  await r.finishTask(state.root.id,{exitCode:0});
  await r.setTaskSubagents!(state.root.id,{entries:[],truncated:false});

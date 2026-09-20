@@ -371,7 +371,7 @@ async function repository(t: TestContext) {
   };
 }
 
-test('retained lifecycle detail survives storage, restart and output eviction', async t => {
+test('retained lifecycle detail survives storage, restart and output beyond the former limit', async t => {
   const state = await repository(t);
   const collector = new SubagentLifecycleCollector('claude');
   collector.feed(spawned('tool-1', 'Fix subagent view findings'));
@@ -383,7 +383,7 @@ test('retained lifecycle detail survives storage, restart and output eviction', 
   for (let index = 0; index < 140; index++) await state.store.appendTaskOutput(state.task.id, 'stdout', 'x'.repeat(8191) + '\n');
   const store = await state.reopen();
   const page = await store.listEvents(state.task.id, 0);
-  assert.ok(page.outputTruncatedBeforeSequence);
+  assert.equal(page.outputTruncatedBeforeSequence, undefined);
   assert.deepEqual(page.subagentLifecycle, snapshot);
   assert.equal(page.subagentLifecycle?.entries[0]?.taskTitle, 'Fix subagent view findings');
   assert.equal(page.subagentLifecycle?.entries[0]?.nestedCount, 1);

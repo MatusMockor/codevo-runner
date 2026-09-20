@@ -345,9 +345,14 @@ share the runner's authority; there are no separate users or per-user permission
 Browser Origin requests and unsupported routes/methods are rejected. JSON bodies
 are accepted for draft creation, task start, continuation and clone admission; uploads use raw binary bodies.
 
-See [API details and limits](docs/api.md). The service stores up to 1,000 tasks
-and 256 attachments (256 MiB total attachment bytes). Retention/deletion is not
-implemented; exhaustion is rejected rather than silently evicting history.
+See [API details and limits](docs/api.md). Task and output history is durable SQLite
+storage with bounded read pages, without a fixed lifetime task count or output byte
+quota. The runner never automatically deletes persisted output. Attachment storage
+remains limited to 256 attachments (256 MiB total attachment bytes); generated
+artifacts have their own count and byte limits. Actual disk exhaustion is reported.
+Previously evicted output cannot be recovered; legacy gap metadata remains visible.
+Local session import belongs to the editor and does not transfer provider history
+to this server. Provider session IDs and server worktrees remain server-owned.
 
 Updating the service can interrupt active work. Back up the complete data volume
 while the runner is stopped; include external registered repositories if using
@@ -528,7 +533,7 @@ being presented as successful completion.
 
 Event replay also carries optional `subagentLifecycle` metadata when
 `subagentTelemetry` is advertised. Up to 32 normalized child identities, states
-and progress summaries are persisted separately from the rolling raw output.
+and progress summaries are persisted separately from the paged raw output.
 The snapshot survives reconnects and restarts; it never invents child completion
 from completion of the parent turn. Older tasks without a saved snapshot cannot
 recover lifecycle data already evicted from their output.

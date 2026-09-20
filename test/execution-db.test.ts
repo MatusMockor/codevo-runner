@@ -60,7 +60,7 @@ test('cancellation and completion races preserve the first terminal state and at
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('output is UTF-8 safe and bounded across reopen without sacrificing completion events', async () => {
+test('output survives the former per-task byte cap across reopen with bounded UTF-8 events', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-execution-db-'));
   const runnerId = randomUUID();
   let repository = await openSqliteRepository(directory, runnerId);
@@ -70,13 +70,13 @@ test('output is UTF-8 safe and bounded across reopen without sacrificing complet
     await repository.claimNextTask();
     await assert.rejects(repository.appendTaskOutput(task.id, 'stderr', '€'.repeat(5000)), { code: 'quota_exceeded' });
     await repository.appendTaskOutput(task.id, 'stderr', '€'.repeat(2730) + 'xx');
-    for (let index = 0; index < EXECUTION_LIMITS.outputBytes / EXECUTION_LIMITS.outputEventBytes - 1; index++) {
+    for (let index = 0; index < 1_048_576 / EXECUTION_LIMITS.outputEventBytes - 1; index++) {
       await repository.appendTaskOutput(task.id, 'stdout', 'x'.repeat(EXECUTION_LIMITS.outputEventBytes));
     }
     await repository.close();
     repository = await openSqliteRepository(directory, runnerId);
     await repository.appendTaskOutput(task.id, 'stdout', 'newest output');
-    assert.ok((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence);
+    assert.equal((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence, undefined);
     await repository.finishTask(task.id, { exitCode: 1, error: 'failed' });
     let cursor = 0;
     let total = 0;
@@ -94,7 +94,7 @@ test('output is UTF-8 safe and bounded across reopen without sacrificing complet
       if (page.nextCursor === null) break;
       cursor = page.nextCursor;
     }
-    assert.equal(total, EXECUTION_LIMITS.outputBytes - EXECUTION_LIMITS.outputEventBytes + Buffer.byteLength('newest output'));
+    assert.equal(total, 1_048_576 + Buffer.byteLength('newest output'));
     assert.equal(types.at(-1), 'task.failed');
     assert.equal((await repository.getTask(task.id)).status, 'failed');
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
@@ -117,16 +117,16 @@ test('schema v1 migration preserves original draft payload and events', async ()
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('tiny output events cannot grow history beyond its event quota', async () => {
+test('tiny output events survive the former per-task and global event quotas', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-execution-db-'));
   const repository = await openSqliteRepository(directory, randomUUID());
   try {
     const task = (await repository.createTask(input())).task;
     await repository.queueTask(task.id, 'project');
     await repository.claimNextTask();
-    for (let index = 0; index < EXECUTION_LIMITS.outputEvents; index++) await repository.appendTaskOutput(task.id, 'stdout', 'x');
+    for (let index = 0; index < 8193; index++) await repository.appendTaskOutput(task.id, 'stdout', 'x');
     await repository.appendTaskOutput(task.id, 'stdout', 'newest');
-    assert.ok((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence);
+    assert.equal((await repository.listEvents(task.id, 0)).outputTruncatedBeforeSequence, undefined);
     await repository.finishTask(task.id, { exitCode: 0 });
     let cursor = 0;
     let count = 0;
@@ -136,25 +136,32 @@ test('tiny output events cannot grow history beyond its event quota', async () =
       if (page.nextCursor === null) break;
       cursor = page.nextCursor;
     }
-    assert.equal(count, EXECUTION_LIMITS.outputEvents);
+    assert.equal(count, 8194);
     assert.equal((await repository.getTask(task.id)).status, 'succeeded');
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('global output quota survives reopening and preserves terminal writes', async () => {
+test('output beyond the former global quota survives reopening and terminal writes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-execution-db-'));
   const runnerId = randomUUID();
   let repository = await openSqliteRepository(directory, runnerId);
   try {
-    for (let index = 0; index < 8; index++) {
+    const ids: string[] = [];
+    for (let index = 0; index < 9; index++) {
       const task = (await repository.createTask(input())).task;
+      ids.push(task.id);
       await repository.queueTask(task.id, 'project');
       await repository.claimNextTask();
-      for (let chunk = 0; chunk < EXECUTION_LIMITS.outputBytes / EXECUTION_LIMITS.outputEventBytes; chunk++) await repository.appendTaskOutput(task.id, 'stdout', 'x'.repeat(EXECUTION_LIMITS.outputEventBytes));
+      for (let chunk = 0; chunk < 1_048_576 / EXECUTION_LIMITS.outputEventBytes; chunk++) await repository.appendTaskOutput(task.id, 'stdout', 'x'.repeat(EXECUTION_LIMITS.outputEventBytes));
       assert.equal((await repository.finishTask(task.id, { exitCode: 0 })).status, 'succeeded');
     }
     await repository.close();
     repository = await openSqliteRepository(directory, runnerId);
+    for (const id of ids) {
+      let after = 0; let bytes = 0;
+      for (;;) { const page = await repository.listEvents(id, after); assert.equal(page.outputTruncatedBeforeSequence, undefined); for (const event of page.items) bytes += Buffer.byteLength(event.text ?? ''); if (page.nextCursor === null) break; after = page.nextCursor; }
+      assert.equal(bytes, 1_048_576);
+    }
     const task = (await repository.createTask(input())).task;
     await repository.queueTask(task.id, 'project');
     await repository.claimNextTask();
@@ -164,22 +171,22 @@ test('global output quota survives reopening and preserves terminal writes', asy
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('bulk database quota reserves capacity for admitted task completion and cancellation', async () => {
+test('database grows beyond its former 64MiB cap while admitted tasks retain terminal writes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-execution-db-'));
-  const repository = await openSqliteRepository(directory, randomUUID());
-  const ids: string[] = [];
+  const runnerId = randomUUID();
+  let repository = await openSqliteRepository(directory, runnerId);
   try {
     const active = (await repository.createTask(input())).task;
-    await repository.queueTask(active.id, 'project');
-    await repository.claimNextTask();
-    await assert.rejects(async () => {
-      for (let index = 0; index < 1000; index++) {
-        const task = (await repository.createTask({ ...input(), parts: [{ type: 'text', text: 'x'.repeat(48_000) }] })).task;
-        ids.push(task.id);
-      }
-    }, { code: 'quota_exceeded' });
-    assert.ok(ids.length > 100 && ids.length < 1000);
-    for (const id of ids) assert.equal((await repository.cancelTask(id)).status, 'cancelled');
+    await repository.queueTask(active.id, 'project'); await repository.claimNextTask();
+    for (let index = 0; index < 750; index++) {
+      const task = (await repository.createTask({ ...input(), parts: [{ type: 'text', text: 'x'.repeat(48_000) }] })).task;
+      await repository.cancelTask(task.id);
+    }
+    await repository.close();
+    const db = new DatabaseSync(join(directory, 'runner.sqlite'));
+    assert.ok(Number(db.prepare('PRAGMA page_count').get()!['page_count']) * Number(db.prepare('PRAGMA page_size').get()!['page_size']) > 64 * 1024 * 1024);
+    db.close();
+    repository = await openSqliteRepository(directory, runnerId);
     assert.equal((await repository.finishTask(active.id, { exitCode: 1, error: '\u0000'.repeat(8192) })).status, 'failed');
     const events = await repository.listEvents(active.id, 0);
     assert.equal(Buffer.byteLength(events.items.at(-1)!.error!), 1024);

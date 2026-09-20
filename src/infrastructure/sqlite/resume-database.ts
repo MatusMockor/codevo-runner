@@ -3,7 +3,7 @@ import { parseLaunchOptions } from '../../domain/launch.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { LIMITS, RunnerError, type Task, type TaskEvent } from '../../domain/contracts.js';
+import { RunnerError, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 
 export const RESUME_SCHEMA = `CREATE TABLE IF NOT EXISTS conversations (
@@ -93,8 +93,6 @@ export class ResumeDatabase {
       if (previous) return previous;
       if (!this.getResumeState(id).available) throw new RunnerError('conflict');
       this.dependencies.requireCapacity();
-      const count = Number(this.db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']);
-      if (count >= LIMITS.tasks) throw new RunnerError('quota_exceeded');
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const ref of refs) this.dependencies.getAttachment(ref);
       const root = parent.conversationId ?? parent.id;

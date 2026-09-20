@@ -11,36 +11,28 @@ import { ProviderArtifactReferences } from '../src/domain/artifact-output.js';
 
 const input = (provider: 'codex' | 'claude' = 'codex') => ({ idempotencyKey: randomUUID(), provider, parts: [{ type: 'text' as const, text: 'long task' }] });
 
-test('rolling retention persists gap boundary separately from stderr and preserves lifecycle', async () => {
+test('legacy gaps survive reopening without evicting any newly appended output', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-output-window-'));
-  const runnerId = randomUUID();
-  let db = new RepositoryDatabase(directory, runnerId);
+  const runnerId = randomUUID(); let db = new RepositoryDatabase(directory, runnerId);
   try {
-    const task = db.createTask(input()).task;
-    db.queueTask(task.id, 'project'); db.claimNextTask();
-    db.appendTaskOutput(task.id, 'stdout', 'partial');
-    db.appendTaskOutput(task.id, 'stderr', 'warning\n');
-    for (let i = 0; i < 1023; i++) db.appendTaskOutput(task.id, 'stdout', '{}\n');
-    let page = db.listEvents(task.id, 0);
-    const watermark = page.outputTruncatedBeforeSequence!;
-    assert.ok(watermark > 0); assert.equal(page.outputStartsAtLineBoundary, false);
-    db.appendTaskOutput(task.id, 'stdout', '{}\n');
-    page = db.listEvents(task.id, 0);
-    assert.ok(page.outputTruncatedBeforeSequence! > watermark);
-    assert.equal(page.outputStartsAtLineBoundary, false, 'stderr eviction cannot reset stdout boundary');
+    const task = db.createTask(input()).task; db.queueTask(task.id, 'project'); db.claimNextTask();
+    db.appendTaskOutput(task.id, 'stdout', 'previously evicted prefix'); db.close();
+    const legacy = new DatabaseSync(join(directory, 'runner.sqlite'));
+    const sequence = Number(legacy.prepare("SELECT sequence FROM events WHERE type='task.output'").get()!['sequence']);
+    legacy.prepare('DELETE FROM events WHERE sequence=?').run(sequence);
+    legacy.prepare('UPDATE task_execution SET output_bytes=0,output_events=0,output_truncated_before_sequence=?,output_starts_at_line_boundary=0 WHERE task_id=?').run(sequence, task.id); legacy.close();
+    db = new RepositoryDatabase(directory, runnerId);
+    for (let i = 0; i < 1026; i++) db.appendTaskOutput(task.id, 'stdout', '{}\n');
+    db.appendTaskOutput(task.id, 'stderr', 'warning\n'); db.finishTask(task.id, { exitCode: 0 });
     db.close(); db = new RepositoryDatabase(directory, runnerId);
-    assert.equal(db.listEvents(task.id, 0).outputStartsAtLineBoundary, false);
-    db.appendTaskOutput(task.id, 'stdout', '{"final":"latest"}\n');
-    db.finishTask(task.id, { exitCode: 0 });
-    assert.equal(db.listEvents(task.id, 0).outputStartsAtLineBoundary, true);
-    const types: string[] = []; let after = 0; let lastOutput = '';
+    let after = 0; let outputs = 0;
     for (;;) {
-      const next = db.listEvents(task.id, after);
-      for (const e of next.items) { types.push(e.type); if (e.text) lastOutput = e.text; }
-      if (next.nextCursor === null) break; after = next.nextCursor;
+      const page = db.listEvents(task.id, after);
+      assert.equal(page.outputTruncatedBeforeSequence, sequence); assert.equal(page.outputStartsAtLineBoundary, false);
+      outputs += page.items.filter(e => e.type === 'task.output').length;
+      if (page.nextCursor === null) break; after = page.nextCursor;
     }
-    assert.deepEqual(types.slice(0, 3), ['task.created', 'task.queued', 'task.running']);
-    assert.equal(types.at(-1), 'task.succeeded'); assert.equal(lastOutput, '{"final":"latest"}\n');
+    assert.equal(outputs, 1027); assert.equal(db.getTask(task.id).status, 'succeeded');
     assert.equal(db.searchHistory({ q: 'missing', after: 0 }).incomplete, true);
   } finally { db.close(); await rm(directory, { recursive: true, force: true }); }
 });
@@ -58,7 +50,7 @@ test('schema6 migration preserves task and establishes empty retention metadata'
   } finally { db.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-for (const provider of ['codex', 'claude'] as const) test(`${provider} process emits >1MiB with backpressure, durable newest output and late artifacts`, async () => {
+for (const provider of ['codex', 'claude'] as const) test(`${provider} process emits >1MiB with backpressure, durable complete output and late artifacts`, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-long-process-'));
   const db = new RepositoryDatabase(directory, randomUUID());
   try {
@@ -86,10 +78,10 @@ for (const provider of ['codex', 'claude'] as const) test(`${provider} process e
     assert.ok(total > 3 * 1024 * 1024); assert.equal(result.error, undefined); assert.equal(result.sessionId, session);
     assert.deepEqual(references.finish(), ['design.html']); assert.equal(references.isComplete(), true);
     assert.equal(db.finishTask(task.id, result).status, 'succeeded');
-    assert.ok(db.listEvents(task.id, 0).outputTruncatedBeforeSequence);
+    assert.equal(db.listEvents(task.id, 0).outputTruncatedBeforeSequence, undefined);
     let after = 0; let output = '';
     for (;;) { const page = db.listEvents(task.id, after); output += page.items.map(e => e.text ?? '').join(''); if (page.nextCursor === null) break; after = page.nextCursor; }
-    assert.ok(Buffer.byteLength(output) <= 1024 * 1024); assert.ok(output.includes('design.html'));
+    assert.equal(Buffer.byteLength(output), total); assert.ok(output.includes('design.html'));
     assert.equal(db.getResumeState(task.id).available, true);
   } finally { db.close(); await rm(directory, { recursive: true, force: true }); }
 });

@@ -18,7 +18,7 @@ export class FileArtifactBlobs implements ArtifactBlobStore {
     let retained = 0;
     let count = 0;
     for await (const entry of await opendir(root)) {
-      if (++count > 32_002 || !isId(entry.name)) throw new RunnerError('storage_unavailable');
+      if (++count > ARTIFACT_LIMITS.retained + 2 || !isId(entry.name)) throw new RunnerError('storage_unavailable');
       const file = await lstat(join(root, entry.name));
       if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1) throw new RunnerError('conflict');
       if (!committed.has(entry.name)) { await unlink(join(root, entry.name)); continue; }

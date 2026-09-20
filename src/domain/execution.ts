@@ -7,7 +7,7 @@ export type OutputChannel = 'stdout' | 'stderr';
 export type RegisteredProject = Readonly<{ id: string; name: string; path: string }>;
 export type ProjectSummary = Readonly<{ id: string; name: string }>;
 export type ExecutionResult = Readonly<{ exitCode: number | null; error?: string; sessionId?: string }>;
-export const EXECUTION_LIMITS = Object.freeze({ outputBytes: 1_048_576, outputEventBytes: 8192, outputEvents: 1024 });
+export const EXECUTION_LIMITS = Object.freeze({ outputEventBytes: 8192 });
 export type ExecutionRequest = Readonly<{
   task: Task;
   onSteeringReady?: (handler: ProviderSteer | undefined) => void;

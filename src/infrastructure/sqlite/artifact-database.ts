@@ -40,8 +40,8 @@ export class ArtifactDatabase {
   }
 
   listArtifactIds(): readonly string[] {
-    const rows = this.db.prepare('SELECT id FROM artifacts ORDER BY rowid LIMIT 32001').all();
-    if (rows.length > 32000) throw new RunnerError('quota_exceeded');
+    const rows = this.db.prepare('SELECT id FROM artifacts ORDER BY rowid LIMIT ?').all(ARTIFACT_LIMITS.retained + 1);
+    if (rows.length > ARTIFACT_LIMITS.retained) throw new RunnerError('quota_exceeded');
     return rows.map(row => String(row['id']));
   }
 
@@ -55,8 +55,9 @@ export class ArtifactDatabase {
       if (conversation && conversation['latest_id'] !== task.id) throw new RunnerError('conflict');
       if (this.db.prepare('SELECT 1 FROM artifacts WHERE id=?').get(artifact.id)) throw new RunnerError('conflict');
       const count = Number(this.db.prepare('SELECT count(*) AS n FROM artifacts WHERE task_id=?').get(artifact.taskId)!['n']);
-      const bytes = Number(this.db.prepare('SELECT coalesce(sum(bytes),0) AS bytes FROM artifacts').get()!['bytes']);
-      if (count >= ARTIFACT_LIMITS.perTask || bytes + artifact.sizeBytes > ARTIFACT_LIMITS.storageBytes) throw new RunnerError('quota_exceeded');
+      const total = this.db.prepare('SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM artifacts').get()!;
+      const bytes = Number(total['bytes']);
+      if (Number(total['count']) >= ARTIFACT_LIMITS.retained || count >= ARTIFACT_LIMITS.perTask || bytes + artifact.sizeBytes > ARTIFACT_LIMITS.storageBytes) throw new RunnerError('quota_exceeded');
       this.requireCapacity();
       this.db.prepare('INSERT INTO artifacts(id,task_id,source_path,payload,bytes) VALUES(?,?,?,?,?)')
         .run(artifact.id, artifact.taskId, path, JSON.stringify(artifact), artifact.sizeBytes);

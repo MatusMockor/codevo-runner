@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { RepositoryDatabase } from '../src/infrastructure/sqlite/database.js';
 import { openSqliteRepository } from '../src/infrastructure/sqlite/index.js';
 import { LIMITS, type Attachment } from '../src/domain/contracts.js';
 const input = () => ({ idempotencyKey: randomUUID(), provider: 'codex' as const, parts: [{ type: 'text' as const, text: 'Implement this' }] });
@@ -42,18 +43,19 @@ test('sqlite persists tasks, immutable attachment replay, cancellation and order
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('sqlite rolls back missing references, enforces task quota and paginates without gaps', async () => {
+test('sqlite rolls back missing references, exceeds the former task quota and paginates without gaps', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'runner-db-'));
-  const repository = await openSqliteRepository(directory, randomUUID());
+  const runnerId = randomUUID();
+  let repository = await openSqliteRepository(directory, runnerId);
   try {
     const missing = { ...input(), parts: [{ type: 'attachment' as const, attachmentId: randomUUID() }] };
     await assert.rejects(repository.createTask(missing), { code: 'not_found' });
     assert.equal((await repository.listTasks(0)).items.length, 0);
     const first = input();
     await repository.createTask(first);
-    for (let index = 1; index < LIMITS.tasks; index++) await repository.createTask(input());
+    for (let index = 1; index < 1005; index++) await repository.createTask(input());
     assert.equal((await repository.createTask(first)).created, false);
-    await assert.rejects(repository.createTask(input()), { code: 'quota_exceeded' });
+    await repository.close(); repository = await openSqliteRepository(directory, runnerId);
     const sequences: number[] = [];
     let cursor = 0;
     for (;;) {
@@ -62,8 +64,8 @@ test('sqlite rolls back missing references, enforces task quota and paginates wi
       if (page.nextCursor === null) break;
       cursor = page.nextCursor;
     }
-    assert.equal(sequences.length, LIMITS.tasks);
-    assert.equal(new Set(sequences).size, LIMITS.tasks);
+    assert.equal(sequences.length, 1005);
+    assert.equal(new Set(sequences).size, 1005);
     assert.deepEqual(sequences, [...sequences].sort((a, b) => a - b));
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
@@ -123,36 +125,20 @@ test('sqlite bounds outstanding operations and drains accepted calls before clos
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('sqlite full preserves quota error after automatic rollback and leaves no partial task', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'runner-db-'));
-  const runnerId = randomUUID();
-  const repository = await openSqliteRepository(directory, runnerId);
-  let created = 0;
+test('SQLite full rolls back without deleting history or inserting partial task records', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'runner-db-full-'));
+  // Constrain this connection only: exercise a genuine SQLITE_FULL transaction.
+  const originalExec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, 'exec', function(this: DatabaseSync, sql: string) {
+    return originalExec.call(this, sql.includes('PRAGMA max_page_count=4294967294') ? sql.replace('max_page_count=4294967294', 'max_page_count=64') : sql);
+  });
+  const repository = new RepositoryDatabase(directory, randomUUID());
   try {
-    const largeText = 'x'.repeat(LIMITS.textBytes);
-    let failure: unknown;
-    for (; created < LIMITS.tasks; created++) {
-      try { await repository.createTask({ ...input(), parts: [{ type: 'text', text: largeText }] }); }
-      catch (error) { failure = error; break; }
-    }
-    assert.ok(created > 0 && created < LIMITS.tasks, 'database page budget must fill before task count quota');
-    assert.equal((failure as { code: string }).code, 'quota_exceeded');
-    let persisted = 0;
-    let cursor = 0;
-    for (;;) {
-      const page = await repository.listTasks(cursor);
-      persisted += page.items.length;
-      if (page.nextCursor === null) break;
-      cursor = page.nextCursor;
-    }
-    assert.equal(persisted, created);
-    await repository.close();
-    const db = new DatabaseSync(join(directory, 'runner.sqlite'));
-    try {
-      assert.equal(Number(db.prepare('SELECT count(*) AS n FROM events').get()!['n']), created);
-      assert.equal(Number(db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']), created);
-    } finally { db.close(); }
-  } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
+    const first = repository.createTask(input()).task;
+    assert.throws(() => repository.createTask({ ...input(), parts: [{ type: 'text', text: 'x'.repeat(240_000) }] }), /database or disk is full/);
+    assert.deepEqual(repository.listTasks(0).items, [first]);
+    assert.equal(repository.listEvents(first.id, 0).items.length, 1);
+  } finally { repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
 test('sqlite leases a data directory exclusively and releases ownership on close', async () => {
@@ -168,4 +154,22 @@ test('sqlite leases a data directory exclusively and releases ownership on close
     try { assert.deepEqual(await replacement.getTask(created.task.id), created.task); }
     finally { await replacement.close(); }
   } finally { await first.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('task pagination bounds serialized bytes without losing large valid prompt records', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'runner-task-pages-'));
+  const repository = await openSqliteRepository(directory, randomUUID());
+  try {
+    for (let i = 0; i < 60; i++) await repository.createTask({ ...input(), parts: [{ type: 'text', text: '"'.repeat(48_000) }] });
+    let after = 0; const ids = new Set<string>(); let pages = 0;
+    for (;;) {
+      const page = await repository.listTasks(after); pages++;
+      assert.ok(page.items.length <= LIMITS.pageSize);
+      assert.ok(Buffer.byteLength(JSON.stringify(page.items)) < 3 * 1024 * 1024);
+      for (const task of page.items) { assert.ok(!ids.has(task.id)); ids.add(task.id); }
+      if (page.nextCursor === null) break;
+      assert.ok(page.nextCursor > after); after = page.nextCursor;
+    }
+    assert.equal(ids.size, 60); assert.ok(pages > 1);
+  } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });

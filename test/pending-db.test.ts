@@ -188,18 +188,19 @@ test('Stop after successful completion but before promotion still pauses the pen
   assert.equal((await repository.listPending(root.id)).items[0]?.status, 'paused');
 });
 
-test('task capacity exhaustion pauses promotion without blocking unrelated queued work', async t => {
+test('promotion beyond the former task quota preserves independent queued work', async t => {
   const { repository } = await fixture(t);
   const root = await active(repository);
   await repository.enqueuePending(root.id, input('Over task capacity'));
   const independent = (await repository.createTask({ ...input('Independent'), provider: 'codex' })).task;
   await repository.queueTask(independent.id, 'project');
-  for (let index = 2; index < LIMITS.tasks; index++) {
+  for (let index = 2; index < 1005; index++) {
     await repository.createTask({ ...input(`Task ${index}`), provider: 'codex' });
   }
   await repository.finishTask(root.id, { exitCode: 0, sessionId: randomUUID() });
-  assert.equal(await repository.promotePending(), null);
-  assert.equal((await repository.listPending(root.id)).items[0]?.status, 'paused');
+  const promoted = await repository.promotePending();
+  assert.equal(promoted?.parentTaskId, root.id);
+  assert.equal((await repository.listPending(root.id)).items.length, 0);
   assert.equal((await repository.claimNextTask())?.id, independent.id);
   assert.equal((await repository.getTask(independent.id)).status, 'running');
 });

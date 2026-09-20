@@ -94,3 +94,27 @@ test('artifact admission rejects obsolete turn after continuation while preservi
     assert.deepEqual(await repository.listArtifactIds(), [original.id, latest.id]);
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('global artifact count rejects new captures before they can prevent restart', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'runner-artifact-count-'));
+  const runnerId = randomUUID(); let repository = await openSqliteRepository(directory, runnerId);
+  try {
+    const taskId = (await repository.createTask(input())).task.id;
+    const nextTask = (await repository.createTask(input())).task.id;
+    const first = artifact(taskId, 1);
+    await repository.putArtifact(first, 'first.html'); await repository.close();
+    const seed = new DatabaseSync(join(directory, 'runner.sqlite'));
+    seed.exec('BEGIN');
+    const insert = seed.prepare('INSERT INTO artifacts(id,task_id,source_path,payload,bytes) VALUES(?,?,?,?,?)');
+    for (let i = 1; i < ARTIFACT_LIMITS.retained; i++) {
+      const value = artifact(taskId, 1); insert.run(value.id, taskId, `${i}.html`, JSON.stringify(value), 1);
+    }
+    seed.exec('COMMIT'); seed.close();
+    repository = await openSqliteRepository(directory, runnerId);
+    await assert.rejects(repository.putArtifact(artifact(nextTask, 1), 'overflow.html'), { code: 'quota_exceeded' });
+    assert.equal((await repository.putArtifact(first, 'first.html')).created, false);
+    assert.equal((await repository.listArtifactIds()).length, ARTIFACT_LIMITS.retained);
+    await repository.close(); repository = await openSqliteRepository(directory, runnerId);
+    assert.equal((await repository.listArtifactIds()).length, ARTIFACT_LIMITS.retained);
+  } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
+});

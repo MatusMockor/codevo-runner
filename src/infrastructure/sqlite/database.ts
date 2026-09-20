@@ -1,7 +1,7 @@
 import { parseAgentSubagentLifecycle, readAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import { SteeringDatabase } from './steering-database.js';
 import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
-import { outputRetentionMetadata, retainOutputWindow, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
+import { outputRetentionMetadata, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
 export { SQLITE_EXECUTION_STORAGE } from './output-retention.js';
 import { parseInstructionSnapshot } from '../../domain/instructions.js';
 import { ArtifactDatabase, ARTIFACT_SCHEMA } from './artifact-database.js';
@@ -14,7 +14,7 @@ import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import { CloneDatabase, CLONE_SCHEMA } from './clone-database.js';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LIMITS, RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 
@@ -31,13 +31,13 @@ export class RepositoryDatabase {
   readonly resumes: ResumeDatabase;
   readonly pending: PendingDatabase;
   readonly steering: SteeringDatabase;
-  constructor(dataDir: string, private readonly runnerId: string) {
+  constructor(private readonly dataDir: string, private readonly runnerId: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     try {
       this.lease = new DatabaseSync(join(dataDir, 'runner-lease.sqlite'));
       this.lease.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
-      this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=16384; PRAGMA journal_size_limit=4194304;');
+      this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=4294967294; PRAGMA journal_size_limit=4194304;');
       this.migrate();
       this.questions = new QuestionDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
@@ -73,6 +73,7 @@ export class RepositoryDatabase {
       this.db.exec(PENDING_SCHEMA);
       this.db.exec(ARTIFACT_SCHEMA);
       this.db.exec(QUESTION_SCHEMA);
+      this.db.exec("CREATE INDEX IF NOT EXISTS tasks_status_sequence ON tasks(json_extract(payload,'$.status'),sequence)");
       this.db.exec('CREATE TABLE IF NOT EXISTS task_subagents (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)');
     });
   }
@@ -86,11 +87,12 @@ export class RepositoryDatabase {
     }
   }
   private requireBulkCapacity(): void {
-    const pages = Number(this.db.prepare('PRAGMA page_count').get()!['page_count']);
-    const free = Number(this.db.prepare('PRAGMA freelist_count').get()!['freelist_count']);
-    const size = Number(this.db.prepare('PRAGMA page_size').get()!['page_size']);
-    const maximum = Number(this.db.prepare('PRAGMA max_page_count').get()!['max_page_count']);
-    if ((maximum - pages + free) * size < SQLITE_EXECUTION_STORAGE.reserveBytes) throw new RunnerError('quota_exceeded');
+    // Capacity is available host storage, not a lifetime history quota. Retain a
+    // small reserve for terminal state writes; real SQLite failures still propagate.
+    const disk = statfsSync(this.dataDir, { bigint: true });
+    if (disk.bavail * disk.bsize < BigInt(SQLITE_EXECUTION_STORAGE.reserveBytes)) throw new RunnerError('quota_exceeded');
+    const exhausted = this.db.prepare('SELECT 1 FROM sqlite_sequence WHERE seq>=? LIMIT 1').get(Number.MAX_SAFE_INTEGER - 1024);
+    if (exhausted) throw new RunnerError('quota_exceeded');
   }
   private task(row: Record<string, unknown>): Task {
     return { ...JSON.parse(row['payload'] as string) as Task, sequence: Number(row['sequence']) };
@@ -122,8 +124,6 @@ export class RepositoryDatabase {
       this.requireBulkCapacity();
       const refs = [...new Set(input.parts.flatMap(part => part.type === 'attachment' ? [part.attachmentId] : []))];
       for (const id of refs) this.getAttachment(id);
-      const count = Number(this.db.prepare('SELECT count(*) AS n FROM tasks').get()!['n']);
-      if (count >= LIMITS.tasks) throw new RunnerError('quota_exceeded');
       const task: Task = { ...isolation, ...(instructions ? { instructions } : {}), id: randomUUID(), sequence: 0, runnerId: this.runnerId, provider: input.provider, status: 'draft', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const id of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, id);
@@ -174,8 +174,9 @@ export class RepositoryDatabase {
       const output = text;
       this.requireBulkCapacity();
       this.event(id, 'task.output', { channel, text: output });
-      this.db.prepare('UPDATE task_execution SET output_bytes=output_bytes+?,output_events=output_events+1 WHERE task_id=?').run(Buffer.byteLength(output), id);
-      retainOutputWindow(this.db, id);
+      const bytes = Buffer.byteLength(output);
+      const updated = this.db.prepare('UPDATE task_execution SET output_bytes=output_bytes+?,output_events=output_events+1 WHERE task_id=? AND output_bytes<=? AND output_events<?').run(bytes, id, Number.MAX_SAFE_INTEGER - bytes, Number.MAX_SAFE_INTEGER);
+      if (updated.changes !== 1) throw new RunnerError('quota_exceeded');
       this.requireBulkCapacity();
     });
   }
@@ -199,13 +200,22 @@ export class RepositoryDatabase {
     this.transaction(() => {
       this.pending.pauseAll();
       this.questions.settlePending(undefined, 'expired');
-      const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence").all();
-      for (const row of rows) this.save({ ...this.task(row), status: 'interrupted' }, 'task.interrupted');
+      for (;;) {
+        const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence LIMIT ?").all(LIMITS.pageSize);
+        if (rows.length === 0) break;
+        for (const row of rows) this.save({ ...this.task(row), status: 'interrupted' }, 'task.interrupted');
+      }
     });
   }
   private page<T extends { sequence: number }>(rows: T[]): Page<T> {
-    const items = rows.slice(0, LIMITS.pageSize);
-    return { items, nextCursor: rows.length > LIMITS.pageSize ? items.at(-1)!.sequence : null };
+    const items: T[] = [];
+    let bytes = 0;
+    for (const row of rows) {
+      const size = Buffer.byteLength(JSON.stringify(row));
+      if (items.length >= LIMITS.pageSize || (items.length > 0 && bytes + size > 3 * 1024 * 1024)) break;
+      items.push(row); bytes += size;
+    }
+    return { items, nextCursor: rows.length > items.length ? items.at(-1)!.sequence : null };
   }
   listTasks(after: number): Page<Task> {
     return this.page(this.db.prepare('SELECT sequence,payload FROM tasks WHERE sequence>? ORDER BY sequence LIMIT ?').all(after, LIMITS.pageSize + 1).map(row => this.task(row)));

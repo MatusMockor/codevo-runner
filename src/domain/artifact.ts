@@ -1,5 +1,5 @@
 import { RunnerError } from './contracts.js';
-export const ARTIFACT_LIMITS = Object.freeze({ perTask: 32, storageBytes: 1024 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, htmlBytes: 2 * 1024 * 1024 });
+export const ARTIFACT_LIMITS = Object.freeze({ perTask: 32, retained: 32_000, storageBytes: 1024 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, htmlBytes: 2 * 1024 * 1024 });
 export type ArtifactMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'text/html';
 export type Artifact = Readonly<{ id: string; taskId: string; name: string; mediaType: ArtifactMediaType; sizeBytes: number; sha256: string }>;
 export function parseArtifactPath(input: unknown): string {
