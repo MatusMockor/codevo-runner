@@ -41,6 +41,7 @@ export type RunnerDescriptor = Readonly<{
     taskDrafts?: boolean;
     projectCloning?: boolean;
     imageAttachments?: boolean;
+    textAttachments?: boolean;
   }>;
 }>;
 export type { RunnerServices } from './transport/services.js';
@@ -88,7 +89,7 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, projectCloning: Boolean(services.clones) },
+    capabilities: { taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
   } : descriptor;
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({

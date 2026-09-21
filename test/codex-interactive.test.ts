@@ -330,3 +330,18 @@ test('native subagent linkage rejects foreign parents, invalid identity, unknown
   assert.equal(Buffer.byteLength(last.agentPath), 256);
   assert.equal(last.agentPath, '🧪'.repeat(64));
 });
+
+test('Codex steering references text attachments without localImage input', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+  await f.ready();
+  const pending = steer!({ idempotencyKey: 'text-file', prompt: 'Read this', attachments: [{ id: 'text', path: '/workspace/pasted.txt', mediaType: 'text/plain' }] });
+  await new Promise(resolve => setImmediate(resolve));
+  const rpc = f.sent.at(-1)!;
+  const input = (rpc.params as { input: { type: string; text: string }[] }).input;
+  assert.equal(input.length, 1);
+  assert.equal(input[0]!.type, 'text');
+  assert.ok(input[0]!.text.includes('"/workspace/pasted.txt"'));
+  await f.receive({ id: rpc.id, result: { turnId: turn } });
+  await pending;
+});

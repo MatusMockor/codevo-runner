@@ -127,3 +127,19 @@ test('preflight rejects non-image bytes claimed to be PNG before native decode',
   await assert.rejects(store.upload(randomUUID(), 'screen.png', 'image/png', chunks(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>')), signal()), hasCode('unsupported_media'));
   assert.deepEqual(await readdir(join(dir, 'attachments')), []);
 });
+
+test('text uploads retain UTF-8 bytes without image dimensions and reject malformed/binary/oversized files', async t => {
+  const { store } = await fixture(t);
+  const id = randomUUID();
+  const bytes = Buffer.from('dlhý text\n'.repeat(5000));
+  const first = await store.upload(id, 'Pasted text.txt', 'text/plain', chunks(bytes), signal());
+  assert.equal(first.attachment.mediaType, 'text/plain');
+  assert.equal(Object.hasOwn(first.attachment, 'width'), false);
+  assert.equal(Object.hasOwn(first.attachment, 'height'), false);
+  assert.deepEqual(Buffer.from((await store.read(id)).bytes), bytes);
+  assert.equal((await store.upload(id, 'Pasted text.txt', 'text/plain', chunks(bytes), signal())).created, false);
+  for (const invalid of [Buffer.from([0xc3, 0x28]), Buffer.from('text\0binary'), Buffer.alloc(0)]) {
+    await assert.rejects(store.upload(randomUUID(), 'pasted.txt', 'text/plain', chunks(invalid), signal()), hasCode('unsupported_media'));
+  }
+  await assert.rejects(store.upload(randomUUID(), 'pasted.txt', 'text/plain', chunks(Buffer.alloc(LIMITS.textAttachmentBytes + 1, 65)), signal()), hasCode('too_large'));
+});

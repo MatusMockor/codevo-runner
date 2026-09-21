@@ -22,4 +22,4 @@ export type ExecutionRequest = Readonly<{
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;
 export type WorkspaceDiff = Readonly<{ patch: string; truncated: boolean; untrackedFiles: readonly string[] }>;
-export type StagedExecutionAttachment = Readonly<{ id: string; path: string; mediaType: 'image/png' | 'image/jpeg' }>;
+export type StagedExecutionAttachment = Readonly<{ id: string; path: string; mediaType: 'image/png' | 'image/jpeg' | 'text/plain' }>;

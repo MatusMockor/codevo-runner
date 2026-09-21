@@ -1,3 +1,4 @@
+import { textAttachmentPrompt, validateTextAttachment } from '../../domain/text-attachment.js';
 import { executeClaudeInteractive } from './claude-interactive.js';
 import { executeCodexInteractive } from './codex-interactive.js';
 import { DEFAULT_EXECUTION_TIMEOUT_MS, MAX_EXECUTION_TIMEOUT_MS } from '../../domain/execution-policy.js';
@@ -60,7 +61,7 @@ export class CliProviderExecutor implements ProviderExecutor {
       return { exitCode: null, error: 'attachment_input_invalid' };
     }
     const rawPrompt = request.task.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
-    const userPrompt = launch ? launchPrompt(launch, rawPrompt) : rawPrompt;
+    const userPrompt = textAttachmentPrompt(launch ? launchPrompt(launch, rawPrompt) : rawPrompt, request.attachments);
     let context = '';
     try { if (request.task.instructions !== undefined) context = instructionContext(parseInstructionSnapshot(request.task.instructions)); }
     catch { return { exitCode: null, error: 'instruction_snapshot_invalid' }; }
@@ -68,12 +69,12 @@ export class CliProviderExecutor implements ProviderExecutor {
     const images: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [];
     try {
       for (const attachment of request.attachments) {
-        if (!isAbsolute(attachment.path) || !['image/png', 'image/jpeg'].includes(attachment.mediaType)) throw new Error('invalid_attachment');
+        if (!isAbsolute(attachment.path) || !['image/png', 'image/jpeg', 'text/plain'].includes(attachment.mediaType)) throw new Error('invalid_attachment');
         const handle = await open(attachment.path, constants.O_RDONLY | constants.O_NOFOLLOW);
         try {
           const stat = await handle.stat();
           if (!stat.isFile() || stat.size < 1 || stat.size > LIMITS.attachmentBytes) throw new Error('invalid_attachment');
-          if (this.provider === 'claude') {
+          if (this.provider === 'claude' || attachment.mediaType === 'text/plain') {
             // Read at most the validated allocation even if a file grows concurrently.
             const bytes = Buffer.alloc(stat.size);
             let offset = 0;
@@ -82,7 +83,8 @@ export class CliProviderExecutor implements ProviderExecutor {
               if (!read.bytesRead) throw new Error('attachment_changed');
               offset += read.bytesRead;
             }
-            images.push({ type: 'image', source: { type: 'base64', media_type: attachment.mediaType, data: bytes.toString('base64') } });
+            if (attachment.mediaType === 'text/plain') validateTextAttachment(bytes);
+            else images.push({ type: 'image', source: { type: 'base64', media_type: attachment.mediaType, data: bytes.toString('base64') } });
           }
         } finally { await handle.close(); }
         if (request.signal.aborted) return { exitCode: null, error: 'cancelled' };
@@ -91,7 +93,7 @@ export class CliProviderExecutor implements ProviderExecutor {
     const args = this.provider === 'codex'
       ? ['exec', ...(request.resumeSessionId ? ['resume'] : []), '--json',
         ...(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : ['-c', `sandbox_mode="${this.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write'}"`,
-        '-c', 'approval_policy="never"']), ...request.attachments.flatMap(image => ['-i', image.path]), '--',
+        '-c', 'approval_policy="never"']), ...request.attachments.filter(file => file.mediaType !== 'text/plain').flatMap(image => ['-i', image.path]), '--',
         ...(request.resumeSessionId ? [request.resumeSessionId] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json',
         '--append-system-prompt', ARTIFACT_HINT,
@@ -106,7 +108,7 @@ export class CliProviderExecutor implements ProviderExecutor {
     // The CLI's default 10-minute background wait can terminate unfinished agents.
     // Runner cancellation and the finite execution deadline remain authoritative.
     if (this.provider === 'claude') env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = '0';
-    if (this.interactiveQuestions) {
+    if (this.interactiveQuestions || (this.provider === 'claude' && request.attachments.some(file => file.mediaType === 'text/plain'))) {
       const plan = { executable: this.executable, cwd: request.cwd, ...(request.cwdIdentity ? { cwdIdentity: request.cwdIdentity } : {}), env, signal: request.signal, timeoutMs: this.timeoutMs, request, prompt };
       return this.provider === 'codex'
         ? executeCodexInteractive({ ...plan, sandbox: this.sandbox })

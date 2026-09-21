@@ -181,3 +181,45 @@ test('Claude refused unaccepted followup releases stored foreground result witho
   await rejected;
  }
 });
+
+test('Claude steering references UTF-8 text as file, rejects invalid bytes without delivery', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'claude-text-steer-'));
+  try {
+    const path = join(root, 'pasted.txt');
+    await writeFile(path, 'User pasted content');
+    let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+    const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+    await steeringReady(f);
+    const pending = steer!({ idempotencyKey: 'text', prompt: '', attachments: [{ id: 'text', path, mediaType: 'text/plain' }] });
+    while (!(f.sent.at(-1) as { session_id?: string }).session_id) await new Promise(resolve => setImmediate(resolve));
+    await acknowledgeSteer(f); await pending;
+    const sent = f.sent.at(-1) as { message: { content: { type: string; text: string }[] } };
+    assert.equal(sent.message.content.length, 1);
+    assert.equal(sent.message.content[0]!.type, 'text');
+    assert.ok(sent.message.content[0]!.text.includes(JSON.stringify(path)));
+    await f.protocol.receive({ type: 'control_request', request_id: 'read-steered-text', request: {
+      subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: path },
+    } }, f.send);
+    const allowed = f.sent.at(-1) as { response: { response: { behavior: string } } };
+    assert.equal(allowed.response.response.behavior, 'allow');
+    await writeFile(path, Buffer.from([0xff]));
+    await assert.rejects(steer!({ idempotencyKey: 'bad-text', prompt: '', attachments: [{ id: 'text', path, mediaType: 'text/plain' }] }), SteeringNotSent);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('Claude permits Read only for its exact staged text paths', async () => {
+  const path = '/private/runner/execution-inputs/task/pasted.txt';
+  const f = fixture({ attachments: [{ id: 'text', path, mediaType: 'text/plain' }] });
+  await steeringReady(f);
+  for (const [index, file] of [path, '/private/runner/token', path + '/../../token'].entries()) {
+    await f.protocol.receive({ type: 'control_request', request_id: `read-${index}`, request: {
+      subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: file },
+    } }, f.send);
+    const reply = f.sent.at(-1) as { response: { response: { behavior: string } } };
+    assert.equal(reply.response.response.behavior, index === 0 ? 'allow' : 'deny');
+  }
+});

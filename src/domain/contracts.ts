@@ -5,11 +5,11 @@ import type { TaskStatus } from './execution.js';
 
 export const LIMITS = Object.freeze({
   jsonBytes: 4 * 1024 * 1024, textBytes: 48_000, parts: 16, attachmentsPerTask: 8,
-  attachmentBytes: 8 * 1024 * 1024, imagePixels: 16_000_000, imageDimension: 8192,
+  attachmentBytes: 8 * 1024 * 1024, textAttachmentBytes: 5 * 1024 * 1024, imagePixels: 16_000_000, imageDimension: 8192,
   attachments: 256, storageBytes: 256 * 1024 * 1024,
   pageSize: 50, uploads: 2, uploadTimeoutMs: 30_000,
 });
-export type MediaType = 'image/png' | 'image/jpeg';
+export type MediaType = 'image/png' | 'image/jpeg' | 'text/plain';
 export type MessagePart = Readonly<{ type: 'text'; text: string }> |
   Readonly<{ type: 'attachment'; attachmentId: string }>;
 export type TaskIsolation = 'in-place' | 'worktree';
@@ -23,9 +23,9 @@ export type Task = Readonly<{
   launch?: AgentLaunchOptions; status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
 }>;
 export type Attachment = Readonly<{
-  id: string; runnerId: string; name: string; mediaType: MediaType; bytes: number;
-  sha256: string; width: number; height: number; createdAt: string;
-}>;
+  id: string; runnerId: string; name: string; bytes: number;
+  sha256: string; createdAt: string;
+}> & (Readonly<{ mediaType: 'image/png' | 'image/jpeg'; width: number; height: number }> | Readonly<{ mediaType: 'text/plain'; width?: never; height?: never }>);
 export type TaskEvent = Readonly<{
   sequence: number; taskId: string; type: 'task.created' | 'task.cancelled' | 'task.queued' | 'task.running' | 'task.succeeded' | 'task.failed' | 'task.interrupted' | 'task.output' | 'task.input'; createdAt: string;
   messageId?: string; parts?: readonly MessagePart[];

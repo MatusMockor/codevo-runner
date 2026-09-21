@@ -86,3 +86,19 @@ test('symlinked staging root is rejected at creation and after initialization', 
   await assert.rejects(stager.stage(randomUUID(), [id]), hasCode('storage_unavailable'));
   assert.deepEqual(await readdir(join(dir, 'attachments')), [`${id}.blob`]);
 });
+
+test('text inputs stage as private UTF-8 txt files and cleanup preserves durable upload', async t => {
+  const { store, stager } = await fixture(t);
+  const id = randomUUID();
+  const text = 'Large pasted context\n'.repeat(3000);
+  await store.upload(id, 'Pasted text.txt', 'text/plain', chunks(Buffer.from(text)), new AbortController().signal);
+  const staged = await stager.stage(randomUUID(), [id]);
+  const file = staged.attachments[0]!;
+  assert.equal(file.mediaType, 'text/plain');
+  assert.ok(file.path.endsWith('.txt'));
+  assert.equal(await readFile(file.path, 'utf8'), text);
+  assert.equal((await stat(file.path)).mode & 0o777, 0o600);
+  await staged.cleanup();
+  await assert.rejects(readFile(file.path));
+  assert.equal(Buffer.from((await store.read(id)).bytes).toString(), text);
+});

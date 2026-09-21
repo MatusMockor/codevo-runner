@@ -226,7 +226,7 @@ export class AttachmentController {
   upload(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const mediaType = request.headers['content-type'];
-      if (request.headers['content-encoding'] || (mediaType !== 'image/png' && mediaType !== 'image/jpeg'))
+      if (request.headers['content-encoding'] || (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'text/plain'))
         throw new RunnerError('unsupported_media');
       if (Number(request.headers['content-length'] ?? 0) > LIMITS.attachmentBytes)
         throw new RunnerError('too_large');

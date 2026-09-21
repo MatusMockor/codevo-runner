@@ -276,3 +276,20 @@ test('instruction payloads accept bounded JSON expansion and never enter task re
   const descriptor = await (await get(url, '/v1/runner')).json() as { capabilities: { instructionSync: boolean } };
   assert.equal(descriptor.capabilities.instructionSync, false);
 });
+
+test('text attachment upload and download retain exact bytes across runner restart', async t => {
+  const f = await fixture(t); let url = await f.start();
+  const id = randomUUID(); const bytes = Buffer.from('Pasted UTF-8 žluťoučký\n'.repeat(2000));
+  const response = await upload(url, id, bytes, 'Pasted text.txt', 'text/plain');
+  assert.equal(response.status, 201);
+  const { attachment: metadata } = await response.json() as { attachment: Attachment };
+  assert.equal(metadata.mediaType, 'text/plain');
+  assert.equal(Object.hasOwn(metadata, 'width'), false);
+  const bad = await upload(url, randomUUID(), Buffer.from([0xff]), 'bad.txt', 'text/plain');
+  assert.equal(bad.status, 415);
+  await f.stop(); url = await f.start();
+  const content = await get(url, `/v1/attachments/${id}/content`);
+  assert.equal(content.status, 200);
+  assert.equal(content.headers.get('content-type'), 'text/plain');
+  assert.deepEqual(Buffer.from(await content.arrayBuffer()), bytes);
+});

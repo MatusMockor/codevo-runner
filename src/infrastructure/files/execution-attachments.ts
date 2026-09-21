@@ -1,3 +1,4 @@
+import { validateTextAttachment } from '../../domain/text-attachment.js';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -36,8 +37,9 @@ class FileExecutionAttachmentStager implements ExecutionAttachmentStager {
       for (const id of attachmentIds) {
         const { attachment, bytes } = await this.store.read(id);
         if (bytes.byteLength > LIMITS.attachmentBytes) throw new RunnerError('too_large');
-        if (attachment.mediaType !== 'image/png' && attachment.mediaType !== 'image/jpeg') throw new RunnerError('unsupported_media');
-        const extension = attachment.mediaType === 'image/png' ? 'png' : 'jpg';
+        if (attachment.mediaType !== 'image/png' && attachment.mediaType !== 'image/jpeg' && attachment.mediaType !== 'text/plain') throw new RunnerError('unsupported_media');
+        if (attachment.mediaType === 'text/plain') validateTextAttachment(bytes);
+        const extension = attachment.mediaType === 'text/plain' ? 'txt' : attachment.mediaType === 'image/png' ? 'png' : 'jpg';
         const path = join(directory, `${id}.${extension}`);
         const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
         try { await file.writeFile(bytes); } finally { await file.close(); }

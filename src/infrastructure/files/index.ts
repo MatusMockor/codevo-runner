@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, opendir, unlink, link, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { constants } from 'node:fs';
+import { validateTextAttachment } from '../../domain/text-attachment.js';
 import sharp from 'sharp';
 import { validateImageEnvelope } from './image-preflight.js';
 import type { AttachmentRepository, AttachmentStore } from '../../application/ports.js';
@@ -23,7 +24,7 @@ function validateInput(id: string, name: string, mediaType: string): asserts med
   if (!isId(id) || !name.trim() || /[\/\\\x00-\x1f\x7f]/.test(name) || Buffer.byteLength(name) > 255 || /[\uD800-\uDFFF]/u.test(name)) {
     throw new RunnerError('invalid_input');
   }
-  if (mediaType !== 'image/png' && mediaType !== 'image/jpeg') throw new RunnerError('unsupported_media');
+  if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'text/plain') throw new RunnerError('unsupported_media');
 }
 async function readBounded(path: string): Promise<Buffer> {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -84,9 +85,11 @@ class FileAttachmentStore implements AttachmentStore {
     try {
       const { bytes, sha256 } = await this.receive(staged, source, signal);
       assertActive(signal);
-      const dimensions = await inspectImage(staged, mediaType, signal);
+      const format = mediaType === 'text/plain'
+        ? (validateTextAttachment(await readBounded(staged)), { mediaType } as const)
+        : { mediaType, ...await inspectImage(staged, mediaType, signal) };
       assertActive(signal);
-      const value: Attachment = { id, runnerId: this.runnerId, name, mediaType, bytes, sha256, ...dimensions, createdAt: new Date().toISOString() };
+      const value: Attachment = { id, runnerId: this.runnerId, name, bytes, sha256, ...format, createdAt: new Date().toISOString() };
       let existing: Attachment | undefined;
       try { existing = await this.repository.getAttachment(id); } catch (error) {
         if (!(error instanceof RunnerError) || error.code !== 'not_found') throw error;

@@ -340,3 +340,32 @@ test('interactive Claude waits for background completion after an early result',
     assert.match(f.output(), /Final background answer/);
   } finally { await f.close(); }
 });
+
+for (const provider of ['codex', 'claude'] as const) {
+  test(`${provider} references pasted text as a file and never emits an image input`, async () => {
+    const f = await fixture(provider === 'claude' ? `
+      const rl = require('node:readline').createInterface({input:process.stdin});
+      rl.on('line', line => { const frame=JSON.parse(line);
+        if(frame.type==='control_request') console.log(JSON.stringify({type:'control_response',response:{subtype:'success',request_id:'codevo-initialize'}}));
+        if(frame.type==='user') { require('node:fs').writeFileSync('captured.json',JSON.stringify(frame)); ${providerSuccess('claude')} process.exit(0); }
+      });
+    ` : `let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
+      console.log(JSON.stringify({args:process.argv.slice(2),stdin,type:'diagnostic'}));
+      ${providerSuccess(provider)}
+    });`);
+    try {
+      const path = join(f.cwd, 'pasted.txt'); const id = randomUUID();
+      await writeFile(path, 'Pasted contents\n'.repeat(3000));
+      const result = await new CliProviderExecutor(provider, { executable: f.executable }).execute({ ...f.request,
+        task: { ...f.request.task, provider, parts: [{ type: 'attachment', attachmentId: id }] },
+        attachments: [{ id, path, mediaType: 'text/plain' }] });
+      assert.equal(result.error, undefined);
+      const observed = provider === 'codex' ? JSON.parse(f.output().split('\n')[0]!) : { args: [], stdin: await readFile(join(f.cwd, 'captured.json'), 'utf8') };
+      assert.equal(observed.args.includes('-i'), false);
+      const prompt = provider === 'codex' ? observed.stdin : JSON.parse(observed.stdin).message.content[0].text;
+      assert.ok(prompt.includes(JSON.stringify(path)));
+      assert.ok(!prompt.includes('Pasted contents'));
+      if (provider === 'claude') assert.deepEqual(JSON.parse(observed.stdin).message.content.map((part: { type: string }) => part.type), ['text']);
+    } finally { await f.close(); }
+  });
+}

@@ -1,3 +1,4 @@
+import { textAttachmentPrompt } from '../../domain/text-attachment.js';
 import { SteeringNotSent } from '../../domain/steering.js';
 import { lstat, realpath } from 'node:fs/promises';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
@@ -99,7 +100,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           await call(send, 3, 'turn/start', {
             threadId, cwd: plan.cwd, ...model, approvalPolicy: 'never', ...(sandboxPolicy ? { sandboxPolicy } : {}),
             input: [{ type: 'text', text: `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${plan.prompt || 'Inspect the attached images.'}` },
-              ...plan.request.attachments.map(image => ({ type: 'localImage', path: image.path }))],
+              ...plan.request.attachments.filter(file => file.mediaType !== 'text/plain').map(image => ({ type: 'localImage', path: image.path }))],
           });
         } else if (stage === 'turn' && frame.id === 3) {
           const id = identifier(object(result.turn).id);
@@ -116,7 +117,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
               const timer = setTimeout(() => { if (pendingSteer?.id === id) { pendingSteer = undefined; reject(new Error('steering_timeout')); } }, 15_000);
               pendingSteer = { id, resolve, reject, timer };
               void call(send, id, 'turn/steer', { threadId, expectedTurnId: ownedTurn,
-                input: [{ type: 'text', text: input.prompt || 'Inspect the attached images.' }, ...input.attachments.map(image => ({ type: 'localImage', path: image.path }))] })
+                input: [{ type: 'text', text: textAttachmentPrompt(input.prompt, input.attachments) || 'Inspect the attached images.' }, ...input.attachments.filter(file => file.mediaType !== 'text/plain').map(image => ({ type: 'localImage', path: image.path }))] })
                 .catch(error => { if (pendingSteer?.id === id) { clearTimeout(timer); pendingSteer = undefined; reject(error); } });
             });
           });
