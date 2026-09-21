@@ -4,7 +4,8 @@ import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
 import { clientCapabilities, cursor, handle, jsonBody, send } from './http.js';
 import { SUBAGENT_LIFECYCLE_RETENTION } from '../domain/subagent-lifecycle.js';
 import type { PendingMessage } from '../domain/pending-message.js';
-import { SERVICES, type RunnerServices } from './services.js';
+import type { RunnerDescriptor } from '../server.js';
+import { DESCRIPTOR, SERVICES, type RunnerServices } from './services.js';
 
 function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions'> {
   const { instructions: _instructions, ...publicValue } = record;
@@ -175,7 +176,22 @@ export class ProjectCloneController {
 
 @Controller('v1/projects')
 export class ProjectController {
-  constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+  constructor(@Inject(SERVICES) private readonly services: RunnerServices,
+    @Inject(DESCRIPTOR) private readonly descriptor: RunnerDescriptor) {}
+  @Get(':id/repository-identity')
+  repositoryIdentity(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      if (request.headers['x-codevo-runner-id'] !== this.descriptor.runnerId) throw new RunnerError('conflict');
+      if (!this.services.execution?.repositoryIdentity) throw new RunnerError('not_found');
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      response.once('close', abort);
+      try {
+        const result = await this.services.execution.repositoryIdentity(id, controller.signal);
+        if (!response.destroyed) send(response, 200, result);
+      } finally { response.off('close', abort); }
+    });
+  }
   @Post('clone')
   clone(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {

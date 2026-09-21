@@ -5,6 +5,7 @@ import type { ProjectRegistry, ProjectWorkspace } from '../../application/execut
 import { isId, RunnerError } from '../../domain/contracts.js';
 import type { RegisteredProject } from '../../domain/execution.js';
 
+import { ProjectRepositoryIdentity } from './repository-identity.js';
 import { git } from './git-command.js';
 import { captureWorkspace, loadMetadata, saveMetadata, validateWorkspace } from './workspace-metadata.js';
 import { listWorkspaceFiles, readWorkspaceFileDiff } from './workspace-files.js';
@@ -35,6 +36,10 @@ export class GitProjectWorkspace implements ProjectWorkspace {
   private readonly baselines: string;
   private readonly metadata: string;
   private reviews = 0;
+  private readonly repositoryIdentities = new ProjectRepositoryIdentity();
+  repositoryIdentity(project: RegisteredProject, signal?: AbortSignal) {
+    return this.repositoryIdentities.read(project, signal);
+  }
   constructor(dataDir: string) {
     this.root = resolve(dataDir, 'workspaces');
     this.baselines = resolve(dataDir, 'workspace-baselines');

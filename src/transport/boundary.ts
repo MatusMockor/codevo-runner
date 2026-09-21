@@ -18,6 +18,7 @@ const terminalBase = '/v1/projects/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}/terminals';
 const terminalOpenRoute = new RegExp(`^${terminalBase}$`);
 const terminalActionRoute = new RegExp(`^${terminalBase}/${uuid}/(input|resize)(?:\\?taskId=${uuid})?$`);
 const routes = [
+  { pattern: /^\/v1\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\/repository-identity$/, methods: ['GET'] },
   { pattern: /^\/v1\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\/surface\/capabilities$/, methods: ['GET'] },
   { pattern: terminalOpenRoute, methods: ['POST'] },
   { pattern: terminalActionRoute, methods: ['POST'] },

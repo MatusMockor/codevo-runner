@@ -121,6 +121,18 @@ export class ExecutionService implements ExecutionApplication {
 
   projects() { return this.registry.list(); }
 
+  async repositoryIdentity(projectId: string, signal?: AbortSignal) {
+    this.assertAvailable();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(projectId)) throw new RunnerError('invalid_input');
+    if (!this.workspaces.repositoryIdentity) throw new RunnerError('not_found');
+    const project = await this.registry.get(projectId);
+    const repositoryKey = await this.workspaces.repositoryIdentity(project, signal);
+    this.assertAvailable();
+    if ((await this.registry.get(projectId)).path !== project.path) throw new RunnerError('conflict');
+    signal?.throwIfAborted();
+    return { repositoryKey };
+  }
+
   async diff(taskId: string) {
     const task = await this.tasks.getTask(validateId(taskId));
     if (!task.projectId) throw new RunnerError('conflict');

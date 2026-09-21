@@ -39,6 +39,7 @@ export interface ProjectRegistry {
 }
 /** Creates a task-owned checkout and returns its server-local working directory. */
 export interface ProjectWorkspace {
+  repositoryIdentity?(project: RegisteredProject, signal?: AbortSignal): Promise<string | null>;
   prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation?: TaskIsolation): Promise<string>;
   diff(taskId: string, project?: RegisteredProject): Promise<WorkspaceDiff>;
   identity?(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<Readonly<{ dev: number; ino: number }>>;
@@ -53,6 +54,7 @@ export interface ProviderExecutor {
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
 export interface ExecutionApplication {
+  repositoryIdentity?(projectId: string, signal?: AbortSignal): Promise<Readonly<{ repositoryKey: string | null }>>;
   steer(taskId: string, input: unknown): Promise<SteerReceipt>;
   steerPending(taskId: string, pendingId: string): Promise<SteerReceipt>;
   enqueue(taskId: string, input: unknown): Promise<{ pending: PendingMessage; created: boolean }>;
