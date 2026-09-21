@@ -216,6 +216,17 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           // Preserve item boundaries: artifact discovery tracks Markdown fences and links per item.
           // Transport writes bounded chunks; existing JSONL parsers report oversized frames explicitly.
           await emit({ type: 'item.completed', item: { id, type: item.type === 'agentMessage' ? 'agent_message' : 'reasoning', text } });
+        } else if (item.type === 'subAgentActivity') {
+          // Current Codex links spawned children through this item, without a
+          // legacy collabAgentToolCall. Register only an exact root-owned item.
+          const childId = identifier(item.agentThreadId);
+          const kind = item.kind;
+          if (typeof kind !== 'string' || !['started', 'interacted', 'interrupted', 'completed'].includes(kind)) throw new Error('provider_subagent_kind_invalid');
+          if (childId === threadId) throw new Error('provider_owner_mismatch');
+          if (children.size >= 256 && !children.has(childId)) throw new Error('provider_child_limit');
+          if (!children.has(childId)) children.set(childId, undefined);
+          await emit({ v: 1, t: 'subagent', kind, agentThreadId: childId,
+            ...subagentPath(item.agentPath) });
         } else if (item.type === 'collabAgentToolCall') {
           const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : [];
           const ids: string[] = [];
@@ -315,4 +326,16 @@ async function validateProtocolWorkspace(plan: CodexInteractivePlan): Promise<vo
       current.dev !== identity.dev || current.ino !== identity.ino) throw new Error('workspace_identity_changed');
   }
   if (plan.signal.aborted) throw new Error('cancelled');
+}
+
+/** Match the editor's canonical tool-identity field bound without splitting UTF-8. */
+function subagentPath(value: unknown): { agentPath: string; clipped: boolean } {
+  if (typeof value !== 'string') return { agentPath: '', clipped: false };
+  let agentPath = ''; let bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > 256) return { agentPath, clipped: true };
+    agentPath += character; bytes += size;
+  }
+  return { agentPath, clipped: false };
 }

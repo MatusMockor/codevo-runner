@@ -142,7 +142,7 @@ test('long command output is retained in bounded tool-result segments', async ()
 });
 
 
-test('real subprocess appserver lifecycle answers question and reaps provider after completion', async () => {
+test('real subprocess appserver lifecycle retains spawned children, answers question and reaps provider after completion', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'codevo-codex-interactive-'));
   const executable = join(cwd, 'provider');
   try {
@@ -155,6 +155,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
  if(frame.method==='thread/start') send({id:frame.id,result:{thread:{id:'${thread}'}}});
  if(frame.method==='turn/start') {
    send({id:frame.id,result:{turn:{id:'${turn}'}}});
+   send({method:'item/completed',params:{threadId:'${thread}',turnId:'${turn}',item:{id:'spawn',type:'subAgentActivity',kind:'started',agentThreadId:'child',agentPath:'/root/review'}}});
+   send({method:'turn/started',params:{threadId:'child',turn:{id:'child-turn'}}});
+   send({method:'turn/completed',params:{threadId:'child',turn:{id:'child-turn',status:'completed'}}});
    send(${JSON.stringify(question())});
  }
  if(frame.id==='question-1' && frame.result) {
@@ -288,4 +291,42 @@ test('Codex late child completion cannot complete its newer active turn', async 
  await start('a');await complete('a');await start('b');
  const before=f.output();await start('a');await complete('a');await complete('unseen');await start('unseen');assert.equal(f.output(),before);
  await complete('b');assert.equal(f.output().split('subagentTurnCompleted').length-1,2);
+});
+
+
+test('native subAgentActivity links child before telemetry and preserves root completion', async () => {
+  const f = fixture(); await f.ready();
+  await f.receive({ method: 'item/completed', params: { threadId: thread, turnId: turn,
+    item: { id: 'spawn', type: 'subAgentActivity', kind: 'started', agentThreadId: 'child', agentPath: '/root/review' } } });
+  await f.receive({ method: 'turn/started', params: { threadId: 'child', turn: { id: 'child-turn' } } });
+  await f.receive({ method: 'item/completed', params: { threadId: 'child', turnId: 'child-turn',
+    item: { id: 'child-output', type: 'agentMessage', text: 'Private child output' } } });
+  assert.equal(await f.receive({ method: 'turn/completed', params: { threadId: 'child', turn: { id: 'child-turn', status: 'completed' } } }), undefined);
+  assert.equal(f.output().includes('Private child output'), false);
+  const activity = f.output().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(activity.some(event => event.t === 'subagent' && event.kind === 'started' && event.agentThreadId === 'child'));
+  assert.ok(activity.some(event => event.t === 'subagentTurnCompleted' && event.agentThreadId === 'child'));
+  assert.deepEqual(await f.receive({ method: 'turn/completed', params: { threadId: thread, turn: { id: turn, status: 'completed' } } }), { exitCode: 0, sessionId: thread });
+});
+
+
+test('native subagent linkage rejects foreign parents, invalid identity, unknown kinds and overflow', async () => {
+  const f = fixture(); await f.ready();
+  const activity = (overrides: Record<string, unknown> = {}, parent = thread) => ({ method: 'item/started', params: {
+    threadId: parent, turnId: turn, item: { id: 'spawn', type: 'subAgentActivity', kind: 'started', agentThreadId: 'child', ...overrides },
+  } });
+  await assert.rejects(f.receive(activity({}, 'foreign')), /owner_mismatch/);
+  await assert.rejects(f.receive(activity({ agentThreadId: thread })), /owner_mismatch/);
+  await assert.rejects(f.receive(activity({ agentThreadId: '' })), /owner_invalid/);
+  await assert.rejects(f.receive(activity({ kind: 'unknown' })), /subagent_kind_invalid/);
+  await assert.rejects(f.receive(activity({ kind: ['started'] })), /subagent_kind_invalid/);
+  await assert.rejects(f.receive({ method: 'turn/started', params: { threadId: 'child', turn: { id: 'foreign-turn' } } }), /owner_mismatch/);
+  assert.equal(f.output().includes('subagent'), false);
+  for (let i = 0; i < 256; i++) await f.receive(activity({ agentThreadId: `child-${i}` }));
+  await assert.rejects(f.receive(activity({ agentThreadId: 'overflow' })), /child_limit/);
+  await f.receive(activity({ agentThreadId: 'child-0', kind: 'interacted', agentPath: '🧪'.repeat(2000) }));
+  const last = JSON.parse(f.output().trim().split('\n').at(-1)!);
+  assert.equal(last.clipped, true);
+  assert.equal(Buffer.byteLength(last.agentPath), 256);
+  assert.equal(last.agentPath, '🧪'.repeat(64));
 });
