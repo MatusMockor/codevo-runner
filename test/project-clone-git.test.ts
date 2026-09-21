@@ -45,6 +45,14 @@ test('Git clone checks out a selected branch, refuses collisions and cleans fail
     const controller = new AbortController(); controller.abort();
     await assert.rejects(adapter.clone({ ...input, name: 'cancelled' }, randomUUID(), controller.signal));
     assert.deepEqual(await readdir(root), ['project']);
+    const nested = join(await realpath(root), 'team');
+    await mkdir(nested);
+    const chosen = await adapter.clone({ ...input, name: 'chosen', parentPath: nested }, randomUUID(), new AbortController().signal);
+    assert.equal(chosen.project.path, join(nested, 'chosen'));
+    assert.equal(await readFile(join(chosen.project.path, 'file.txt'), 'utf8'), 'feature');
+    await chosen.rollback();
+    await rm(nested, { recursive: true });
+    await assert.rejects(adapter.clone({ ...input, name: 'outside', parentPath: source }, randomUUID(), new AbortController().signal), /invalid_input/);
     const rollbackClone = await adapter.clone({ ...input, name: 'rollback' }, randomUUID(), new AbortController().signal);
     await rename(root, `${root}-owned`);
     await mkdir(root);

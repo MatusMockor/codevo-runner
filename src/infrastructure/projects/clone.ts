@@ -1,8 +1,11 @@
+import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { lstat, mkdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, rename, rm, rmdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { PreparedClone, ProjectCloner } from '../../application/clone-ports.js';
 import { validCloneBranch, validCloneUrl, type CloneInput } from '../../domain/project-clone.js';
+import { prepareCloneProviderAuth } from './clone-provider-auth.js';
+import { retainCloneDirectory } from './clone-directory.js';
 import { RunnerError } from '../../domain/contracts.js';
 
 /** Clones use the server's SSH identity; credentials never pass through the editor. */
@@ -18,49 +21,72 @@ export class GitCloneAdapter implements ProjectCloner {
     // Independently constrain the filesystem segment even when called outside HTTP.
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(input.name) || !validCloneUrl(input.url) ||
         (input.branch !== undefined && !validCloneBranch(input.branch))) throw new RunnerError('invalid_input');
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const rootIdentity = await lstat(this.root);
-    if (!rootIdentity.isDirectory() || rootIdentity.isSymbolicLink()) throw new RunnerError('storage_unavailable');
-    const root = await realpath(this.root);
-    const rootOwned = async () => {
-      const current = await lstat(this.root).catch(() => undefined);
-      return current?.dev === rootIdentity.dev && current.ino === rootIdentity.ino &&
-        current.isDirectory() && !current.isSymbolicLink() &&
-        await realpath(this.root).catch(() => undefined) === root;
-    };
-    if (!await rootOwned()) throw new RunnerError('storage_unavailable');
-    const destination = join(root, input.name);
-    try { await mkdir(destination, { mode: 0o700 }); }
-    catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'EEXIST') throw new RunnerError('conflict');
-      throw new RunnerError('storage_unavailable');
-    }
-    const identity = await lstat(destination);
-    const destinationOwned = async () => {
-      if (!await rootOwned()) return false;
-      const current = await lstat(destination).catch(() => undefined);
-      return current?.dev === identity.dev && current.ino === identity.ino &&
-        current.isDirectory() && !current.isSymbolicLink();
-    };
-    const rollback = async () => {
-      // A swapped root or destination is never ours to remove.
-      if (await destinationOwned()) await rm(destination, { recursive: true, force: true });
-    };
+    const directory = await retainCloneDirectory(this.root, input.parentPath);
     try {
-      if (!await destinationOwned()) throw new RunnerError('storage_unavailable');
+      const root = directory.path;
+      const rootOwned = directory.owned;
       signal.throwIfAborted();
-      await cloneGit(root, destination, input, signal);
-      signal.throwIfAborted();
-      if (!await destinationOwned()) throw new RunnerError('storage_unavailable');
-      return { project: { id: input.name, name: input.name, path: destination }, rollback };
-    } catch (error) {
-      await rollback();
-      throw error;
-    }
+      const destination = join(root, input.name);
+      const anchoredDestination = join(directory.anchor, input.name);
+      try { await mkdir(anchoredDestination, { mode: 0o700 }); }
+      catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'EEXIST') throw new RunnerError('conflict');
+        throw new RunnerError('storage_unavailable');
+      }
+      const identity = await lstat(destination);
+      const destinationOwned = async () => {
+        if (!await rootOwned()) return false;
+        const current = await lstat(destination).catch(() => undefined);
+        return current?.dev === identity.dev && current.ino === identity.ino &&
+          current.isDirectory() && !current.isSymbolicLink();
+      };
+      const rollback = async () => {
+        // A swapped root or destination is never ours to remove.
+        if (!await destinationOwned()) return;
+        // Move into a private random container before deleting. If a replacement
+        // won the move race, preserve its contents rather than deleting them.
+        const cleanupDirectory = await retainCloneDirectory(this.root, root);
+        try {
+          if (!await destinationOwned()) return;
+          const cleanup = await mkdtemp(join(cleanupDirectory.anchor, '.codevo-cleanup-'));
+          const moved = join(cleanup, 'clone');
+          try {
+            if (!await destinationOwned()) return;
+            await rename(join(cleanupDirectory.anchor, input.name), moved);
+            const movedIdentity = await lstat(moved);
+            if (movedIdentity.dev !== identity.dev || movedIdentity.ino !== identity.ino) throw new RunnerError('storage_unavailable');
+            await rm(moved, { recursive: true, force: true });
+          } finally {
+            // rmdir is intentionally non-recursive: uncertain contents survive.
+            await rmdir(cleanup).catch(() => undefined);
+          }
+        } finally { await cleanupDirectory.close(); }
+      };
+      try {
+        if (!await destinationOwned()) throw new RunnerError('storage_unavailable');
+        signal.throwIfAborted();
+        const destinationHandle = await open(anchoredDestination, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        try {
+          const held = await destinationHandle.stat();
+          if (held.dev !== identity.dev || held.ino !== identity.ino || !await destinationOwned()) throw new RunnerError('storage_unavailable');
+          const cwd = process.platform === 'linux' ? `/proc/${process.pid}/fd/${destinationHandle.fd}` : destination;
+          signal.throwIfAborted();
+          await cloneGit(cwd, '.', input, signal);
+        } finally { await destinationHandle.close(); }
+        signal.throwIfAborted();
+        if (!await destinationOwned()) throw new RunnerError('storage_unavailable');
+        return { project: { id: input.name, name: input.name, path: destination }, rollback };
+      } catch (error) {
+        await rollback();
+        throw error;
+      }
+    } finally { await directory.close(); }
   }
 }
 
-function cloneGit(cwd: string, destination: string, input: CloneInput, signal: AbortSignal): Promise<void> {
+async function cloneGit(cwd: string, destination: string, input: CloneInput, signal: AbortSignal): Promise<void> {
+  const providerAuth = await prepareCloneProviderAuth(input.url, signal);
+  signal.throwIfAborted();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
   Object.assign(env, {
     GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/false', SSH_ASKPASS: '/bin/false', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
@@ -68,7 +94,7 @@ function cloneGit(cwd: string, destination: string, input: CloneInput, signal: A
   });
   const args = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
     '-c', 'credential.helper=', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always',
-    '-c', 'protocol.ssh.allow=always', 'clone', '--no-recurse-submodules', '--template=', '--quiet'];
+    '-c', 'protocol.ssh.allow=always', ...providerAuth, 'clone', '--no-recurse-submodules', '--template=', '--quiet'];
   if (input.branch) args.push('--branch', input.branch);
   args.push('--', input.url, destination);
   return new Promise((resolveResult, reject) => {

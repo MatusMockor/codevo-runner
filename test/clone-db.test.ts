@@ -13,10 +13,14 @@ test('clone replay, name reservations, atomic registration and runner identity s
   const identity = randomUUID();
   let repository = await openSqliteRepository(directory, identity);
   try {
-    const request = input();
+    const request = { ...input(), parentPath: '/srv/projects/team' };
     const job = await repository.createClone(request);
     assert.deepEqual(await repository.createClone(request), job);
     await assert.rejects(repository.createClone({ ...request, branch: 'other' }), { code: 'conflict' });
+    await assert.rejects(repository.createClone({ ...request, parentPath: '/srv/projects/other' }), { code: 'conflict' });
+    await repository.close();
+    repository = await openSqliteRepository(directory, identity);
+    assert.deepEqual(await repository.createClone(request), job);
     await assert.rejects(repository.createClone(input()), { code: 'conflict' });
     assert.deepEqual(await repository.claimClone(), { job: { ...job, status: 'running' }, input: request });
     assert.equal(await repository.claimClone(), null);
@@ -109,7 +113,7 @@ test('v2 migration preserves tasks and clone job retention remains bounded with 
     finally { legacy.close(); }
     repository = await openSqliteRepository(directory, identity);
     assert.deepEqual(await repository.getTask(task.id), task);
-    const request = input();
+    const request = { ...input(), parentPath: '/srv/projects/team' };
     const first = await repository.createClone(request);
     await repository.cancelClone(first.id);
     for (let i = 1; i < 1000; i++) {

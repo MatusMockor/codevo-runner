@@ -14,6 +14,10 @@ try {
     try {
       let value: unknown;
       switch (request.method) {
+        case 'reorderThread': value = db.threadMetadata.reorder(...request.args); break;
+        case 'getThreadMetadata': value = db.threadMetadata.get(...request.args); break;
+        case 'listThreadMetadata': value = db.threadMetadata.list(...request.args); break;
+        case 'patchThreadMetadata': value = db.threadMetadata.patch(...request.args); break;
         case 'setTaskSubagents': value = db.setTaskSubagents(...request.args); break;
         case 'releaseSteer': value = db.steering.releaseSteer(...request.args); break;
         case 'claimSteer': value = db.steering.claimSteer(...request.args); break;

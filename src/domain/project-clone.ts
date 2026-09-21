@@ -1,5 +1,5 @@
 import { isId, RunnerError } from './contracts.js';
-export type CloneInput = Readonly<{ idempotencyKey: string; url: string; name: string; branch?: string }>;
+export type CloneInput = Readonly<{ idempotencyKey: string; url: string; name: string; branch?: string; parentPath?: string }>;
 export type CloneStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled';
 export type CloneJob = Readonly<{ id: string; status: CloneStatus; project: Readonly<{ id: string; name: string }> | null; error: string | null }>;
 export type StoredClone = Readonly<{ job: CloneJob; input: CloneInput }>;
@@ -24,9 +24,14 @@ export function validCloneBranch(value: unknown): value is string {
 export function parseCloneInput(value: unknown): CloneInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RunnerError('invalid_input');
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).some(key => !['idempotencyKey', 'url', 'name', 'branch'].includes(key)) ||
+  if (Object.keys(v).some(key => !['idempotencyKey', 'url', 'name', 'branch', 'parentPath'].includes(key)) ||
       (!isId(v.idempotencyKey) || v.idempotencyKey.length !== 36) || !validCloneUrl(v.url) || typeof v.name !== 'string' ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(v.name) || /[\r\n]/.test(v.name) ||
-      (v.branch !== undefined && !validCloneBranch(v.branch))) throw new RunnerError('invalid_input');
-  return { idempotencyKey: v.idempotencyKey, url: v.url, name: v.name, ...(v.branch === undefined ? {} : { branch: v.branch as string }) };
+      (v.branch !== undefined && !validCloneBranch(v.branch)) ||
+      (v.parentPath !== undefined && !validProjectDirectoryPath(v.parentPath))) throw new RunnerError('invalid_input');
+  return { idempotencyKey: v.idempotencyKey, url: v.url, name: v.name, ...(v.branch === undefined ? {} : { branch: v.branch as string }), ...(v.parentPath === undefined ? {} : { parentPath: v.parentPath as string }) };
+}
+
+export function validProjectDirectoryPath(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && value.length <= 4096 && new TextEncoder().encode(value).length <= 4096 && !/[\x00-\x1f\x7f-\x9f]/.test(value) && !value.split('/').includes('..');
 }

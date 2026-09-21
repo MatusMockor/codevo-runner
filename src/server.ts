@@ -1,3 +1,6 @@
+import { RepositoryLookupController } from './transport/repository-lookup-controller.js';
+import { ThreadMetadataController } from './transport/thread-metadata-controller.js';
+import { ProjectDirectoriesController } from './transport/project-directories-controller.js';
 import { TerminalController } from './transport/terminal-controller.js';
 import { SurfaceController } from './transport/surface-controller.js';
 import { QuestionController } from './transport/question-controller.js';
@@ -7,15 +10,15 @@ import { RunnerChangeTransport } from './transport/changes.js';
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import {
-  Controller, Get, Inject, Module, Res,
+  Controller, Get, Inject, Module, Req, Res,
   type INestApplication, type OnApplicationShutdown,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { RequestBoundary } from './transport/boundary.js';
 import { AttachmentController, ProjectController, ProjectCloneController, TaskController } from './transport/controllers.js';
-import { send } from './transport/http.js';
+import { clientCapabilities, send } from './transport/http.js';
 import { AUTHORIZE, DESCRIPTOR, EXTENDED, SERVICES, type Authorize, type RunnerServices } from './transport/services.js';
 
 export type RunnerDescriptor = Readonly<{
@@ -24,6 +27,8 @@ export type RunnerDescriptor = Readonly<{
   runnerId: string;
   name: string;
   capabilities: Readonly<{
+    projectManagement?: boolean;
+    threadManagement?: boolean;
     interactiveQuestions?: boolean;
     instructionSync?: boolean;
     taskIsolation?: boolean;
@@ -56,8 +61,16 @@ class RunnerController {
   }
 
   @Get('v1/runner')
-  runner(@Res() response: Response) {
-    send(response, 200, this.descriptor);
+  runner(@Req() request: Request, @Res() response: Response) {
+    // Older editors validate discovery strictly. New optional features are announced
+    // only to clients which explicitly understand the same feature contract.
+    const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
+    const { projectManagement, threadManagement, ...legacy } = this.descriptor.capabilities;
+    send(response, 200, { ...this.descriptor, capabilities: {
+      ...legacy,
+      ...(supported.has('projectManagement') && projectManagement !== undefined ? { projectManagement } : {}),
+      ...(supported.has('threadManagement') && threadManagement !== undefined ? { threadManagement } : {}),
+    } });
   }
 }
 
@@ -89,12 +102,12 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
-  } : descriptor;
+    capabilities: { projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, projectManagement: false, threadManagement: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [TerminalController, SurfaceController, QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
+    controllers: [RunnerController, ...(services ? [RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),

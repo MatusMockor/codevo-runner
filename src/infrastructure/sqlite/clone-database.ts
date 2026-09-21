@@ -25,7 +25,7 @@ export class CloneDatabase {
     return JSON.parse(row['payload'] as string) as CloneJob;
   }
   createClone(input: CloneInput, maximumProjects = 32): CloneJob {
-    const fingerprint = JSON.stringify({ url: input.url, name: input.name, branch: input.branch ?? null });
+    const fingerprint = JSON.stringify({ url: input.url, name: input.name, branch: input.branch ?? null, ...(input.parentPath === undefined ? {} : { parentPath: input.parentPath }) });
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT fingerprint,payload FROM project_clones WHERE key=?').get(input.idempotencyKey);
       if (previous) {

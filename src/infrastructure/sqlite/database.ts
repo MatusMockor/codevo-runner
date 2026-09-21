@@ -1,3 +1,4 @@
+import { ThreadMetadataDatabase, THREAD_METADATA_SCHEMA } from './thread-metadata-database.js';
 import { parseAgentSubagentLifecycle, readAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import { SteeringDatabase } from './steering-database.js';
 import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
@@ -25,6 +26,7 @@ import { EXECUTION_LIMITS, type ExecutionResult, type OutputChannel } from '../.
 export class RepositoryDatabase {
   private readonly db!: DatabaseSync;
   private readonly lease!: DatabaseSync;
+  readonly threadMetadata: ThreadMetadataDatabase;
   readonly questions: QuestionDatabase;
   readonly artifacts: ArtifactDatabase;
   readonly clones: CloneDatabase;
@@ -39,9 +41,10 @@ export class RepositoryDatabase {
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=4294967294; PRAGMA journal_size_limit=4194304;');
       this.migrate();
+      this.threadMetadata = new ThreadMetadataDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.questions = new QuestionDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
-      this.resumes = new ResumeDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
+      this.resumes = new ResumeDatabase(this.db, { wakeThread: id => this.threadMetadata.wake(id), transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
       this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
       this.steering = new SteeringDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id) });
       this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
@@ -73,6 +76,7 @@ export class RepositoryDatabase {
       this.db.exec(PENDING_SCHEMA);
       this.db.exec(ARTIFACT_SCHEMA);
       this.db.exec(QUESTION_SCHEMA);
+      this.db.exec(THREAD_METADATA_SCHEMA);
       this.db.exec("CREATE INDEX IF NOT EXISTS tasks_status_sequence ON tasks(json_extract(payload,'$.status'),sequence)");
       this.db.exec('CREATE TABLE IF NOT EXISTS task_subagents (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)');
     });

@@ -1,3 +1,7 @@
+import { RepositoryLookupService } from './application/repository-lookup-service.js';
+import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
+import { ThreadMetadataService } from './application/thread-metadata.js';
+import { ProjectDirectoriesAdapter } from './infrastructure/projects/project-directories.js';
 import { FileSystemSurfaceOperations } from './infrastructure/projects/surface-operations.js';
 import { TerminalService } from './application/terminal-service.js';
 import { NodePtyFactory } from './infrastructure/terminal/node-pty.js';
@@ -84,6 +88,9 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let closing: Promise<void> | undefined;
     return {
       surfaces, terminals,
+      repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
+      projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
+      threadMetadata: new ThreadMetadataService(repository),
       questions: execution ? questions : undefined,
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts,
       close(): Promise<void> {

@@ -15,6 +15,7 @@ type Dependencies = Readonly<{
   getTask(id: string): Task;
   requireCapacity(): void;
   getAttachment(id: string): unknown;
+  wakeThread(id: string): void;
   event(id: string, type: TaskEvent['type']): void;
 }>;
 
@@ -103,6 +104,7 @@ export class ResumeDatabase {
       this.db.prepare('UPDATE conversations SET latest_id=? WHERE root_id=? AND latest_id=?').run(task.id, root, id);
       this.dependencies.event(task.id, 'task.created');
       this.dependencies.event(task.id, 'task.queued');
+      this.dependencies.wakeThread(root);
       this.dependencies.requireCapacity();
       return { task: { ...task, sequence: Number(result.lastInsertRowid) }, created: true };
   }

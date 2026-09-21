@@ -1,3 +1,5 @@
+import type { ThreadMetadataRepository } from '../../application/thread-metadata.js';
+import type { ThreadMetadata, ThreadMetadataPage, ThreadMetadataPatch, ThreadOrder } from '../../domain/thread-metadata.js';
 import type { AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import type { SteerInput, SteerClaim, SteerReceipt } from '../../domain/steering.js';
 import type { QuestionRepository } from '../../application/question-ports.js';
@@ -18,7 +20,7 @@ import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
+class SqliteRepository implements ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -59,6 +61,10 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
       catch { clearTimeout(this.pending.get(id)!.timer); this.pending.delete(id); reject(new RunnerError('storage_unavailable')); }
     });
   }
+  reorderThread(id: string, input: ThreadOrder): Promise<{ items: readonly ThreadMetadata[] }> { return this.call({ method: 'reorderThread', args: [id, input] }); }
+  getThreadMetadata(id: string): Promise<ThreadMetadata> { return this.call({ method: 'getThreadMetadata', args: [id] }); }
+  listThreadMetadata(after: string): Promise<ThreadMetadataPage> { return this.call({ method: 'listThreadMetadata', args: [after] }); }
+  patchThreadMetadata(id: string, patch: ThreadMetadataPatch): Promise<ThreadMetadata> { return this.call({ method: 'patchThreadMetadata', args: [id, patch] }); }
   claimSteer(id: string, input: SteerInput): Promise<SteerClaim> { return this.call({ method: 'claimSteer', args: [id, input] }); }
   findSteer(id: string, input: SteerInput): Promise<SteerReceipt | null> { return this.call({ method: 'findSteer', args: [id, input] }); }
   findPendingSteer(id: string, pendingId: string): Promise<SteerReceipt | null> { return this.call({ method: 'findPendingSteer', args: [id, pendingId] }); }
@@ -113,7 +119,7 @@ class SqliteRepository implements RunnerRepository, ExecutionRepository, CloneRe
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -123,6 +129,7 @@ export async function openSqliteRepository(dataDir: string, runnerId: string, ch
 function changesInventory(operation: Operation, value: unknown): boolean {
   switch (operation.method) {
     // A promotion attempt may pause a blocked queue without creating a task.
+    case 'reorderThread': case 'patchThreadMetadata':
     case 'setTaskSubagents':
     case 'releaseSteer': case 'claimSteer': case 'claimPendingSteer': case 'acceptSteer':
     case 'createQuestion': case 'answerQuestion': case 'expireQuestions':
@@ -132,6 +139,7 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'getThreadMetadata': case 'listThreadMetadata':
     case 'findSteer': case 'findPendingSteer':
     case 'listQuestions':
     case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':

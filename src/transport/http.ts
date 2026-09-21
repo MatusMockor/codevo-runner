@@ -47,18 +47,18 @@ export function cursor(request: Request): number {
   return Number(value);
 }
 
-export async function jsonBody(request: Request): Promise<unknown> {
+export async function jsonBody(request: Request, maximumBytes: number = LIMITS.jsonBytes): Promise<unknown> {
   if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? ''))
     throw new RunnerError('unsupported_media');
   if (request.headers['content-encoding']) throw new RunnerError('unsupported_media');
-  if (Number(request.headers['content-length'] ?? 0) > LIMITS.jsonBytes)
+  if (Number(request.headers['content-length'] ?? 0) > maximumBytes)
     throw new RunnerError('too_large');
   const chunks: Buffer[] = [];
   let length = 0;
   // destroyOnReturn=false allows a bounded error response without draining an oversized body.
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     length += chunk.length;
-    if (length > LIMITS.jsonBytes) throw new RunnerError('too_large');
+    if (length > maximumBytes) throw new RunnerError('too_large');
     chunks.push(chunk);
   }
   try {

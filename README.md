@@ -133,14 +133,19 @@ credentials separately. An SSH disconnect alone does not interrupt tasks.
 
 On an execution-enabled runner, **Clone repository** in the editor's remote task
 panel accepts a repository URL, a folder name and an optional branch. Git runs
-on the server and clones into `CODEVO_PROJECTS_ROOT/<name>`. The default root is
+on the server and clones into `CODEVO_PROJECTS_ROOT/<name>`, or a selected existing
+subdirectory beneath that root. The default root is
 `~/Developer` for the service account. The direct Linux example above explicitly
 uses `/home/codex/Developer`; environment files require absolute paths.
 
-Public repositories can use HTTPS. Private repositories should use SSH with the
-service account's existing SSH key and verified Git-host key. Git is noninteractive,
-uses strict SSH host-key checking and disables credential helpers and global/system
-Git configuration. The desktop's SSH agent is not forwarded. Embedded URL passwords
+Public repositories can use HTTPS. Private repositories can use the service account's
+SSH key and verified Git-host key, or HTTPS with an authenticated `gh` (GitHub.com)
+or `glab` (configured GitLab host) account on the server. HTTPS authentication uses
+only a fixed provider credential helper scoped to the exact authenticated host;
+redirects are disabled for authenticated clones. Tokens stay within the provider
+CLI and Git credential protocol. Git is noninteractive, uses strict SSH host-key
+checking and disables arbitrary credential helpers and global/system Git
+configuration. The desktop's SSH agent is not forwarded. Embedded URL passwords
 or tokens, local paths and arbitrary clone destinations are rejected.
 
 Cloning is an asynchronous job, independent of the editor connection. A successful
@@ -154,8 +159,11 @@ Use **Cancel clone** to stop a job. One clone runs at a time, with a ten-minute
 Git deadline. Restarting the runner marks unfinished clone jobs `interrupted`,
 including queued jobs; they are not resumed automatically. An abrupt process death
 can leave a partial folder. Inspect it before removing it or choose another name
-for a retry. Normal failure/cancellation removes only the folder still owned by
-that operation. Cloned source repositories and task worktrees have no disk-size
+for a retry. Normal failure/cancellation quarantines the destination and verifies
+its identity before removal. If another process replaces it during cleanup, its
+contents are preserved in a `.codevo-cleanup-*/clone` directory for manual recovery.
+Filesystem operations on Linux use retained directory descriptors; this is not an
+isolation boundary against another process running under the same account. Cloned source repositories and task worktrees have no disk-size
 quota or automatic cleanup.
 
 See [clone requests and limits](docs/api.md#clone-and-register-a-repository).
@@ -558,5 +566,21 @@ A client may announce what it understands with a single
 16 printable-ASCII tokens, at most 512 characters in total. Unknown tokens are
 ignored and an absent, oversized or non-ASCII header announces nothing, so an
 older client always receives the oldest contract. The runner advertises the
-capabilities it can serve in `GET /v1/runner`; `subagentLifecycleRetention` is the
-only one currently negotiated per request.
+capabilities it can serve in `GET /v1/runner`. `projectManagement` and
+`threadManagement` are included only when the matching token is announced, so
+strict older editors remain compatible. `subagentLifecycleRetention` additionally
+negotiates lifecycle event encoding per request.
+
+### Project and thread management
+
+On execution-enabled runners, repository discovery and exact/partial lookup run
+under the server's own `gh`/`glab` account. Directory browsing and clone destinations
+are limited to the configured projects root. Clients must send the pinned
+`X-Codevo-Runner-Id` on every management request.
+
+Conversation title, pin/archive/remove state, snooze/settled times and manual order
+are durable Runner metadata. Updates use optimistic revisions to reject stale
+writes; clients reload and apply their intended change after a conflict. Removing
+metadata visibility does not delete source files or provider history. Other clients
+refresh through the existing inventory notification channel. See
+[management API contracts](docs/api.md#project-and-thread-management).

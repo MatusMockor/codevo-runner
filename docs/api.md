@@ -16,7 +16,7 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id` | Task |
 | `POST /v1/tasks/:id/cancel` | Cancel task; no request body |
 | `GET /v1/projects` | `{ items: [{ id, name }] }`; execution deployment only |
-| `POST /v1/projects/clone` | Clone job, HTTP 202; body `{ idempotencyKey, url, name, branch? }` |
+| `POST /v1/projects/clone` | Clone job, HTTP 202; body `{ idempotencyKey, url, name, branch?, parentPath? }` |
 | `GET /v1/project-clones/:id` | Clone job |
 | `POST /v1/project-clones/:id/cancel` | Cancel clone job; no request body |
 | `POST /v1/tasks/:id/start` | Task, HTTP 202; body `{ "projectId": "my-app" }` |
@@ -75,7 +75,7 @@ recover an uncertain response; identical admission with that key returns the
 same job, while changed input conflicts. Retry an interrupted or failed attempt
 with a new key after resolving the cause.
 
-The body accepts only the four documented fields. `idempotencyKey` is a lowercase
+The body accepts only the five documented fields. `idempotencyKey` is a lowercase
 UUID v4. `name` is also the destination folder name: 1–64 ASCII letters, digits,
 underscores or hyphens, starting with a letter or digit. `branch` is optional and
 must be a valid bounded branch name (at most 255 characters); omitting it clones
@@ -83,11 +83,13 @@ the default branch. URLs are at most 2,048 characters and accept the supported
 HTTPS, `ssh://user@host/path` or `user@host:path` forms. Credentials in HTTPS URLs,
 query strings, fragments, local paths and other protocols are rejected.
 
-HTTPS is anonymous: credential helpers and interactive prompts are disabled.
-For private repositories, configure SSH authentication and known host keys under
-the runner's service account. The runner does not accept credentials or forward
-the desktop SSH agent. The clone destination is selected by the operator's
-`CODEVO_PROJECTS_ROOT` (default `~/Developer`), never a client-supplied path.
+HTTPS can use the service account's authenticated `gh` or `glab` account for
+exactly its configured host; only fixed provider credential helpers are enabled
+and authenticated redirects are disabled. Otherwise HTTPS remains anonymous.
+SSH uses the service account's existing keys and known hosts. Credentials never
+pass through the editor and its SSH agent is not forwarded. Optional `parentPath`
+selects an existing absolute directory beneath `CODEVO_PROJECTS_ROOT` (default
+`~/Developer`); paths outside that root and symlink aliases are rejected.
 Any existing destination file, directory or symlink is a conflict and is never
 overwritten. Names already registered or reserved by another clone also conflict.
 
@@ -511,3 +513,44 @@ never removes data from durable event history. Generated artifacts retain an
 independent admission limit of 32,000 items across the runner, so startup blob
 reconciliation stays bounded even as task history grows. Existing captures remain
 readable and idempotent at that limit.
+
+## Project and thread management
+
+All routes below require bearer authentication and the exact `X-Codevo-Runner-Id`.
+Discovery advertises `projectManagement` and `threadManagement` only when matching
+`X-Codevo-Client-Capabilities` tokens are supplied. Unsupported services are false.
+
+| Route | Request / response |
+| --- | --- |
+| `GET /v1/repositories/hosts` | GitHub and configured GitLab host authentication snapshots, no credentials |
+| `POST /v1/repositories/lookup` | `{provider,host,path}` → exact repository or typed failure |
+| `POST /v1/repositories/search` | `{provider,host,query,page}` → `{status:"ok",repositories,nextPage,truncated}` or typed failure |
+| `POST /v1/project-directories` | `{path?}` → `{path,parentPath,entries:[{name,path}],truncated}` |
+| `GET /v1/tasks/:id/thread-metadata` | Canonical conversation metadata, defaults have revision zero |
+| `PATCH /v1/tasks/:id/thread-metadata` | `{expectedRevision,...changedFields}` → committed metadata; stale revision returns HTTP 409 |
+| `GET /v1/thread-metadata?after=:id` | `{items,nextAfter}`; optional cursor, 100 persisted records per page |
+| `POST /v1/tasks/:id/thread-order` | `{targetTaskId,placement:"before"|"after"}` → `{items}` changed metadata records |
+
+Repository operations allow only server-discovered authenticated hosts. Search uses
+20 results per page, at most 10 pages, with explicit truncation when more results
+exist. At most two lookup operations run concurrently; each CLI process is bounded
+by 15 seconds, 256 KiB stdout and 64 KiB stderr. Lookup requests are at most 4 KiB.
+
+Directory requests are at most 8 KiB. Paths use at most 4096 UTF-8 bytes. Listings
+inspect at most 4096 entries and return at most 256 directories within a 128 KiB
+name/path budget, indicating truncation. Symlink entries are excluded. Browse never
+changes the allowed root, and a root listing returns `parentPath: null`.
+
+Metadata has `taskId`, `revision`, nullable `title` (256 UTF-8 bytes), boolean
+`pinned`, `archived`, `removed`, nullable `viewedAtEpochMs`, `snoozedUntil`,
+`settledAt` (integer milliseconds between zero and 8.64e15), and nullable finite
+`sortOrder` within JavaScript's safe integer magnitude. Patches reject unknown
+fields, empty changes and invalid values; request bodies are at most 4 KiB.
+Continuation task IDs resolve to the same conversation root. Metadata persists
+across restarts, and changes notify all connected clients through inventory events.
+
+Reordering resolves both conversation roots and uses their current metadata in one
+transaction. Only visible conversations in the same project and sidebar section
+can be reordered. At most 256 records in that section are renumbered; larger
+sections return HTTP 429 without partial changes. This endpoint moves relative to
+an anchor rather than accepting a stale full ordering from the client.

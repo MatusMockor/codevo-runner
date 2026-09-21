@@ -1,3 +1,6 @@
+import type { RepositoryLookupService } from '../application/repository-lookup-service.js';
+import type { ThreadMetadataService } from '../application/thread-metadata.js';
+import type { ProjectDirectories } from '../application/project-directories.js';
 import type { TerminalService } from '../application/terminal-service.js';
 import type { SurfaceService } from '../application/surface-service.js';
 import type { QuestionService } from '../application/question-service.js';
@@ -9,6 +12,9 @@ import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 
 export interface RunnerServices {
+  readonly repositories?: RepositoryLookupService;
+  readonly threadMetadata?: ThreadMetadataService;
+  readonly projectDirectories?: ProjectDirectories;
   readonly surfaces?: SurfaceService;
   readonly terminals?: TerminalService;
   readonly questions?: QuestionService;
