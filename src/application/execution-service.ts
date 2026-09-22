@@ -1,3 +1,4 @@
+import type { TurnChanges } from './turn-changes.js';
 import { SubagentLifecycleCollector } from '../domain/subagent-lifecycle.js';
 import { SteeringService } from './steering-service.js';
 import type { QuestionService } from './question-service.js';
@@ -29,6 +30,7 @@ export class ExecutionService implements ExecutionApplication {
     private readonly captureArtifacts?: (taskId: string, paths: readonly string[]) => Promise<boolean>,
     private readonly instructions?: InstructionWorkspace,
     private readonly questions?: QuestionService,
+    private readonly turnChanges?: TurnChanges,
   ) { this.steering = new SteeringService(executions, attachments); }
 
   steer(taskId: string, input: unknown) { this.assertAvailable(); return this.steering.steer(taskId, input); }
@@ -150,6 +152,20 @@ export class ExecutionService implements ExecutionApplication {
     return this.workspaces.fileDiff(project, workspaceTaskId, path);
   }
 
+  async turnSummary(taskId: string) {
+    await this.tasks.getTask(validateId(taskId));
+    if (!this.turnChanges) throw new RunnerError('not_found');
+    return this.turnChanges.summary(taskId);
+  }
+
+  async turnFileDiff(taskId: string, input: unknown) {
+    await this.tasks.getTask(validateId(taskId));
+    if (!this.turnChanges || !input || typeof input !== 'object' || Array.isArray(input)) throw new RunnerError('invalid_input');
+    const record = input as Record<string, unknown>;
+    if (Object.keys(record).length !== 1 || typeof record.relativePath !== 'string') throw new RunnerError('invalid_input');
+    return this.turnChanges.diff(taskId, record.relativePath);
+  }
+
   private async reviewContext(taskId: string) {
     this.assertAvailable();
     const task = await this.tasks.getTask(validateId(taskId));
@@ -208,6 +224,16 @@ export class ExecutionService implements ExecutionApplication {
     if (this.closing) abort.abort();
     let inputs: StagedExecutionInputs | undefined;
     let syncingInstructions = false;
+    let turnContext: { cwd: string; identity: Readonly<{ dev: number; ino: number }> } | undefined;
+    let snapshotFinished = false;
+    const finishSnapshot = async () => {
+      if (snapshotFinished || !turnContext || this.closing || abort.signal.aborted) return;
+      snapshotFinished = true;
+      try {
+        await this.turnChanges?.captureEnd(task.id, turnContext.cwd, turnContext.identity,
+          AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]));
+      } catch { /* Missing historical capture is exposed as unavailable, never a live diff. */ }
+    };
     try {
       if ((await this.tasks.getTask(task.id)).status !== 'running') return;
       if (!task.projectId) throw new RunnerError('invalid_input');
@@ -236,6 +262,14 @@ export class ExecutionService implements ExecutionApplication {
       const artifactReferences = new ProviderArtifactReferences(task.provider);
       const subagents = new SubagentLifecycleCollector(task.provider);
       await this.executions.setTaskSubagents?.(task.id, { entries: [], truncated: false });
+      if (this.turnChanges && cwdIdentity) {
+        try {
+          await this.turnChanges.captureStart(task.id, cwd, cwdIdentity,
+            AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]));
+          turnContext = { cwd, identity: cwdIdentity };
+        } catch { /* Snapshot failures must not prevent the authorized provider task. */ }
+        abort.signal.throwIfAborted();
+      }
       const result = await executor.execute({ task, cwd, onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
         onSession: async (sessionId) => {
@@ -253,6 +287,7 @@ export class ExecutionService implements ExecutionApplication {
           await this.executions.appendTaskOutput(task.id, channel, text);
         },
       });
+      await finishSnapshot();
       const finalSubagents = subagents.finish();
       if (finalSubagents) await this.executions.setTaskSubagents?.(task.id, finalSubagents);
       if (result.sessionId) await this.executions.setTaskSession(task.id, result.sessionId);
@@ -263,6 +298,7 @@ export class ExecutionService implements ExecutionApplication {
       }
       if (!this.closing) await this.executions.finishTask(task.id, result);
     } catch {
+      await finishSnapshot();
       // Do not persist raw exception strings: they may contain credentials or host paths.
       if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: syncingInstructions ? 'instruction_sync_failed' : 'execution_failed' });
     } finally {

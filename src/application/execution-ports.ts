@@ -1,3 +1,4 @@
+import type { TurnChangesSummary, TurnFileDiff } from '../domain/turn-changes.js';
 import type { AgentSubagentLifecycle } from '../domain/subagent-lifecycle.js';
 import type { SteerInput, SteerReceipt, SteerClaim } from '../domain/steering.js';
 import type { InstructionSnapshot } from '../domain/instructions.js';
@@ -54,6 +55,8 @@ export interface ProviderExecutor {
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
 export interface ExecutionApplication {
+  turnSummary?(taskId: string): Promise<TurnChangesSummary>;
+  turnFileDiff?(taskId: string, input: unknown): Promise<TurnFileDiff>;
   repositoryIdentity?(projectId: string, signal?: AbortSignal): Promise<Readonly<{ repositoryKey: string | null }>>;
   steer(taskId: string, input: unknown): Promise<SteerReceipt>;
   steerPending(taskId: string, pendingId: string): Promise<SteerReceipt>;

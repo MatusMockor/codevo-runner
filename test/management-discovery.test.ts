@@ -27,9 +27,11 @@ test('management discovery preserves the strict legacy descriptor and negotiates
   const legacy = (await get()).capabilities;
   assert.equal('projectManagement' in legacy, false);
   assert.equal('threadManagement' in legacy, false);
+  assert.equal('turnChanges' in legacy, false);
   for (const header of [undefined, 'subagentLifecycleRetention', 'projectmanagement', 'x'.repeat(513), Array(17).fill('threadManagement').join(',')]) {
     assert.deepEqual((await get(header)).capabilities, legacy);
   }
+  assert.deepEqual((await get('turnChanges')).capabilities, { ...legacy, turnChanges: true });
   assert.deepEqual((await get('projectManagement')).capabilities, { ...legacy, projectManagement: true });
   assert.deepEqual((await get('threadManagement')).capabilities, { ...legacy, threadManagement: true });
   assert.deepEqual((await get('subagentLifecycleRetention, projectManagement, threadManagement')).capabilities,

@@ -1,3 +1,4 @@
+import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
 import { ThreadMetadataService } from './application/thread-metadata.js';
@@ -71,7 +72,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir),
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), new FileInstructionWorkspace(dataDir), questions);
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), new FileInstructionWorkspace(dataDir), questions, new FileTurnChangesStore(dataDir));
         await execution.initialize();
 
       }

@@ -17,6 +17,7 @@ test('management endpoints reject unauthenticated, foreign and missing owners be
   await app.listen(0, '127.0.0.1');
   const url = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
   const routes = [
+    [`/v1/tasks/${taskId}/turn-changes`, 'GET'], [`/v1/tasks/${taskId}/turn-file-diff`, 'POST'],
     ['/v1/repositories/hosts', 'GET'], ['/v1/repositories/lookup', 'POST'], ['/v1/repositories/search', 'POST'],
     ['/v1/project-directories', 'POST'], ['/v1/thread-metadata', 'GET'], [`/v1/thread-metadata?after=${taskId}`, 'GET'],
     [`/v1/tasks/${taskId}/thread-metadata`, 'GET'], [`/v1/tasks/${taskId}/thread-metadata`, 'PATCH'], [`/v1/tasks/${taskId}/thread-order`, 'POST'],

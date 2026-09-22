@@ -554,3 +554,35 @@ transaction. Only visible conversations in the same project and sidebar section
 can be reordered. At most 256 records in that section are renumbered; larger
 sections return HTTP 429 without partial changes. This endpoint moves relative to
 an anchor rather than accepting a stale full ordering from the client.
+
+## Immutable changes for an individual turn
+
+Clients announcing `turnChanges` in `X-Codevo-Client-Capabilities` can discover the
+optional `turnChanges` capability. Older clients do not receive this field.
+
+- `GET /v1/tasks/:id/turn-changes` returns `{turnId,state,files,truncated,reason}`.
+- `POST /v1/tasks/:id/turn-file-diff` accepts exactly `{relativePath}` and returns
+  `{relativePath,original:{text,truncated},modified:{text,truncated},unavailableReason}`.
+
+Both routes require authentication and the pinned Runner identity. The task ID is
+an individual provider turn, including each continuation, not the conversation
+root. File entries contain `relativePath`, nullable `oldRelativePath`, `status`,
+and nullable `addedLines`/`deletedLines` counts. Binary or large-file line counts
+are both null, and their diff has `unavailableReason: "binary" | "large"`.
+
+The Runner captures the on-disk working tree immediately before provider execution
+and again after it exits, before publishing normal completion. Existing dirty
+files form part of the baseline and are not reported unless they change during
+that turn. Commits made during execution do not erase the turn's changes. Saved
+results do not change when another turn or a manual edit modifies the workspace.
+Concurrent human edits during execution are part of the same before/after change
+set; snapshots do not establish which process authored a change.
+
+Historical tasks without snapshots, interrupted/cancelled captures, unsupported
+files and exhausted capture/storage budgets return `state: "unavailable"` with a
+bounded reason. They never fall back to the current working tree or cumulative
+conversation diff. A ready result returns at most 500 changed files and explicitly
+indicates truncation. Each text side is bounded to 128 KiB; paths are at most 4096
+UTF-8 bytes and 64 segments. Capture has a 10-second execution deadline, bounded
+file/byte scanning and a 256 MiB retained-store quota. Existing historical records
+are not overwritten to admit new snapshots.
