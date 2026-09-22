@@ -78,7 +78,7 @@ export class FileTurnChangesStore implements TurnChanges {
   }
   private async write(name: string, value: unknown, signal?: AbortSignal) {
     return this.withRoot(async base => {
-    
+
     const bytes = Buffer.from(JSON.stringify(value));
     if (bytes.length > RECORD_BYTES) throw new RunnerError('quota_exceeded');
     let total = 0; let count = 0;
