@@ -1,13 +1,40 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { parseLaunchOptions, CLAUDE_MODEL_CHOICES, CODEX_MODEL_CHOICES } from '../src/domain/launch.js';
+import { parseLaunchOptions } from '../src/domain/launch.js';
+import { RunnerError } from '../src/domain/contracts.js';
 import { launchArguments, launchPrompt } from '../src/domain/launch-arguments.js';
+
+const CLAUDE_MODEL_CHOICES = [
+  "default",
+  "fable",
+  "opus",
+  "sonnet",
+  "claude-fable-5-1",
+  "claude-fable-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-opus-4-5",
+  "claude-sonnet-5",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+] as const;
+const CODEX_MODEL_CHOICES = [
+  "default",
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.4",
+] as const;
 
 const claude = (overrides: Record<string, unknown> = {}) => parseLaunchOptions({
   provider: 'claudeCode', model: 'default', mode: 'default', effort: 'default', ...overrides,
 });
 
-test('launch parser rejects arbitrary authority, unsupported capabilities and provider mismatch', () => {
+test('launch parser rejects unknown keys, invalid closed choices and provider mismatch', () => {
   for (const value of [null, [], 'claude', {},
     { provider: 'claudeCode', model: 'default', mode: 'default' },
     { provider: 'codex', model: 'default', mode: 'default', effort: 'high' },
@@ -17,9 +44,7 @@ test('launch parser rejects arbitrary authority, unsupported capabilities and pr
   ]) assert.throws(() => parseLaunchOptions(value));
   for (const overrides of [
     { effort: null }, { context: null }, { fastMode: 'true' }, { thinkingMode: 1 },
-    { model: 'fable', fastMode: true }, { model: 'sonnet', thinkingMode: true },
-    { model: 'sonnet', effort: 'ultracode' }, { model: 'claude-opus-4-6', effort: 'xhigh' },
-    { model: 'claude-opus-4-5', effort: 'ultrathink' }, { model: 'claude-haiku-4-5', effort: 'low' },
+    { effort: 'extreme' }, { context: '2m' }, { mode: 'readOnly' }, { args: [] },
   ]) assert.throws(() => claude(overrides));
   assert.throws(() => parseLaunchOptions(claude(), 'codex'));
   assert.throws(() => parseLaunchOptions({ provider: 'codex', model: 'default', mode: 'default' }, 'claude'));
@@ -77,4 +102,54 @@ test('ultrathink preserves slash commands and prefixes other text exactly once',
   ]) assert.equal(launchPrompt(options, input!), expected);
   assert.equal(launchPrompt(claude(), ' untouched '), ' untouched ');
   assert.deepEqual(launchArguments(options, false), []);
+});
+
+test('model IDs accept safe syntax for either provider and reject unsafe values', () => {
+  for (const provider of ['claudeCode', 'codex']) {
+    const input = { provider, mode: 'default', ...(provider === 'claudeCode' ? { effort: 'default' } : {}) };
+    for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-5.6-sol', 'future-model', '0', 'a'.repeat(96), 'a._-0']) {
+      assert.equal(parseLaunchOptions({ ...input, model }).model, model);
+    }
+    for (const model of ['', '-rf', '--model', 'Claude-Opus', 'claude opus', 'claude-opus-5-5[1m]', 'a/b', 'a'.repeat(97), 42, null, undefined, {}, 'claude-ö', 'model\n']) {
+      assert.throws(() => parseLaunchOptions({ ...input, model }), (error: unknown) => error instanceof RunnerError && error.code === 'invalid_input');
+    }
+  }
+});
+
+test('the editor owns model capabilities', () => {
+  for (const overrides of [
+    { model: 'fable', fastMode: true }, { model: 'sonnet', thinkingMode: true },
+    { model: 'sonnet', effort: 'ultracode' }, { model: 'claude-opus-4-6', effort: 'xhigh' },
+    { model: 'claude-opus-4-5', effort: 'ultrathink' }, { model: 'claude-haiku-4-5', effort: 'low' },
+  ]) assert.doesNotThrow(() => claude(overrides));
+  assert.deepEqual(launchArguments(claude({ model: 'claude-opus-5-5', context: '1m', effort: 'ultracode', fastMode: true }), false), [
+    '--model', 'claude-opus-5-5[1m]', '--effort', 'xhigh', '--settings', '{"fastMode":true,"ultracode":true}',
+  ]);
+});
+
+test('non-haiku thinking merges with fast mode and ultracode in one settings object', () => {
+  for (const model of ['default', 'sonnet', 'claude-opus-5-5']) {
+    for (const fastMode of [false, true]) {
+      for (const effort of ['default', 'ultracode']) {
+        for (const thinkingMode of [undefined, false, true]) {
+          const settings = {
+            ...(fastMode ? { fastMode: true } : {}),
+            ...(effort === 'ultracode' ? { ultracode: true } : {}),
+            ...(thinkingMode ? { alwaysThinkingEnabled: true } : {}),
+          };
+          const expected = [
+            ...(model === 'default' ? [] : ['--model', model]),
+            ...(effort === 'ultracode' ? ['--effort', 'xhigh'] : []),
+            ...(Object.keys(settings).length ? ['--settings', JSON.stringify(settings)] : []),
+          ];
+          for (const resumed of [false, true]) assert.deepEqual(launchArguments(claude({ model, fastMode, effort, thinkingMode }), resumed), expected);
+        }
+      }
+    }
+  }
+  for (const thinkingMode of [undefined, false, true]) {
+    assert.deepEqual(launchArguments(claude({ model: 'claude-haiku-4-5', thinkingMode }), false), [
+      '--model', 'claude-haiku-4-5', '--settings', JSON.stringify({ alwaysThinkingEnabled: thinkingMode ?? false }),
+    ]);
+  }
 });

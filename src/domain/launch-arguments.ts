@@ -34,10 +34,12 @@ function claudeSettings(options: ClaudeLaunchOptions): string[] {
   if (options.model === 'claude-haiku-4-5') {
     return ['--settings', JSON.stringify({ alwaysThinkingEnabled: options.thinkingMode ?? false })];
   }
-  if (options.effort === 'ultracode' && options.fastMode) return ['--settings', '{"fastMode":true,"ultracode":true}'];
-  if (options.effort === 'ultracode') return ['--settings', '{"ultracode":true}'];
-  if (options.fastMode) return ['--settings', '{"fastMode":true}'];
-  return [];
+  const settings = {
+    ...(options.fastMode ? { fastMode: true } : {}),
+    ...(options.effort === 'ultracode' ? { ultracode: true } : {}),
+    ...(options.thinkingMode ? { alwaysThinkingEnabled: true } : {}),
+  };
+  return Object.keys(settings).length ? ['--settings', JSON.stringify(settings)] : [];
 }
 
 export function launchPrompt(options: AgentLaunchOptions, prompt: string): string {
