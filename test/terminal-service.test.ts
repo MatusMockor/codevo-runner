@@ -8,7 +8,7 @@ function fixture() {
   let data = (_: string) => {}; let exit = (_: number | null) => {}; let closes = 0; let starts = 0; let valid = true;
   const writes: string[] = [];
   const resolver = { async resolve() { return { cwd: '/tmp', identity: { dev: 1, ino: 1 }, async revalidate() { if (!valid) throw new Error('revoked'); } }; } };
-  const factory: TerminalProcessFactory = { async open(_workspace, _size, onData, onExit) { starts++; data = onData; exit = onExit; return { write(value) { writes.push(value); }, resize() {}, close() { closes++; } }; } };
+  const factory: TerminalProcessFactory = { async open(_workspace, _size, onData, onExit) { starts++; data = onData; exit = onExit; return { write(value) { writes.push(value); }, resize() {}, close() { closes++; }, ownedProcesses() { return []; } }; } };
   const service = new TerminalService(resolver, factory);
   return { service, emit: (value: string) => data(value), exit: () => exit(0), revoke: () => { valid = false; }, starts: () => starts, closes: () => closes, writes };
 }
@@ -54,6 +54,17 @@ test('PTY runs an interactive shell and accepts stdin with real terminal semanti
   const terminal = await new NodePtyFactory().open(workspace, { cols: 90, rows: 25 }, data => { output += data; if (/PTY_IS_REAL\r?\n/.test(output)) complete(); }, () => complete());
   try { terminal.write("test -t 0 && printf 'PTY_IS_REAL\\n'\r"); await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000).unref())]); assert.match(output, /PTY_IS_REAL\r?\n/); }
   finally { terminal.close(); }
+});
+test('terminal process owners revalidate the exact workspace and drop a revoked session', async () => {
+  const f = fixture();
+  try {
+    await f.service.open('a', { cols: 80, rows: 24 });
+    assert.equal((await f.service.processOwners('a')).length, 1);
+    assert.equal((await f.service.processOwners('b')).length, 0);
+    f.revoke();
+    assert.deepEqual(await f.service.processOwners('a'), []);
+    assert.equal(f.closes(), 1);
+  } finally { await f.service.close(); }
 });
 test('terminal rejects wrong task identity even within same project', async () => {
   const f = fixture(); const taskId = '11111111-1111-4111-8111-111111111111';

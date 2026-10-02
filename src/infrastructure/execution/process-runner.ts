@@ -3,12 +3,14 @@ import { spawn } from 'node:child_process';
 import { LinuxProcessTree } from './linux-process-tree.js';
 import { StringDecoder } from 'node:string_decoder';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
+import type { ProcessOwnershipSink } from '../../domain/process-ownership.js';
 
 /** Internal launch plan: never construct arguments/environment from HTTP fields. */
 export type ProcessPlan = Readonly<{
   executable: string; args: readonly string[]; cwd: string; stdin: string;
   cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   env: NodeJS.ProcessEnv; signal: AbortSignal; timeoutMs: number; outputBytes?: number;
+  processes?: ProcessOwnershipSink;
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;
 
@@ -28,6 +30,7 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
     let tree: LinuxProcessTree | undefined;
     try { if (process.platform === 'linux' && child.pid) tree = new LinuxProcessTree(child.pid); }
     catch { failure = 'process_cleanup_failed'; }
+    const detach = tree ? plan.processes?.attach(tree) : undefined;
     const tracking = tree ? setInterval(() => {
       try { tree.observe(); } catch { stop('process_cleanup_failed'); }
     }, 100) : undefined;
@@ -76,6 +79,7 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
       clearInterval(tracking);
       plan.signal.removeEventListener('abort', abort);
       killGroup();
+      detach?.();
       void delivery.then(async () => {
         if (!failure) {
           for (const channel of ['stdout', 'stderr'] as const) {

@@ -673,6 +673,41 @@ the configured `remote.origin.url`/`pushurl`; repository-local `url.*.insteadOf`
 `pushInsteadOf` rewrites still apply to fetch and push, within the protocols allowed above.
 A turn that cannot obtain its workspace lease fails with the error `busy`.
 
-The `portPreview` capability and `GET /v1/tasks/:id/ports` /
-`GET /v1/projects/:projectId/ports` routes are reserved; port discovery is not
-implemented yet, so the capability is false and both routes return 404.
+## Port preview
+
+Clients announcing `portPreview` in `X-Codevo-Client-Capabilities` discover the
+optional `portPreview` capability. It is true only on Linux with execution enabled;
+elsewhere it is false and both routes return 404. Authentication, runner identity,
+exact paths and query-string rules match Git sync; only GET is allowed.
+
+| Route | Listed processes |
+| --- | --- |
+| `GET /v1/tasks/:id/ports` | The running turn of the task's conversation (its provider and every descendant) as `agent`, plus terminals opened for any task of that conversation as `terminal`. Unknown tasks are 404. |
+| `GET /v1/projects/:projectId/ports` | Running in-place turns of the project as `agent`, plus the project terminal (opened without a task) as `terminal`. Unknown projects are 404. |
+
+Both return `{ports:[{port,address,source,process}],truncated,scannedAt}`. Only TCP
+sockets in `LISTEN` state held by those exact process trees are reported, and only
+when bound to `127.0.0.1` or `::ffff:127.0.0.1` (`loopback-v4`), `::1`
+(`loopback-v6`), `0.0.0.0` (`any-v4`) or `::` (`any-v6`); specific non-loopback binds cannot be reached through a
+loopback forward and are omitted. Ports below 1024 and the runner's own listen port
+are never reported. `process` is the executable's base name (falling back to the
+kernel `comm`), printable ASCII of at most 15 bytes, else `unknown`. Entries are
+unique and strictly ordered by port, then address (`loopback-v4`, `loopback-v6`,
+`any-v4`, `any-v6`), then source (`agent`, `terminal`); at most 32 are returned.
+
+Discovery reads `/proc` without spawning processes: each owned pid's `fd` directory
+(at most 1024 descriptors per process and 16,384 per scan) is matched against
+`/proc/net/tcp` and `/proc/net/tcp6` (at most 4 MiB and 65,536 rows each), and a pid
+whose kernel start time changed during the scan is discarded. `truncated` is true
+when any of these bounds, the 2-second scan deadline, an unreadable descriptor or
+an incomplete process tree may have hidden a listener, or when more than 32 ports
+qualify. A scan that has not settled 500 ms after its deadline fails with 503
+`busy`. A scope's result is cached for one second; at most four scans run at once
+and a further scope is refused with 503 `busy`. Terminal sessions whose workspace no
+longer revalidates are closed instead of listed.
+
+Servers started by an agent live only while its turn runs, because the runner kills
+the turn's tracked process tree when the provider exits. Use the conversation's
+terminal for a server that should keep running. Process trees are observed every
+100 ms for turns and every second for terminals; a server that detaches from its tree
+faster than that (for example a double-forking daemon) is neither tracked nor listed.

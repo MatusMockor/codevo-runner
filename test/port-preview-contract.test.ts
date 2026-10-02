@@ -41,7 +41,7 @@ test('port ordering is strict by port, address family and source', () => {
   assert.equal(processName('nöde'), 'unknown');
 });
 
-test('port preview stays unadvertised and its routes are truthful until discovery is wired', async t => {
+test('port preview is advertised only on Linux and its routes stay closed and truthful', async t => {
   const root = await mkdtemp(join(tmpdir(), 'runner-port-preview-'));
   const runnerId = randomUUID();
   const services = await openRunnerServices(join(root, 'data'), runnerId, { projects: [], projectsRoot: join(root, 'projects'), providers: [] });
@@ -52,7 +52,7 @@ test('port preview stays unadvertised and its routes are truthful until discover
   const url = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
   const headers = { authorization: 'Bearer test', 'x-codevo-runner-id': runnerId };
   const descriptor = await (await fetch(`${url}/v1/runner`, { headers: { ...headers, 'x-codevo-client-capabilities': 'portPreview' } })).json();
-  assert.equal(descriptor.capabilities.portPreview, false);
+  assert.equal(descriptor.capabilities.portPreview, process.platform === 'linux');
   for (const path of [`/v1/tasks/${randomUUID()}/ports`, '/v1/projects/example/ports']) {
     const response = await fetch(`${url}${path}`, { headers });
     assert.equal(response.status, 404, path);

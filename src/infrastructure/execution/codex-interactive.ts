@@ -295,7 +295,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
 }
 
 export function executeCodexInteractive(plan: CodexInteractivePlan): Promise<ExecutionResult> {
-  return runInteractiveProcess({ ...plan, args: ['app-server', '--listen', 'stdio://', '-c', 'features.default_mode_request_user_input=true'], onOutput: plan.request.onOutput }, createCodexProtocol(plan));
+  return runInteractiveProcess({ ...plan, args: ['app-server', '--listen', 'stdio://', '-c', 'features.default_mode_request_user_input=true'], ...(plan.request.processes ? { processes: plan.request.processes } : {}), onOutput: plan.request.onOutput }, createCodexProtocol(plan));
 }
 
 function boundedSummary(value: unknown): string {

@@ -117,7 +117,7 @@ export class CliProviderExecutor implements ProviderExecutor {
     const parser = new ProviderOutputParser(this.provider, request.resumeSessionId);
     let sessionPublished = false;
     const result = await runProcess({ executable: this.executable, args, cwd: request.cwd, ...(request.cwdIdentity ? { cwdIdentity: request.cwdIdentity } : {}), stdin, env,
-      signal: request.signal, timeoutMs: this.timeoutMs, ...(this.outputBytes === undefined ? {} : { outputBytes: this.outputBytes }), onOutput: async (channel, text) => {
+      signal: request.signal, timeoutMs: this.timeoutMs, ...(this.outputBytes === undefined ? {} : { outputBytes: this.outputBytes }), ...(request.processes ? { processes: request.processes } : {}), onOutput: async (channel, text) => {
         if (channel === 'stdout') parser.push(text);
         const sessionId = parser.currentSessionId();
         if (sessionId && !sessionPublished) {

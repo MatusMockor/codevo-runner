@@ -3,6 +3,8 @@ import { RunnerError, isId } from '../domain/contracts.js';
 import { TERMINAL_LIMITS, terminalInput, terminalOpen, terminalSize, type TerminalChunk, type TerminalPage, type TerminalSnapshot } from '../domain/terminal.js';
 import type { SurfaceWorkspace, SurfaceWorkspaceResolver } from './surface-workspace.js';
 import type { TerminalProcess, TerminalProcessFactory } from './terminal-ports.js';
+import type { OwnedProcessTree } from '../domain/process-ownership.js';
+export type TerminalProcessOwner = Readonly<{ taskId: string | null; tree: OwnedProcessTree }>;
 type Session = { snapshot: TerminalSnapshot; chunks: TerminalChunk[]; bytes: number; touched: number; inputWindow: number; inputBytes: number; workspace: SurfaceWorkspace; process?: TerminalProcess };
 /** A primary PTY per exact project/task survives transport reconnects, with bounded replay. */
 export class TerminalService {
@@ -86,6 +88,21 @@ export class TerminalService {
     const size = terminalSize(value); const session = this.session(projectId, id, taskId); await this.authorize(session);
     if (session.snapshot.status !== 'running') throw new RunnerError('conflict');
     session.process!.resize(size); session.snapshot = { ...session.snapshot, ...size }; return session.snapshot;
+  }
+  async processOwners(projectId: string): Promise<readonly TerminalProcessOwner[]> {
+    const owners: TerminalProcessOwner[] = [];
+    for (const session of [...this.sessions.values()]) {
+      const process = session.process;
+      if (!process || session.snapshot.projectId !== projectId || session.snapshot.status !== 'running') continue;
+      if (!await this.current(session)) continue;
+      owners.push({ taskId: session.snapshot.taskId, tree: { snapshot: () => this.sessions.get(session.snapshot.id) === session ? process.ownedProcesses() : [] } });
+    }
+    return owners;
+  }
+  private async current(session: Session): Promise<boolean> {
+    try { await session.workspace.revalidate(); }
+    catch { this.remove(session); return false; }
+    return !this.closed && this.sessions.get(session.snapshot.id) === session;
   }
   closeSession(projectId: string, id: string, taskId?: string): Readonly<{ closed: true }> { this.remove(this.session(projectId, id, taskId)); return { closed: true }; }
   private remove(session: Session): void { this.sessions.delete(session.snapshot.id); try { session.process?.close(); } catch { /* Continue releasing all owned sessions if an OS cleanup fails. */ } }

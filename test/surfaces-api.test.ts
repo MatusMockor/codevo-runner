@@ -23,7 +23,7 @@ async function fixture(t: TestContext) {
   const services = await openRunnerServices(join(root, 'data'), runnerId, { projects: [{ id: 'sample', name: 'Sample', path: source }], providers: [] });
   const writes: string[] = [];
   const terminals = new TerminalService({ async resolve() { return { cwd: source, identity: { dev: 1, ino: 1 }, async revalidate() {} }; } }, {
-    async open(_workspace, _size, data) { data('ready\r\n'); return { write(value) { writes.push(value); }, resize() {}, close() {} }; },
+    async open(_workspace, _size, data) { data('ready\r\n'); return { write(value) { writes.push(value); }, resize() {}, close() {}, ownedProcesses() { return []; } }; },
   });
   const app = await createRunnerApplication({ runnerId, name: 'Surface test', protocolVersion: 1, capabilities: { taskExecution: false, eventReplay: true } }, header => header === authorization, { ...services, terminals, async close() { await terminals.close(); await services.close(); } });
   t.after(async () => { await app.close(); await rm(root, { recursive: true, force: true }); });

@@ -5,6 +5,7 @@ import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 import { LIMITS } from '../../domain/contracts.js';
 import { INSTRUCTION_LIMITS } from '../../domain/instructions.js';
 import { LinuxProcessTree } from './linux-process-tree.js';
+import type { ProcessOwnershipSink } from '../../domain/process-ownership.js';
 
 export type InteractiveSend = (value: unknown) => Promise<void>;
 export interface InteractiveProtocol {
@@ -20,6 +21,7 @@ export interface InteractiveProcessPlan {
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly timeoutMs: number;
+  readonly processes?: ProcessOwnershipSink;
   /** Claude print results may precede background-agent completion and later results. */
   readonly completion?: 'provider-exit';
   readonly onOutput: (channel: OutputChannel, text: string) => Promise<void>;
@@ -60,6 +62,7 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
     const fail = (error: string) => finish({ exitCode: null, error });
     try { if (process.platform === 'linux' && child.pid) tree = new LinuxProcessTree(child.pid); }
     catch { fail('process_cleanup_failed'); }
+    const detach = tree ? plan.processes?.attach(tree) : undefined;
     const tracking = tree ? setInterval(() => { try { tree?.observe(); } catch { fail('process_cleanup_failed'); } }, 100) : undefined;
     const timer = plan.timeoutMs > 0 ? setTimeout(() => fail('execution_timeout'), plan.timeoutMs) : undefined;
     const abort = () => fail('cancelled');
@@ -110,7 +113,7 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
     });
     child.once('exit', kill);
     child.once('close', exitCode => {
-      clearTimeout(timer); clearInterval(tracking); kill();
+      clearTimeout(timer); clearInterval(tracking); kill(); detach?.();
       // Drain already accepted persistence before task completion; a broken adapter cannot retain ownership forever.
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       const boundedDrain = new Promise<void>(accept => { drainTimer = setTimeout(() => {

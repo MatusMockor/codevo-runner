@@ -1,6 +1,7 @@
 import type { ProviderSteer } from './steering.js';
 import type { AgentQuestion, AgentQuestionResponse } from './questions.js';
 import type { Task } from './contracts.js';
+import type { ProcessOwnershipSink } from './process-ownership.js';
 
 export type TaskStatus = 'draft' | 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled';
 export type OutputChannel = 'stdout' | 'stderr';
@@ -19,6 +20,7 @@ export type ExecutionRequest = Readonly<{
   cwd: string;
   cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   signal: AbortSignal;
+  processes?: ProcessOwnershipSink;
   onOutput: (channel: OutputChannel, text: string) => Promise<void>;
 }>;
 export type WorkspaceDiff = Readonly<{ patch: string; truncated: boolean; untrackedFiles: readonly string[] }>;

@@ -46,3 +46,26 @@ export function isPortList(value: unknown): value is PortList {
   return ports.every((port, index) => isListeningPort(port) &&
     (index === 0 || comparePorts(ports[index - 1] as ListeningPort, port) < 0));
 }
+
+export type PortListOptions = Readonly<{ excludedPorts: ReadonlySet<number>; truncated: boolean; scannedAt: string }>;
+
+export function previewablePort(port: number, excludedPorts: ReadonlySet<number>): boolean {
+  return Number.isSafeInteger(port) && port >= PORT_PREVIEW_LIMITS.minPort && port <= PORT_PREVIEW_LIMITS.maxPort && !excludedPorts.has(port);
+}
+
+export function portList(candidates: readonly ListeningPort[], options: PortListOptions): PortList {
+  const unique = new Map<string, ListeningPort>();
+  for (const candidate of candidates) {
+    if (!previewablePort(candidate.port, options.excludedPorts)) continue;
+    const key = `${candidate.port}:${candidate.address}:${candidate.source}`;
+    const name = processName(candidate.process);
+    const existing = unique.get(key);
+    if (!existing || name < existing.process) unique.set(key, { ...candidate, process: name });
+  }
+  const sorted = [...unique.values()].sort(comparePorts);
+  return {
+    ports: sorted.slice(0, PORT_PREVIEW_LIMITS.ports),
+    truncated: options.truncated || sorted.length > PORT_PREVIEW_LIMITS.ports,
+    scannedAt: options.scannedAt,
+  };
+}

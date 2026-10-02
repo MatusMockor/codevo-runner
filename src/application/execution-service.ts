@@ -11,6 +11,7 @@ import { validateId } from '../domain/task-input.js';
 import { isGitErrorCode, parseStartInput } from '../domain/git-sync.js';
 import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
+import type { AgentProcessOwnership, ProcessOwnershipLease } from './process-ownership.js';
 
 /** One serialized admission pump owns bounded, independently cancellable workers. */
 export class ExecutionService implements ExecutionApplication {
@@ -35,6 +36,7 @@ export class ExecutionService implements ExecutionApplication {
     private readonly questions?: QuestionService,
     private readonly turnChanges?: TurnChanges,
     private readonly concurrency: number = EXECUTION_LIMITS.activeTasks,
+    private readonly processOwnership?: AgentProcessOwnership,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > EXECUTION_LIMITS.activeTasks) throw new RunnerError('invalid_input');
     this.steering = new SteeringService(executions, attachments);
@@ -257,6 +259,7 @@ export class ExecutionService implements ExecutionApplication {
     let syncingInstructions = false;
     let awaitingGitLease = false;
     let turnContext: { cwd: string; identity: Readonly<{ dev: number; ino: number }> } | undefined;
+    let processes: ProcessOwnershipLease | undefined;
     let snapshotFinished = false;
     const finishSnapshot = async () => {
       if (snapshotFinished || !turnContext || this.closing || abort.signal.aborted) return;
@@ -308,7 +311,8 @@ export class ExecutionService implements ExecutionApplication {
         } catch { /* Snapshot failures must not prevent the authorized provider task. */ }
         abort.signal.throwIfAborted();
       }
-      const result = await executor.execute({ task, cwd, onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
+      processes = this.processOwnership?.open({ conversationId: session.workspaceTaskId, projectId: project.id, isolation: task.isolation ?? 'worktree' });
+      const result = await executor.execute({ task, cwd, ...(processes ? { processes } : {}), onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
         onSession: async (sessionId) => {
           abort.signal.throwIfAborted();
@@ -342,6 +346,7 @@ export class ExecutionService implements ExecutionApplication {
         : syncingInstructions ? 'instruction_sync_failed' : 'execution_failed';
       if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: failure });
     } finally {
+      processes?.release();
       abort.abort();
       try {
         try { await steering.close(); }

@@ -45,7 +45,7 @@ test('gitSync is announced only to clients that understand it', async t => {
   assert.equal('portPreview' in legacy, false);
   const modern = (await (await fetch(`${url}/v1/runner`, { headers: { ...headers, 'x-codevo-client-capabilities': 'turnChanges,gitSync,portPreview' } })).json()).capabilities;
   assert.equal(modern.gitSync, true);
-  assert.equal(modern.portPreview, false);
+  assert.equal(modern.portPreview, process.platform === 'linux');
   assert.deepEqual({ ...modern, gitSync: undefined, portPreview: undefined, turnChanges: undefined }, { ...legacy, gitSync: undefined, portPreview: undefined, turnChanges: undefined });
 
   const discovery = await createRunnerApplication({ protocolVersion: 1, runnerId: randomUUID(), name: 'Discovery only',

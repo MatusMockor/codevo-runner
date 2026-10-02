@@ -33,6 +33,9 @@ import { GitCoordination, type GitCoordinationOptions } from './application/git-
 import { GitOriginBases, GitSyncService, type GitSyncOptions } from './application/git-sync-service.js';
 import { GitRepositoryAdapter, type GitRepositoryTimeouts } from './infrastructure/projects/git-sync.js';
 import type { GitAuthor } from './domain/git-sync.js';
+import { ProcessOwnershipRegistry } from './application/process-ownership.js';
+import { PortPreviewService } from './application/port-preview-service.js';
+import { ProcListeningPortScanner } from './infrastructure/execution/listening-ports.js';
 
 export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
@@ -42,6 +45,7 @@ export type RunnerExecutionOptions = Readonly<{
   providers?: readonly ProviderExecutor[];
   isolation?: 'provider' | 'container';
   gitAuthor?: GitAuthor;
+  listenPort?: number;
   gitSync?: Readonly<{ coordination?: GitCoordinationOptions; timeouts?: GitRepositoryTimeouts; service?: Omit<GitSyncOptions, 'author'> }>;
 }>;
 
@@ -63,6 +67,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let artifacts: ArtifactService | undefined;
     let clones: ProjectCloneService | undefined;
     let gitSync: GitSyncService | undefined;
+    let ports: PortPreviewService | undefined;
     try {
       if (options) {
         const configured = new ConfiguredProjectRegistry(options.projects);
@@ -82,12 +87,17 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         const executionWorkspace = new GitProjectWorkspace(dataDir, { bases: new GitOriginBases(coordination, gitRepository), leases: coordination });
         gitSync = new GitSyncService(repository, repository, new ManagedProjectRegistry(configured, repository), executionWorkspace,
           gitRepository, coordination, { ...options.gitSync?.service, ...(options.gitAuthor ? { author: options.gitAuthor } : {}) }, instructionWorkspace);
+        const processOwnership = new ProcessOwnershipRegistry();
         execution = new ExecutionService(repository, repository,
           new ManagedProjectRegistry(configured, repository), executionWorkspace,
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency);
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership);
         await execution.initialize();
+        if (process.platform === 'linux') {
+          ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,
+            new ProcListeningPortScanner(), { excludedPorts: options.listenPort === undefined ? [] : [options.listenPort] });
+        }
 
       }
     } catch (error) {
@@ -110,7 +120,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
       questions: execution ? questions : undefined,
-      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync,
+      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync, ports,
       close(): Promise<void> {
         closing ??= (async () => {
           try {

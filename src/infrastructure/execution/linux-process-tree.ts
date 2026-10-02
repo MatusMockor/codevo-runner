@@ -1,10 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import type { OwnedProcess, OwnedProcessTree } from '../../domain/process-ownership.js';
 
 interface Identity { readonly pid: number; readonly start: string; readonly parent: number }
 const LIMIT = 4096;
 
 /** Linux ownership uses kernel start times, never a recycled PID alone. */
-export class LinuxProcessTree {
+export class LinuxProcessTree implements OwnedProcessTree {
   private readonly owned = new Map<number, Identity>();
   constructor(root: number) {
     const identity = this.identity(root);
@@ -75,6 +76,11 @@ export class LinuxProcessTree {
   }
 
   observe(): void { this.collect(false); }
+
+  snapshot(): readonly OwnedProcess[] {
+    this.collect(false);
+    return [...this.owned.values()].map(({ pid, start }) => ({ pid, start }));
+  }
 
   kill(): void {
     let failure: unknown;

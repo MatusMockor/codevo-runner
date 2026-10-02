@@ -31,6 +31,7 @@ export class NodePtyFactory implements TerminalProcessFactory {
         write(value: string) { input!.write(value); },
         resize(value: { cols: number; rows: number }) { pty.resize(value.cols, value.rows); },
         close() { data.dispose(); if (exited) return; cleanup(); },
+        ownedProcesses() { return exited || !tree ? [] : tree.snapshot(); },
       };
     } catch (error) { try { cleanup(); } finally { try { pty.kill('SIGKILL'); } catch { /* Preserve original initialization failure. */ } } throw error; }
   }
