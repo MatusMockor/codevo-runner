@@ -12,29 +12,40 @@ type Owner = {
   retainedImages: number;
   readonly inputs: StagedExecutionInputs[];
   operation?: Promise<unknown>;
+  cleanup?: Promise<void>;
 };
 /** Active delivery is separate from output retention and the terminal continuation queue. */
 export class SteeringService {
-  private owner?: Owner;
+  private readonly owners = new Map<string, Owner>();
   constructor(private readonly repository: ExecutionRepository, private readonly attachments?: ExecutionAttachmentStager) {}
 
   open(taskId: string, signal: AbortSignal) {
+    validateId(taskId);
+    if (this.owners.has(taskId)) throw new RunnerError('conflict');
+    if (this.owners.size >= 64) throw new RunnerError('busy');
     const owner: Owner = { taskId, signal, busy: false, closed: false, retainedImages: 0, inputs: [] };
-    this.owner = owner;
+    this.owners.set(taskId, owner);
     return {
-      ready: (handler: ProviderSteer | undefined) => { if (this.owner === owner && !owner.closed) owner.handler = handler; },
+      ready: (handler: ProviderSteer | undefined) => { if (this.owners.get(owner.taskId) === owner && !owner.closed) owner.handler = handler; },
       boundary: async () => {
         if (!this.valid(owner) || owner.busy || !owner.handler || !this.repository.claimPendingSteer) return;
         try { await this.withOwner(owner, () => this.repository.claimPendingSteer!(taskId)); }
         catch { /* Pending messages remain durable. Never retry an uncertain write. */ }
       },
-      close: async () => {
+      close: () => {
+        if (owner.cleanup) return owner.cleanup;
         owner.closed = true;
         owner.handler = undefined;
-        if (this.owner === owner) this.owner = undefined;
-        await owner.operation?.catch(() => undefined);
-        const settled = await Promise.allSettled(owner.inputs.map(input => input.cleanup()));
-        if (settled.some(result => result.status === 'rejected')) throw new RunnerError('storage_unavailable');
+        owner.cleanup = (async () => {
+        try {
+          await owner.operation?.catch(() => undefined);
+          const settled = await Promise.allSettled(owner.inputs.map(input => input.cleanup()));
+          if (settled.some(result => result.status === 'rejected')) throw new RunnerError('storage_unavailable');
+        } finally {
+          if (this.owners.get(owner.taskId) === owner) this.owners.delete(owner.taskId);
+        }
+        })();
+        return owner.cleanup;
       },
     };
   }
@@ -62,9 +73,9 @@ export class SteeringService {
     return receipt;
   }
 
-  private valid(owner: Owner): boolean { return this.owner === owner && !owner.closed && !owner.signal.aborted; }
+  private valid(owner: Owner): boolean { return this.owners.get(owner.taskId) === owner && !owner.closed && !owner.signal.aborted; }
   private requireOwner(taskId: string): Owner {
-    const owner = this.owner;
+    const owner = this.owners.get(taskId);
     if (!owner || owner.taskId !== taskId || !this.valid(owner) || !owner.handler) throw new RunnerError('conflict');
     return owner;
   }

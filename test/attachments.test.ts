@@ -111,14 +111,15 @@ test('fresh orphan retries recover matching bytes and never delete conflicting b
   } finally { await reopened.close(); }
 });
 
-test('content reads enforce bounded concurrent admission', async t => {
+test('content reads queue overlapping requests without rejecting parallel executions', async t => {
   const { store } = await fixture(t);
   const id = randomUUID();
   await store.upload(id, 'screen.png', 'image/png', chunks(await png()), signal());
   const first = store.read(id);
   const second = store.read(id);
-  await assert.rejects(store.read(id), hasCode('busy'));
-  await Promise.all([first, second]);
+  const third = store.read(id);
+  const results = await Promise.all([first, second, third]);
+  assert.ok(results.every(result => result.attachment.id === id));
   assert.equal((await store.read(id)).attachment.id, id);
 });
 

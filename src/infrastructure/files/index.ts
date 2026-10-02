@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../../domain/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, opendir, unlink, link, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -65,6 +66,8 @@ class FileAttachmentStore implements AttachmentStore {
   private readonly active = new Map<string, { controller: AbortController; work: Promise<unknown> }>();
   private closed = false;
   private readonly reads = new Set<Promise<unknown>>();
+  private readSlots = 0;
+  private readonly waitingReads: Array<{ resolve: () => void; reject: (error: RunnerError) => void }> = [];
   constructor(private readonly directory: string, private readonly runnerId: string, private readonly repository: AttachmentRepository) {}
 
   async upload(id: string, name: string, mediaType: string, source: AsyncIterable<Uint8Array>, signal: AbortSignal) {
@@ -161,8 +164,26 @@ class FileAttachmentStore implements AttachmentStore {
 
   private async trackedRead<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closed) throw unavailable();
-    if (this.reads.size >= LIMITS.uploads) throw new RunnerError('busy');
-    const work = operation();
+    // Keep two blob allocations active; waiting executions retain no blob buffers.
+    if (this.waitingReads.length >= EXECUTION_LIMITS.activeTasks * 2) throw new RunnerError('busy');
+    const admission = this.readSlots < 2
+      ? (this.readSlots++, Promise.resolve())
+      : new Promise<void>((resolve, reject) => this.waitingReads.push({ resolve, reject }));
+    const work = (async () => {
+      await admission;
+      try {
+        if (this.closed) throw unavailable();
+        const result = await operation();
+        if (this.closed) throw unavailable();
+        return result;
+      } finally {
+        this.readSlots--;
+        if (!this.closed) {
+          const next = this.waitingReads.shift();
+          if (next) { this.readSlots++; next.resolve(); }
+        }
+      }
+    })();
     this.reads.add(work);
     try { return await work; } finally { this.reads.delete(work); }
   }
@@ -186,6 +207,7 @@ class FileAttachmentStore implements AttachmentStore {
 
   async close(): Promise<void> {
     this.closed = true;
+    for (const waiting of this.waitingReads.splice(0)) waiting.reject(unavailable());
     for (const { controller } of this.active.values()) controller.abort();
     await Promise.allSettled([...this.active.values()].map(({ work }) => work).concat([...this.reads]));
   }

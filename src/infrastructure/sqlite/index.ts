@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../../domain/execution.js';
 import type { ThreadMetadataRepository } from '../../application/thread-metadata.js';
 import type { ThreadMetadata, ThreadMetadataPage, ThreadMetadataPatch, ThreadOrder } from '../../domain/thread-metadata.js';
 import type { AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
@@ -53,7 +54,7 @@ class SqliteRepository implements ThreadMetadataRepository, RunnerRepository, Ex
   }
   private call<T>(operation: Operation, closing = false): Promise<T> {
     if (this.closed && !closing) return Promise.reject(new RunnerError('storage_unavailable'));
-    if (this.pending.size >= 64 && !closing) return Promise.reject(new RunnerError('busy'));
+    if (this.pending.size >= EXECUTION_LIMITS.activeTasks * 8 + 64 && !closing) return Promise.reject(new RunnerError('busy'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer: this.deadline(), operation });

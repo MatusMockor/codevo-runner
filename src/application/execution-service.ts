@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../domain/execution.js';
 import type { TurnChanges } from './turn-changes.js';
 import { SubagentLifecycleCollector } from '../domain/subagent-lifecycle.js';
 import { SteeringService } from './steering-service.js';
@@ -10,13 +11,14 @@ import { validateId } from '../domain/task-input.js';
 import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 
-/** A single runner owns durable admission and one detached worker, independent of HTTP. */
+/** One serialized admission pump owns bounded, independently cancellable workers. */
 export class ExecutionService implements ExecutionApplication {
   private readonly steering: SteeringService;
   private initialized = false;
   private closing = false;
   private worker: Promise<void> | undefined;
-  private active: { taskId: string; abort: AbortController } | undefined;
+  private readonly active = new Map<string, { conversationId: string; abort: AbortController; completion: Promise<void> }>();
+  private closePromise: Promise<void> | undefined;
   private wakeRequested = false;
   private workerFailure: unknown;
 
@@ -31,7 +33,11 @@ export class ExecutionService implements ExecutionApplication {
     private readonly instructions?: InstructionWorkspace,
     private readonly questions?: QuestionService,
     private readonly turnChanges?: TurnChanges,
-  ) { this.steering = new SteeringService(executions, attachments); }
+    private readonly concurrency: number = EXECUTION_LIMITS.activeTasks,
+  ) {
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > EXECUTION_LIMITS.activeTasks) throw new RunnerError('invalid_input');
+    this.steering = new SteeringService(executions, attachments);
+  }
 
   steer(taskId: string, input: unknown) { this.assertAvailable(); return this.steering.steer(taskId, input); }
   steerPending(taskId: string, pendingId: string) { this.assertAvailable(); return this.steering.pending(taskId, pendingId); }
@@ -54,6 +60,7 @@ export class ExecutionService implements ExecutionApplication {
     const parsed = parseContinueTask(input);
     const task = await this.tasks.getTask(taskId);
     this.executorFor({ ...task, parts: parsed.parts });
+    this.assertAvailable();
     const result = await this.executions.enqueuePending(taskId, parsed);
     this.wake();
     return result;
@@ -79,6 +86,7 @@ export class ExecutionService implements ExecutionApplication {
     await this.registry.get(projectId);
     const task = await this.tasks.getTask(taskId);
     this.executorFor(task);
+    this.assertAvailable();
     const queued = await this.executions.queueTask(taskId, projectId);
     this.wake();
     return queued;
@@ -109,6 +117,7 @@ export class ExecutionService implements ExecutionApplication {
     if (!task.projectId) throw new RunnerError('conflict');
     const session = await this.executions.getTaskSession(taskId);
     await this.workspaces.resume(await this.registry.get(task.projectId), session.workspaceTaskId);
+    this.assertAvailable();
     const result = await this.executions.continueTask(taskId, parsed);
     this.wake();
     return result;
@@ -117,7 +126,7 @@ export class ExecutionService implements ExecutionApplication {
   async cancel(taskId: string): Promise<Task> {
     validateId(taskId);
     const task = await this.tasks.cancelTask(taskId);
-    if (task.status === 'cancelled' && this.active?.taskId === taskId) this.active.abort.abort();
+    if (task.status === 'cancelled') this.active.get(taskId)?.abort.abort();
     return task;
   }
 
@@ -175,10 +184,17 @@ export class ExecutionService implements ExecutionApplication {
     return { project, workspaceTaskId };
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.closing = true;
-    this.active?.abort.abort();
+    for (const entry of this.active.values()) entry.abort.abort();
+    this.closePromise ??= this.finishClose();
+    return this.closePromise;
+  }
+
+  private async finishClose(): Promise<void> {
+    // Admission may already be awaiting a durable claim. Reap it before the snapshot.
     await this.worker;
+    await Promise.all([...this.active.values()].map(entry => entry.completion));
     await this.executions.interruptRunningTasks();
   }
 
@@ -196,32 +212,45 @@ export class ExecutionService implements ExecutionApplication {
 
   private wake(): void {
     this.wakeRequested = true;
-    if (this.worker || this.closing) return;
+    if (this.worker || this.closing || this.workerFailure) return;
     this.worker = this.drain().catch((error: unknown) => {
       // Persistence errors stop admission instead of acknowledging work we cannot own.
-      this.workerFailure = error;
+      this.workerFailure = error instanceof Error ? error : new RunnerError('storage_unavailable');
     }).finally(() => {
       this.worker = undefined;
-      if (this.wakeRequested && !this.closing && !this.workerFailure) this.wake();
+      if (this.wakeRequested && !this.closing && !this.workerFailure && this.active.size < this.concurrency) this.wake();
     });
   }
 
   private async drain(): Promise<void> {
-    while (!this.closing) {
+    while (!this.closing && !this.workerFailure && this.active.size < this.concurrency) {
       this.wakeRequested = false;
       await this.executions.promotePending();
-      if (this.closing) return;
+      if (this.closing || this.workerFailure) return;
       const task = await this.executions.claimNextTask();
       if (!task) return;
-      await this.run(task);
+      this.launch(task);
     }
   }
 
-  private async run(task: Task): Promise<void> {
+  private launch(task: Task): void {
     const abort = new AbortController();
-    this.active = { taskId: task.id, abort };
+    const conversationId = task.conversationId ?? task.id;
+    const predecessors = [...this.active.values()].filter(entry => entry.conversationId === conversationId);
+    const completion = Promise.all(predecessors.map(entry => entry.completion))
+      .then(() => this.run(task, abort))
+      .catch((error: unknown) => { this.workerFailure = error instanceof Error ? error : new RunnerError('storage_unavailable'); })
+      .finally(() => {
+        this.active.delete(task.id);
+        this.wake();
+      });
+    this.active.set(task.id, { conversationId, abort, completion });
+    if (this.closing || this.workerFailure) abort.abort();
+  }
+
+  private async run(task: Task, abort: AbortController): Promise<void> {
     const steering = this.steering.open(task.id, abort.signal);
-    if (this.closing) abort.abort();
+    if (this.closing || this.workerFailure) abort.abort();
     let inputs: StagedExecutionInputs | undefined;
     let syncingInstructions = false;
     let turnContext: { cwd: string; identity: Readonly<{ dev: number; ino: number }> } | undefined;
@@ -236,6 +265,7 @@ export class ExecutionService implements ExecutionApplication {
     };
     try {
       if ((await this.tasks.getTask(task.id)).status !== 'running') return;
+      abort.signal.throwIfAborted();
       if (!task.projectId) throw new RunnerError('invalid_input');
       const executor = this.executorFor(task);
       const project = await this.registry.get(task.projectId);
@@ -304,13 +334,10 @@ export class ExecutionService implements ExecutionApplication {
     } finally {
       abort.abort();
       try {
-        try {
-          try { await steering.close(); }
-          finally { await this.questions?.expire(task.id); }
-        }
-        finally { await inputs?.cleanup(); }
+        try { await steering.close(); }
+        finally { await this.questions?.expire(task.id); }
       }
-      finally { this.active = undefined; }
+      finally { await inputs?.cleanup(); }
     }
   }
 }

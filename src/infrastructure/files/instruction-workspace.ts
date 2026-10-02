@@ -7,10 +7,11 @@ import { resolve, sep } from 'node:path';
 import { isId, RunnerError } from '../../domain/contracts.js';
 import { parseInstructionSnapshot, type InstructionSnapshot } from '../../domain/instructions.js';
 import { materializedInstructionFiles } from '../../domain/instruction-context.js';
+import { InstructionSyncQueue } from './instruction-sync-queue.js';
 
 type Hashes = Record<string, string>;
 type Manifest = { version: 1; root: string; files: Hashes; pending?: Hashes };
-const active = new Set<string>();
+const synchronization = new InstructionSyncQueue();
 const runFile = promisify(execFile);
 const digest = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const conflict = (): never => { throw new RunnerError('conflict'); };
@@ -146,12 +147,13 @@ export class FileInstructionWorkspace {
     if (resolve(cwd) !== root) conflict();
     const rootIdentity = await lstat(root);
     if (expectedIdentity && (rootIdentity.dev !== expectedIdentity.dev || rootIdentity.ino !== expectedIdentity.ino)) conflict();
-    if (active.has(root)) throw new RunnerError('busy');
-    active.add(root);
+    const release = await synchronization.acquire(`${rootIdentity.dev}:${rootIdentity.ino}`, signal);
     let workspace: FileHandle | undefined;
     let storage: FileHandle | undefined;
     let manifests: FileHandle | undefined;
     try {
+      signal.throwIfAborted();
+      if (await realpath(cwd) !== root) conflict();
       workspace = await openDirectory(root);
       const openedRoot = await workspace.stat();
       if (openedRoot.dev !== rootIdentity.dev || openedRoot.ino !== rootIdentity.ino) conflict();
@@ -223,7 +225,7 @@ export class FileInstructionWorkspace {
       try { await manifests?.close(); }
       finally {
         try { await storage?.close(); }
-        finally { try { await workspace?.close(); } finally { active.delete(root); } }
+        finally { try { await workspace?.close(); } finally { release(); } }
       }
     }
   }

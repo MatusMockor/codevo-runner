@@ -51,7 +51,7 @@ process.stdin.on('end', () => {
 });
 `, { mode: 0o700 });
   const runnerId = randomUUID();
-  const options = { projects: [{ id: 'sample', name: 'Sample', path: project }],
+  const options = { executionConcurrency: 1, projects: [{ id: 'sample', name: 'Sample', path: project }],
     providers: [new CliProviderExecutor('codex', { executable, timeoutMs: 10_000 })] };
   async function reopen(execution = true) {
     await services?.close();

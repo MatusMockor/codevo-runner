@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../src/domain/execution.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -112,13 +113,14 @@ test('sqlite bounds outstanding operations and drains accepted calls before clos
   const directory = await mkdtemp(join(tmpdir(), 'runner-db-'));
   const repository = await openSqliteRepository(directory, randomUUID());
   try {
-    const operations = Array.from({ length: 65 }, () => repository.listTasks(0));
+    const capacity = EXECUTION_LIMITS.activeTasks * 8 + 64;
+    const operations = Array.from({ length: capacity + 1 }, () => repository.listTasks(0));
     const results = Promise.allSettled(operations);
     const closing = repository.close();
     assert.equal(repository.close(), closing);
     const settled = await results;
-    assert.equal(settled.filter(result => result.status === 'fulfilled').length, 64);
-    const rejected = settled[64];
+    assert.equal(settled.filter(result => result.status === 'fulfilled').length, capacity);
+    const rejected = settled[capacity];
     assert.equal(rejected?.status, 'rejected');
     if (rejected?.status === 'rejected') assert.equal(rejected.reason.code, 'busy');
     await closing;

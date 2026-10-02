@@ -34,6 +34,7 @@ export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
   projectsRoot?: string;
   executionTimeoutMs?: number;
+  executionConcurrency?: number;
   providers?: readonly ProviderExecutor[];
   isolation?: 'provider' | 'container';
 }>;
@@ -72,7 +73,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir),
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), new FileInstructionWorkspace(dataDir), questions, new FileTurnChangesStore(dataDir));
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), new FileInstructionWorkspace(dataDir), questions, new FileTurnChangesStore(dataDir), options.executionConcurrency);
         await execution.initialize();
 
       }

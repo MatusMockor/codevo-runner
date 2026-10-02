@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from './execution.js';
 /** Finite wall-clock budget for one provider invocation, including user input waits. */
 export const MIN_EXECUTION_TIMEOUT_MS = 60_000;
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 12 * 60 * 60 * 1000;
@@ -14,4 +15,12 @@ export function parseExecutionTimeoutMs(value: string | undefined): number {
   if (!/^[0-9]{1,9}$/.test(value))
     throw new Error('CODEVO_EXECUTION_TIMEOUT_MS must be an integer between 60000 and 604800000');
   return executionTimeoutMs(Number(value));
+}
+
+/** Host-controlled capacity; queued work waits for a fully cleaned-up slot. */
+export function parseExecutionConcurrency(value: string | undefined): number {
+  if (value === undefined) return EXECUTION_LIMITS.activeTasks;
+  if (!/^[0-9]{1,2}$/.test(value) || Number(value) < 1 || Number(value) > EXECUTION_LIMITS.activeTasks)
+    throw new Error('CODEVO_EXECUTION_CONCURRENCY must be an integer between 1 and 64');
+  return Number(value);
 }

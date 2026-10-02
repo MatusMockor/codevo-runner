@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../../domain/execution.js';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { mkdir, open, opendir, lstat, link, unlink } from 'node:fs/promises';
@@ -29,7 +30,7 @@ export class FileTurnChangesStore implements TurnChanges {
     return id;
   }
   private async owned<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.pending >= 4) throw new RunnerError('busy');
+    if (this.pending >= EXECUTION_LIMITS.activeTasks * 2) throw new RunnerError('busy');
     this.pending++;
     const previous = this.serial;
     let release!: () => void;

@@ -3,7 +3,7 @@
 The desktop selects an execution target separately from a provider. Each runner
 owns its registered project roots, provider login, task processes and durable history.
 The default deployment stores drafts and PNG/JPEG attachments. Explicitly enabling
-execution adds a persistent queue, one application worker, task-specific Git
+execution adds a persistent queue, a bounded parallel scheduler, task-specific Git
 worktrees, CLI processes, bounded output replay and diff retrieval.
 
 ## Local-first editor integration
@@ -88,8 +88,10 @@ See the [API contract](api.md) and [attachment scope](attachments.md).
 
 The execution service persists queued intent before acknowledgment and owns its
 worker independently of HTTP. A client disconnect does not cancel accepted work.
-Only one task runs at a time. Startup marks previously running tasks interrupted
-and drains pending queued work. Shutdown stops the active process; Docker's restart
+Up to 64 tasks run concurrently (a host can lower this with `CODEVO_EXECUTION_CONCURRENCY`).
+One serialized claim pump reserves slots; per-task owners retain them through cleanup.
+Conversation successors await their predecessor’s cleanup. Startup marks previously running
+tasks interrupted and drains pending queued work. Shutdown stops and reaps all active processes; Docker's restart
 policy does not resume provider sessions. Cancelled and terminal states win races
 with late process results.
 

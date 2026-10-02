@@ -212,3 +212,20 @@ fsTest('in-place refuses root replaced after workspace preparation before creati
   await assert.rejects(readFile(join(f.cwd, 'CLAUDE.md')), { code: 'ENOENT' });
   await assert.rejects(fs.stat(join(f.data, 'instruction-manifests')), { code: 'ENOENT' });
 });
+
+fsTest('concurrent shared-checkout synchronizations wait and preserve managed edit conflicts', async t => {
+  const f = await fixture(t);
+  const apply = (service: FileInstructionWorkspace) => service.apply(
+    randomUUID(), f.cwd, snapshot({ 'CLAUDE.local.md': 'same instructions' }),
+    new AbortController().signal, 'in-place',
+  );
+  await Promise.all([apply(f.service), apply(new FileInstructionWorkspace(f.data))]);
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'same instructions');
+  await writeFile(join(f.cwd, 'CLAUDE.local.md'), 'server edit');
+  const results = await Promise.allSettled([apply(f.service), apply(new FileInstructionWorkspace(f.data))]);
+  for (const result of results) {
+    assert.equal(result.status, 'rejected');
+    if (result.status === 'rejected') assert.equal(result.reason.code, 'conflict');
+  }
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'server edit');
+});

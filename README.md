@@ -406,8 +406,10 @@ not erased; the current snapshot explicitly supersedes earlier synchronized rule
 provider settings and server-installed global rules may still apply. Unsupported absolute
 or home-directory imports must be made portable before synchronization.
 
-The runner serializes execution and retains its exclusive database lease for the full
-process lifetime. Instruction synchronization requires Linux descriptor-relative filesystem operations.
+The runner executes independent conversations concurrently and retains its exclusive database
+lease for the full process lifetime. Instruction reconciliation uses a bounded FIFO per directory
+identity; different directories synchronize independently. It requires Linux descriptor-relative
+filesystem operations.
 Worktree isolation and path checks protect normal project operations;
 they are not a sandbox against another malicious process running as the same Unix user.
 Synchronized tracked files are ordinary worktree edits and can appear in review diffs.
@@ -457,6 +459,18 @@ of immediate release availability or access to a particular model. To disable it
 Test the updater without network access or real installations:
 `python3 -m unittest discover -s scripts -p 'test_update_provider_clis.py'`.
 
+### Parallel execution
+
+The runner starts up to 64 tasks concurrently across all projects and checkout modes.
+Set `CODEVO_EXECUTION_CONCURRENCY` to an integer from 1 to 64 to lower that host-wide
+limit; excess tasks remain durably queued. A slot remains occupied until provider,
+steering and attachment cleanup finish. Successive turns of the same conversation
+remain ordered, even while other conversations use the same checkout. Shutdown
+stops and awaits all active tasks and leaves unclaimed queued work for restart.
+
+Shared-checkout snapshots show filesystem changes during a turn and can include
+other conversations’ edits. Use worktrees for separate files and change history.
+
 ### Task checkout mode
 
 New clients can use the `taskIsolation` runner capability and include `isolation`
@@ -467,7 +481,8 @@ continued and queued turns inherit it.
 `in-place` runs in the registered server checkout and preserves its existing dirty
 and untracked files. Its diff includes preexisting changes relative to HEAD when
 the conversation started. Other conversations using that checkout see the same
-files; the runner serializes executions. Stop terminates the provider but does not
+files, Git state and synchronized instruction files while running concurrently. Stop terminates
+only the selected task’s provider and waits for its cleanup; it does not
 undo edits. `worktree` continues to isolate the conversation from the source checkout.
 
 In-place instruction synchronization only changes files managed by Codevo.

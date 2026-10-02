@@ -82,3 +82,40 @@ test('definitively rejected image steering releases staging and quota for retry'
  assert.equal(staged,10);
  await session.close();assert.equal(cleaned,10);
 });
+
+test('parallel Codex and Claude owners route input independently through Stop and cleanup', async t => {
+ const {repository,task,service,session,abort}=await fixture(t);
+ const other=(await repository.createTask({idempotencyKey:randomUUID(),provider:'claude',parts:[{type:'text',text:'other'}]})).task;
+ await repository.queueTask(other.id,'project'); await repository.claimNextTask();
+ const otherSession=service.open(other.id,new AbortController().signal);
+ const firstMessages:ProviderSteerInput[]=[];const otherMessages:ProviderSteerInput[]=[];
+ let enter!:()=>void;let release!:()=>void;
+ const entered=new Promise<void>(resolve=>{enter=resolve;});
+ session.ready(async message=>{firstMessages.push(message);enter();await new Promise<void>(resolve=>{release=resolve;});});
+ otherSession.ready(async message=>{otherMessages.push(message);});
+ const first=service.steer(task.id,input()); await entered;
+ await service.steer(other.id,input());
+ abort.abort(); const closing=session.close();
+ await assert.rejects(service.steer(task.id,input()),{code:'conflict'});
+ const pending=await repository.enqueuePending(other.id,input());
+ await otherSession.boundary();
+ assert.equal((await service.pending(other.id,pending.pending.id)).status,'accepted');
+ release();await first;await closing;
+ await service.steer(other.id,input());
+ assert.equal(firstMessages.length,1);assert.equal(otherMessages.length,3);
+ const events=(await repository.listEvents(other.id,0)).items.filter(event=>event.type==='task.input');
+ assert.equal(events.length,3);
+ await otherSession.close();
+});
+
+test('steering owners are bounded and a stale close cannot remove a replacement', async t => {
+ const {service,task,session}=await fixture(t);
+ assert.throws(()=>service.open(task.id,new AbortController().signal),{code:'conflict'});
+ const sessions=Array.from({length:63},()=>service.open(randomUUID(),new AbortController().signal));
+ assert.throws(()=>service.open(randomUUID(),new AbortController().signal),{code:'busy'});
+ await session.close();
+ const replacement=service.open(task.id,new AbortController().signal);
+ await session.close();
+ assert.throws(()=>service.open(task.id,new AbortController().signal),{code:'conflict'});
+ await Promise.all([...sessions,replacement].map(owner=>owner.close()));
+});

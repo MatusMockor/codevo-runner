@@ -1,3 +1,4 @@
+import { EXECUTION_LIMITS } from '../domain/execution.js';
 import { randomUUID } from 'node:crypto';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
@@ -13,7 +14,7 @@ export class QuestionService {
 
   async ask(task: Task, questions: readonly AgentQuestion[], signal: AbortSignal): Promise<AgentQuestionResponse> {
     signal.throwIfAborted();
-    if (this.waiting.size >= 8) throw new RunnerError('busy');
+    if (this.waiting.size >= EXECUTION_LIMITS.activeTasks) throw new RunnerError('busy');
     const request = parseAgentQuestionRequest({ id: randomUUID(), taskId: task.id,
       provider: task.provider === 'claude' ? 'claudeCode' : 'codex', questions, status: 'pending' });
     let reject!: (error: unknown) => void;

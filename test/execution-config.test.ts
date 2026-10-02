@@ -38,3 +38,12 @@ test('project configuration is bounded, closed, unique and host-local', async t 
   await symlink(path, link);
   await assert.rejects(readProjectsFile(link));
 });
+
+test('execution concurrency defaults to 64 and accepts only a bounded host setting', () => {
+  const base = { CODEVO_TOKEN_FILE: '/token' };
+  assert.equal(readConfig(base).executionConcurrency, 64);
+  for (const value of ['1', '8', '64'])
+    assert.equal(readConfig({ ...base, CODEVO_EXECUTION_CONCURRENCY: value }).executionConcurrency, Number(value));
+  for (const value of ['', '0', '65', '-1', '1.5', '1e1', ' 2', 'NaN'])
+    assert.throws(() => readConfig({ ...base, CODEVO_EXECUTION_CONCURRENCY: value }));
+});
