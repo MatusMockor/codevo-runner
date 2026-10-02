@@ -1,0 +1,176 @@
+{
+  "claudeCodeVersion": "2.1.287",
+  "note": "Recorded resume of a session whose previous turn left a stopped background Bash task. The CLI replays the pending task_notification before init and answers it with its own result (origin task-notification) before the user prompt starts. Long fields stripped.",
+  "sequences": {
+    "queuedBeforeReplayResult": [
+      {
+        "type": "system",
+        "subtype": "task_notification",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "task_id": "bg0dpdktn",
+        "tool_use_id": "toolu_01TQePY7BQHQsgttaddMbEwT",
+        "status": "stopped",
+        "summary": "Background shell command didn't finish before the previous session ended",
+        "output_file": ""
+      },
+      {
+        "type": "control_response",
+        "response": {
+          "request_id": "codevo-initialize",
+          "subtype": "success"
+        }
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "queued",
+        "command_uuid": "<initial>"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "is_error": false,
+        "num_turns": 0,
+        "origin": {
+          "kind": "task-notification"
+        },
+        "result_index": 0,
+        "result": ""
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "started",
+        "command_uuid": "<initial>"
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "assistant",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "OK"
+            }
+          ]
+        }
+      },
+      {
+        "type": "rate_limit_event",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "is_error": false,
+        "num_turns": 1,
+        "result_index": 1,
+        "result": "OK"
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "completed",
+        "command_uuid": "<initial>"
+      }
+    ],
+    "replayResultBeforeQueued": [
+      {
+        "type": "system",
+        "subtype": "task_notification",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "task_id": "b52q84bc6",
+        "tool_use_id": "toolu_01Qq4Nztj8LfFoWtd8sfX9EY",
+        "status": "stopped",
+        "summary": "Background shell command didn't finish before the previous session ended",
+        "output_file": ""
+      },
+      {
+        "type": "control_response",
+        "response": {
+          "request_id": "codevo-initialize",
+          "subtype": "success"
+        }
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "is_error": false,
+        "num_turns": 0,
+        "origin": {
+          "kind": "task-notification"
+        },
+        "result_index": 0,
+        "result": ""
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "queued",
+        "command_uuid": "<initial>"
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "started",
+        "command_uuid": "<initial>"
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "assistant",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "OK"
+            }
+          ]
+        }
+      },
+      {
+        "type": "rate_limit_event",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "is_error": false,
+        "num_turns": 1,
+        "result_index": 1,
+        "result": "OK"
+      },
+      {
+        "type": "command_lifecycle",
+        "session_id": "13fbeb90-ea1d-4708-9870-c2c29d58aa82",
+        "state": "completed",
+        "command_uuid": "<initial>"
+      }
+    ]
+  }
+}

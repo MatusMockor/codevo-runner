@@ -44,6 +44,10 @@ export function parseClaudeQuestions(input: Record<string, unknown>): readonly A
       }) };
   });
 }
+function notificationTurn(frame: Record<string, unknown>): boolean {
+  const origin = frame.origin;
+  return !!origin && typeof origin === 'object' && !Array.isArray(origin) && (origin as Record<string, unknown>).kind === 'task-notification';
+}
 export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   let initialized = false;
   let done = false;
@@ -51,6 +55,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   const initialCommand = randomUUID();
   const readableTextFiles = new Set(plan.request.attachments.filter(file => file.mediaType === 'text/plain').map(file => file.path));
   let lifecycleSupported = false;
+  let promptStarted = false;
   let lifecycleSession: string | undefined;
   let registerSteering: (() => void) | undefined;
   let resultGeneration = 0;
@@ -66,6 +71,10 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   let questionId: string | undefined;
   const seen = new Set<string>();
   const backgroundTasks = new ClaudeBackgroundTasks();
+  // A resumed CLI replays pending task notifications before init; only the resumed session may own them.
+  const taskSession = (frame: Record<string, unknown>) => sessionId
+    ?? (frame.subtype === 'task_notification' && plan.request.resumeSessionId !== undefined && frame.session_id === plan.request.resumeSessionId
+      ? plan.request.resumeSessionId : undefined);
   return {
     dispose() { done = true; clearCommands(); plan.request.onSteeringReady?.(undefined); },
     async start(send) {
@@ -84,6 +93,11 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
         if (!isProviderSessionId(frame.session_id) || (sessionId && frame.session_id !== sessionId)) throw new Error('session_mismatch');
         if (frame.command_uuid === initialCommand && ['queued', 'started', 'completed'].includes(String(frame.state))) {
           lifecycleSupported = true; lifecycleSession = frame.session_id; registerSteering?.();
+          if (frame.state !== 'queued') promptStarted = true;
+        }
+        if (frame.command_uuid === initialCommand && ['cancelled', 'discarded', 'refused'].includes(String(frame.state))) {
+          done = true; clearCommands(); plan.request.onSteeringReady?.(undefined);
+          return { exitCode: 1, error: 'provider_reported_failure', ...(sessionId ? { sessionId } : {}) };
         }
         const command = typeof frame.command_uuid === 'string' ? commands.get(frame.command_uuid) : undefined;
         if (!command) return;
@@ -210,7 +224,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
         registerSteering();
       }
       if (!['system', 'assistant', 'user', 'result', 'stream_event', 'tool_progress', 'tool_use_summary', 'rate_limit_event'].includes(String(frame.type))) return;
-      backgroundTasks.observe(frame, sessionId);
+      backgroundTasks.observe(frame, taskSession(frame));
       await emitInteractiveOutput(plan.request.onOutput, 'stdout', JSON.stringify(frame) + '\n');
       if (frame.type === 'user' && !questionId && !done && frame.parent_tool_use_id == null) {
         const content = frame.message && typeof frame.message === 'object' ? (frame.message as Record<string, unknown>).content : undefined;
@@ -221,6 +235,9 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
       if (frame.type === 'result') {
         if (questionId) { questionId = undefined; return { exitCode: null, error: 'provider_question_unanswered' }; }
         if (!sessionId || frame.session_id !== sessionId) throw new Error('session_mismatch');
+        // A resumed CLI answers replayed notifications in their own turn before our prompt starts.
+        if (!promptStarted && notificationTurn(frame)) return;
+        promptStarted = true;
         resultGeneration++;
         settleCompleted();
         if (frame.is_error === false && frame.subtype === 'success') {
