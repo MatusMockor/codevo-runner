@@ -102,12 +102,12 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       }
     } catch (error) {
       try {
-        try { await terminals?.close(); }
+        try { await execution?.close(); }
         finally {
-          try { await clones?.close(); }
+          try { await terminals?.close(); }
           finally {
-            try { await gitSync?.close(); }
-            finally { await execution?.close(); }
+            try { await clones?.close(); }
+            finally { await gitSync?.close(); }
           }
         }
       } finally { await attachments.close(); }
@@ -124,12 +124,12 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       close(): Promise<void> {
         closing ??= (async () => {
           try {
-            try { await terminals?.close(); }
+            try { await execution?.close(); }
             finally {
-              try { await clones?.close(); }
+              try { await terminals?.close(); }
               finally {
-                try { await gitSync?.close(); }
-                finally { await execution?.close(); }
+                try { await clones?.close(); }
+                finally { await gitSync?.close(); }
               }
             }
           } finally {

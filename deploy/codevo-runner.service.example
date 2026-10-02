@@ -9,7 +9,7 @@ EnvironmentFile=%h/.config/codevo-runner/runner.env
 ExecStart=/absolute/path/to/node dist/src/main.js
 Restart=on-failure
 RestartSec=5
-KillMode=control-group
+KillMode=mixed
 TimeoutStopSec=35
 UMask=0077
 

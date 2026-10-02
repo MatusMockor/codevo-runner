@@ -14,7 +14,7 @@ import 'reflect-metadata';
 import { createServer } from 'node:http';
 import {
   Controller, Get, Inject, Module, Req, Res,
-  type INestApplication, type OnApplicationShutdown,
+  type BeforeApplicationShutdown, type INestApplication, type OnApplicationShutdown,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
@@ -83,8 +83,9 @@ class RunnerController {
   }
 }
 
-class ServiceLifecycle implements OnApplicationShutdown {
+class ServiceLifecycle implements BeforeApplicationShutdown, OnApplicationShutdown {
   constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
+  async beforeApplicationShutdown() { await this.services.execution?.close().catch(() => undefined); }
   async onApplicationShutdown() { await this.services.close(); }
 }
 
