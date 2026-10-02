@@ -10,6 +10,8 @@ import type { RunnerChangeSource } from '../application/runner-changes.js';
 import type { CloneApplication } from '../application/clone-ports.js';
 import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
+import type { GitSyncApplication } from '../application/git-sync-ports.js';
+import type { PortPreviewApplication } from '../application/port-preview-ports.js';
 
 export interface RunnerServices {
   readonly repositories?: RepositoryLookupService;
@@ -25,6 +27,8 @@ export interface RunnerServices {
   readonly tasks: TaskApplication;
   readonly attachments: AttachmentStore;
   readonly execution?: ExecutionApplication;
+  readonly gitSync?: GitSyncApplication;
+  readonly ports?: PortPreviewApplication;
   readonly close: () => Promise<void>;
 }
 export const SERVICES = Symbol('runner services');

@@ -19,7 +19,7 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `POST /v1/projects/clone` | Clone job, HTTP 202; body `{ idempotencyKey, url, name, branch?, parentPath? }` |
 | `GET /v1/project-clones/:id` | Clone job |
 | `POST /v1/project-clones/:id/cancel` | Cancel clone job; no request body |
-| `POST /v1/tasks/:id/start` | Task, HTTP 202; body `{ "projectId": "my-app" }` |
+| `POST /v1/tasks/:id/start` | Task, HTTP 202; body `{ "projectId": "my-app", "base"?: StartBase }` (see [Git sync](#git-sync)) |
 | `GET /v1/tasks/:id/resume` | Continuation eligibility `{ available, reason }` |
 | `POST /v1/tasks/:id/continue` | `{ task, created }`, 202 for new or 200 for identical retry |
 | `GET /v1/tasks/:id/diff` | `{ patch, truncated, untrackedFiles }` |
@@ -586,3 +586,93 @@ indicates truncation. Each text side is bounded to 128 KiB; paths are at most 40
 UTF-8 bytes and 64 segments. Capture has a 10-second execution deadline, bounded
 file/byte scanning and a 256 MiB retained-store quota. Existing historical records
 are not overwritten to admit new snapshots.
+
+## Git sync
+
+Clients announcing `gitSync` in `X-Codevo-Client-Capabilities` discover the optional
+`gitSync` capability; it is true whenever execution is enabled. All routes require
+bearer authentication and the exact `X-Codevo-Runner-Id` (missing or foreign: 409).
+Paths are exact; query strings are 404 and bodies on GET are 400. Bodies are closed
+JSON objects: unknown fields are 400. `:projectId` uses the registered project id
+grammar and `:id` is a task uuid resolving to its conversation workspace.
+
+| Route | Request / response |
+| --- | --- |
+| `GET /v1/projects/:projectId/git/branches` | `{defaultBranch,checkoutBranch,fetchedAt,branches:[{name,sha,committedAt}],truncated}` |
+| `POST /v1/projects/:projectId/git/fetch` | `{idempotencyKey}` → 202 `GitOperation` (`fetch`) |
+| `GET /v1/projects/:projectId/git/status` | `{branch,headSha,upstream,dirty,operation,inPlaceTaskActive,fetchedAt}` |
+| `POST /v1/projects/:projectId/git/update` | `{idempotencyKey}` → 202 `GitOperation` (`update`) or an admission refusal |
+| `GET /v1/tasks/:id/git/status` | `{mode,branch,headSha,base,published,dirty,active}` |
+| `POST /v1/tasks/:id/git/commit` | `{message}` → `{commitSha,status}` |
+| `POST /v1/tasks/:id/git/push` | `{idempotencyKey,target:"thread-branch"|"base-branch"}` → 202 `GitOperation` (`push`) or an admission refusal |
+| `GET /v1/git-operations/:id` | `GitOperation` `{id,kind,status,error,result}`; 404 when unknown or expired |
+
+`POST /v1/tasks/:id/start` accepts an optional `base`: `{kind:"origin-branch",branch}`
+(worktree isolation only) or `{kind:"checkout-head"}` (previous behaviour). An
+`origin-branch` start fetches origin (coalesced with a fetch that finished less than
+15 seconds earlier), resolves `refs/remotes/origin/<branch>` and creates the worktree
+on a new local branch `codevo/<first 8 hex of the task id>` (the full 32 hex id on
+collision). A failed fetch or missing branch fails the turn with that Git error code
+before the provider starts; there is no fallback to the stale checkout. Without a
+base, worktrees keep the detached `HEAD` behaviour. The base is stored with the task;
+retrying start with a different base is a conflict.
+
+Branch names use the clone branch grammar, at most 255 UTF-8 bytes, never `HEAD` and
+never starting with `+`; remote branches outside the grammar are omitted from the
+listing. Listings return at most 500 branches, newest commit first, with `truncated`.
+Shas are 40 or 64 lowercase hex. Dirty counts stop at 10,000 (`truncated`). Commit
+messages are 1–4096 UTF-8 bytes, not whitespace-only, without control characters
+except `\n`; a commit stages every change except runner-managed synchronized
+instruction files (`.codevo-instructions/global/`, `.claude/rules/codevo-global/` and
+the instruction manifest's paths), which status also omits from dirty counts. It is refused while a turn of the
+conversation (or, for in-place threads, any in-place turn of the project) is queued
+or running. Commit identity is `CODEVO_GIT_AUTHOR_NAME`/`CODEVO_GIT_AUTHOR_EMAIL`, else
+the repository-local `user.name`/`user.email`, else `git_identity_missing`.
+
+Push never forces, never pushes tags and always sends one explicit
+`<sha>:refs/heads/<branch>` refspec to the origin URL. `thread-branch` publishes the
+recorded `codevo/...` branch, the in-place checkout branch, or `codevo/<id8>` for a
+legacy detached worktree. `base-branch` is available only for worktrees started from
+an origin branch and is fast-forward only (`git_rejected_non_fast_forward`). Update
+from origin fetches and runs `merge --ff-only` on the server checkout; it is refused
+while an in-place turn is queued or running (`busy`), and for a detached checkout,
+missing or non-origin upstream, an in-progress merge/rebase/cherry-pick/revert/bisect,
+tracked changes, or divergence after the fetch. A status whose output exceeds its
+bounds (256 KiB or 10,000 entries, for example an unignored dependency tree) counts as
+dirty for Update. The merge has its own 10-second deadline and does not start when less
+than that remains of the update budget.
+
+Network operations are polled jobs keyed by `idempotencyKey`: the same key with the
+same input returns the same operation and a different input is 409 `conflict`. At
+most 64 operations are retained in memory; completed ones expire after 10 minutes and
+all are lost on restart (poll 404 means the outcome is unknown; refresh status). At
+most two network Git operations run runner-wide and one per project. Deadlines are
+60 seconds for fetch, 60 seconds for update, 120 seconds for push and 10 seconds per
+local Git command. On deadline or shutdown the process group receives SIGTERM, so
+Git can remove its lock files, and SIGKILL two seconds later.
+Network Git uses the service account's SSH keys with strict host keys and no agent
+forwarding, or the host-scoped `gh`/`glab` credential helper for HTTPS. Origin URLs
+and push URLs with credentials, local paths or unsupported transports are refused
+(`git_remote_unsupported`); a missing origin is `git_no_remote`. Repository hooks,
+fsmonitor, configured credential helpers, signing, tag following and submodule
+recursion are disabled. Git output is never returned; stderr is read up to 16 KiB
+only to classify failures.
+
+Operation failures and admission refusals use the closed codes `git_remote_unavailable`,
+`git_auth_failed`, `git_timeout`, `git_no_remote`, `git_remote_unsupported`,
+`git_branch_not_found`, `git_detached_head`, `git_no_upstream`, `git_dirty`,
+`git_diverged`, `git_operation_in_progress`, `git_rejected_non_fast_forward`,
+`git_rejected`, `git_nothing_to_commit`, `git_identity_missing`, `busy` and
+`conflict`. As HTTP errors, `git_*` codes and `conflict` are 409 and `busy` is 503.
+
+A follow-up turn waits (at most 130 seconds, then fails as busy) for a commit or push
+holding its workspace before the provider starts. Same-uid agents can still change
+repository configuration such as clean/smudge filters used while staging; this is a
+documented residual bounded by the process deadline. The origin URL check applies to
+the configured `remote.origin.url`/`pushurl`; repository-local `url.*.insteadOf` and
+`pushInsteadOf` rewrites still apply to fetch and push, within the protocols allowed above.
+A turn that cannot obtain its workspace lease fails with the error `busy`.
+
+The `portPreview` capability and `GET /v1/tasks/:id/ports` /
+`GET /v1/projects/:projectId/ports` routes are reserved; port discovery is not
+implemented yet, so the capability is false and both routes return 404.

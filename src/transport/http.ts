@@ -15,6 +15,10 @@ export function send(response: ServerResponse, status: number, body: unknown) {
 const statusCodes: Record<ErrorCode, number> = {
   delivery_uncertain: 409, invalid_input: 400, not_found: 404, conflict: 409, quota_exceeded: 429,
   unsupported_media: 415, too_large: 413, busy: 503, storage_unavailable: 503,
+  git_remote_unavailable: 409, git_auth_failed: 409, git_timeout: 409, git_no_remote: 409,
+  git_remote_unsupported: 409, git_branch_not_found: 409, git_detached_head: 409, git_no_upstream: 409,
+  git_dirty: 409, git_diverged: 409, git_operation_in_progress: 409, git_rejected_non_fast_forward: 409,
+  git_rejected: 409, git_nothing_to_commit: 409, git_identity_missing: 409,
 };
 
 export async function handle(response: ServerResponse, action: () => Promise<void>) {

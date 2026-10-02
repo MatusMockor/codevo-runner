@@ -1,0 +1,2254 @@
+{
+  "schemaVersion": 1,
+  "capability": "gitSync",
+  "errorCodes": [
+    "git_remote_unavailable",
+    "git_auth_failed",
+    "git_timeout",
+    "git_no_remote",
+    "git_remote_unsupported",
+    "git_branch_not_found",
+    "git_detached_head",
+    "git_no_upstream",
+    "git_dirty",
+    "git_diverged",
+    "git_operation_in_progress",
+    "git_rejected_non_fast_forward",
+    "git_rejected",
+    "git_nothing_to_commit",
+    "git_identity_missing",
+    "busy",
+    "conflict"
+  ],
+  "sections": {
+    "startBody": {
+      "accepted": [
+        {
+          "name": "projectOnly",
+          "value": {
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "originBranch",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "feature/checkout-v2"
+            }
+          }
+        },
+        {
+          "name": "checkoutHead",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "checkout-head"
+            }
+          }
+        },
+        {
+          "name": "branchAt255Bytes",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "name": "branchWithInnerPlus",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "feature/a+b"
+            }
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownField",
+          "value": {
+            "projectId": "storefront",
+            "extra": true
+          }
+        },
+        {
+          "name": "missingProjectId",
+          "value": {
+            "base": {
+              "kind": "checkout-head"
+            }
+          }
+        },
+        {
+          "name": "badProjectId",
+          "value": {
+            "projectId": "../etc"
+          }
+        },
+        {
+          "name": "nullBase",
+          "value": {
+            "projectId": "storefront",
+            "base": null
+          }
+        },
+        {
+          "name": "unknownBaseKind",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "remote-branch",
+              "branch": "main"
+            }
+          }
+        },
+        {
+          "name": "checkoutHeadWithBranch",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "checkout-head",
+              "branch": "main"
+            }
+          }
+        },
+        {
+          "name": "originBranchMissingBranch",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch"
+            }
+          }
+        },
+        {
+          "name": "originBranchUnknownField",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "main",
+              "sha": "3f786850e387550fdab836ed7e6dc881de23001b"
+            }
+          }
+        },
+        {
+          "name": "branchHead",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "HEAD"
+            }
+          }
+        },
+        {
+          "name": "branchPlusRefspec",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "+refs/heads/main:refs/heads/main"
+            }
+          }
+        },
+        {
+          "name": "branchLeadingPlus",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "+main"
+            }
+          }
+        },
+        {
+          "name": "baseAsArray",
+          "value": {
+            "projectId": "storefront",
+            "base": ["origin-branch", "main"]
+          }
+        },
+        {
+          "name": "bodyAsArray",
+          "value": ["storefront"]
+        },
+        {
+          "name": "branchLeadingDash",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "-main"
+            }
+          }
+        },
+        {
+          "name": "branchDotDot",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "feature/../main"
+            }
+          }
+        },
+        {
+          "name": "branchWildcard",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "feature/*"
+            }
+          }
+        },
+        {
+          "name": "branchControl",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "main\n"
+            }
+          }
+        },
+        {
+          "name": "branchTooLong",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "name": "branchMultibyteOver255Bytes",
+          "value": {
+            "projectId": "storefront",
+            "base": {
+              "kind": "origin-branch",
+              "branch": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+            }
+          }
+        }
+      ]
+    },
+    "fetchOrUpdateBody": {
+      "accepted": [
+        {
+          "name": "idempotencyKey",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "missingKey",
+          "value": {}
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "force": true
+          }
+        },
+        {
+          "name": "uppercaseKey",
+          "value": {
+            "idempotencyKey": "0B9D6F3E-6A51-4C1F-8D2E-7F1A2B3C4D5E"
+          }
+        },
+        {
+          "name": "notUuidV4",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-1c1f-8d2e-7f1a2b3c4d5e"
+          }
+        },
+        {
+          "name": "numericKey",
+          "value": {
+            "idempotencyKey": 1
+          }
+        }
+      ]
+    },
+    "commitBody": {
+      "accepted": [
+        {
+          "name": "singleLine",
+          "value": {
+            "message": "Fix checkout totals"
+          }
+        },
+        {
+          "name": "multiLine",
+          "value": {
+            "message": "Fix checkout totals\n\nRound before tax."
+          }
+        },
+        {
+          "name": "at4096Bytes",
+          "value": {
+            "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "multibyteAt4096Bytes",
+          "value": {
+            "message": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "empty",
+          "value": {
+            "message": ""
+          }
+        },
+        {
+          "name": "whitespaceOnly",
+          "value": {
+            "message": " \n "
+          }
+        },
+        {
+          "name": "byteOrderMarkOnly",
+          "value": {
+            "message": "﻿"
+          }
+        },
+        {
+          "name": "oversize",
+          "value": {
+            "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "multibyteOversize",
+          "value": {
+            "message": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          }
+        },
+        {
+          "name": "nul",
+          "value": {
+            "message": "a\u0000b"
+          }
+        },
+        {
+          "name": "tab",
+          "value": {
+            "message": "a\tb"
+          }
+        },
+        {
+          "name": "carriageReturn",
+          "value": {
+            "message": "a\r\nb"
+          }
+        },
+        {
+          "name": "delete",
+          "value": {
+            "message": "ab"
+          }
+        },
+        {
+          "name": "c1Control",
+          "value": {
+            "message": "ab"
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "message": "Fix",
+            "amend": true
+          }
+        },
+        {
+          "name": "nonString",
+          "value": {
+            "message": 42
+          }
+        }
+      ]
+    },
+    "pushBody": {
+      "accepted": [
+        {
+          "name": "threadBranch",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "thread-branch"
+          }
+        },
+        {
+          "name": "baseBranch",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "base-branch"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "forceRefspecTarget",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "+refs/heads/main"
+          }
+        },
+        {
+          "name": "explicitRefTarget",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "refs/heads/main"
+          }
+        },
+        {
+          "name": "missingTarget",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e"
+          }
+        },
+        {
+          "name": "missingKey",
+          "value": {
+            "target": "thread-branch"
+          }
+        },
+        {
+          "name": "nullTarget",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": null
+          }
+        },
+        {
+          "name": "forceField",
+          "value": {
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "thread-branch",
+            "force": true
+          }
+        }
+      ]
+    },
+    "branchList": {
+      "accepted": [
+        {
+          "name": "typical",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "detachedNeverFetched",
+          "value": {
+            "defaultBranch": null,
+            "checkoutBranch": null,
+            "fetchedAt": null,
+            "branches": [],
+            "truncated": false
+          }
+        },
+        {
+          "name": "truncated",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": true
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownField",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": false,
+            "remote": "origin"
+          }
+        },
+        {
+          "name": "branchUnknownField",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00",
+                "upstream": "origin/main"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "missingFetchedAt",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "sha41Hex",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b0",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "shaUppercase",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3F786850E387550FDAB836ED7E6DC881DE23001B",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "shaAbbreviated",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "branchNamedHead",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "HEAD",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "branchLeadingPlus",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "+main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "branchAsArray",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              ["main", "3f786850e387550fdab836ed7e6dc881de23001b", "2026-10-02T11:14:03+02:00"]
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "branchWithRefspec",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "+refs/heads/main:x",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "badCommittedAt",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "yesterday"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "dateOnlyCommittedAt",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "badDefaultBranch",
+          "value": {
+            "defaultBranch": "main..dev",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "truncatedNotBoolean",
+          "value": {
+            "defaultBranch": "main",
+            "checkoutBranch": "main",
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "branches": [
+              {
+                "name": "main",
+                "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+                "committedAt": "2026-10-02T11:14:03+02:00"
+              },
+              {
+                "name": "feature/checkout-v2",
+                "sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "committedAt": "2026-10-01T18:02:11Z"
+              }
+            ],
+            "truncated": "false"
+          }
+        }
+      ]
+    },
+    "checkoutStatus": {
+      "accepted": [
+        {
+          "name": "cleanTracking",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "detachedRebasing",
+          "value": {
+            "branch": null,
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": null,
+            "dirty": {
+              "tracked": 3,
+              "untracked": 1,
+              "truncated": false
+            },
+            "operation": "rebase",
+            "inPlaceTaskActive": true,
+            "fetchedAt": null
+          }
+        },
+        {
+          "name": "dirtyAtLimit",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 10000,
+              "untracked": 10000,
+              "truncated": true
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "operation-merge",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "merge",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "operation-cherry-pick",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "cherry-pick",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "operation-revert",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "revert",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "operation-bisect",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "bisect",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownOperation",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "am",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "dirtyOverLimit",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 10001,
+              "untracked": 0,
+              "truncated": true
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "dirtyUnknownField",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false,
+              "ignored": 0
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "dirtyAsArray",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": [0, 0, false],
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "upstreamAsArray",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": ["origin/main", 0, 2],
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "negativeAhead",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": -1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "fractionalBehind",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 1.5
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "upstreamUnknownField",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 0,
+              "remote": "origin"
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "missingInPlaceTaskActive",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z",
+            "stash": 0
+          }
+        },
+        {
+          "name": "headShaNull",
+          "value": {
+            "branch": "main",
+            "headSha": null,
+            "upstream": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 2
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "operation": "none",
+            "inPlaceTaskActive": false,
+            "fetchedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ]
+    },
+    "threadGitStatus": {
+      "accepted": [
+        {
+          "name": "worktreeFromOrigin",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "legacyDetachedWorktree",
+          "value": {
+            "mode": "worktree",
+            "branch": null,
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": null,
+            "published": null,
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": true
+          }
+        },
+        {
+          "name": "inPlace",
+          "value": {
+            "mode": "in-place",
+            "branch": "main",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": null,
+            "published": {
+              "ref": "origin/main",
+              "ahead": 0,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "baseNeverFetched",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": null,
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownMode",
+          "value": {
+            "mode": "detached",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "baseUnknownField",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0,
+              "remote": "origin"
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "baseMissingFetchedAt",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "publishedMissingBehind",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "missingActive",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            }
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false,
+            "integrated": false
+          }
+        },
+        {
+          "name": "headSha41Hex",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/7389088c",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b0",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        },
+        {
+          "name": "branchWithSpace",
+          "value": {
+            "mode": "worktree",
+            "branch": "codevo/my branch",
+            "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+            "base": {
+              "branch": "main",
+              "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "ahead": 2,
+              "behind": 0
+            },
+            "published": {
+              "ref": "origin/codevo/7389088c",
+              "ahead": 1,
+              "behind": 0
+            },
+            "dirty": {
+              "tracked": 0,
+              "untracked": 0,
+              "truncated": false
+            },
+            "active": false
+          }
+        }
+      ]
+    },
+    "commitResult": {
+      "accepted": [
+        {
+          "name": "committed",
+          "value": {
+            "commitSha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+            "status": {
+              "mode": "worktree",
+              "branch": "codevo/7389088c",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "base": {
+                "branch": "main",
+                "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+                "fetchedAt": "2026-10-02T09:15:00.000Z",
+                "ahead": 2,
+                "behind": 0
+              },
+              "published": {
+                "ref": "origin/codevo/7389088c",
+                "ahead": 1,
+                "behind": 0
+              },
+              "dirty": {
+                "tracked": 0,
+                "untracked": 0,
+                "truncated": false
+              },
+              "active": false
+            }
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "missingStatus",
+          "value": {
+            "commitSha": "89e6c98d92887913cadf06b2adb97f26cde4849b"
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "commitSha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+            "status": {
+              "mode": "worktree",
+              "branch": "codevo/7389088c",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "base": {
+                "branch": "main",
+                "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+                "fetchedAt": "2026-10-02T09:15:00.000Z",
+                "ahead": 2,
+                "behind": 0
+              },
+              "published": {
+                "ref": "origin/codevo/7389088c",
+                "ahead": 1,
+                "behind": 0
+              },
+              "dirty": {
+                "tracked": 0,
+                "untracked": 0,
+                "truncated": false
+              },
+              "active": false
+            },
+            "pushed": false
+          }
+        },
+        {
+          "name": "commitSha41Hex",
+          "value": {
+            "commitSha": "89e6c98d92887913cadf06b2adb97f26cde4849b0",
+            "status": {
+              "mode": "worktree",
+              "branch": "codevo/7389088c",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "base": {
+                "branch": "main",
+                "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+                "fetchedAt": "2026-10-02T09:15:00.000Z",
+                "ahead": 2,
+                "behind": 0
+              },
+              "published": {
+                "ref": "origin/codevo/7389088c",
+                "ahead": 1,
+                "behind": 0
+              },
+              "dirty": {
+                "tracked": 0,
+                "untracked": 0,
+                "truncated": false
+              },
+              "active": false
+            }
+          }
+        },
+        {
+          "name": "invalidStatus",
+          "value": {
+            "commitSha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+            "status": {
+              "mode": "detached",
+              "branch": "codevo/7389088c",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "base": {
+                "branch": "main",
+                "sha": "89e6c98d92887913cadf06b2adb97f26cde4849b",
+                "fetchedAt": "2026-10-02T09:15:00.000Z",
+                "ahead": 2,
+                "behind": 0
+              },
+              "published": {
+                "ref": "origin/codevo/7389088c",
+                "ahead": 1,
+                "behind": 0
+              },
+              "dirty": {
+                "tracked": 0,
+                "untracked": 0,
+                "truncated": false
+              },
+              "active": false
+            }
+          }
+        }
+      ]
+    },
+    "gitOperation": {
+      "accepted": [
+        {
+          "name": "fetchRunning",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "running",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "fetchSucceeded",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "fetch",
+              "fetchedAt": "2026-10-02T09:15:00.000Z"
+            }
+          }
+        },
+        {
+          "name": "updateSucceeded",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "update",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "update",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "fastForwarded": 3
+            }
+          }
+        },
+        {
+          "name": "pushSucceeded",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "push",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "push",
+              "remoteRef": "refs/heads/codevo/7389088c",
+              "pushedSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "created": true
+            }
+          }
+        },
+        {
+          "name": "pushFailed",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "push",
+            "status": "failed",
+            "error": "git_rejected_non_fast_forward",
+            "result": null
+          }
+        },
+        {
+          "name": "updateBusy",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "update",
+            "status": "failed",
+            "error": "busy",
+            "result": null
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownKind",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "pull",
+            "status": "running",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "unknownStatus",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "queued",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "unknownErrorCode",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "failed",
+            "error": "git_exploded",
+            "result": null
+          }
+        },
+        {
+          "name": "rawGitError",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "failed",
+            "error": "fatal: could not read from remote repository",
+            "result": null
+          }
+        },
+        {
+          "name": "succeededWithoutResult",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "succeededWithError",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": "git_timeout",
+            "result": {
+              "kind": "fetch",
+              "fetchedAt": "2026-10-02T09:15:00.000Z"
+            }
+          }
+        },
+        {
+          "name": "failedWithoutError",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "failed",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "failedWithResult",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "failed",
+            "error": "git_timeout",
+            "result": {
+              "kind": "fetch",
+              "fetchedAt": "2026-10-02T09:15:00.000Z"
+            }
+          }
+        },
+        {
+          "name": "runningWithResult",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "running",
+            "error": null,
+            "result": {
+              "kind": "fetch",
+              "fetchedAt": "2026-10-02T09:15:00.000Z"
+            }
+          }
+        },
+        {
+          "name": "runningWithError",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "running",
+            "error": "git_timeout",
+            "result": null
+          }
+        },
+        {
+          "name": "resultKindMismatch",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "push",
+              "remoteRef": "refs/heads/main",
+              "pushedSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "created": false
+            }
+          }
+        },
+        {
+          "name": "resultUnknownField",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "fetch",
+              "fetchedAt": "2026-10-02T09:15:00.000Z",
+              "refs": 3
+            }
+          }
+        },
+        {
+          "name": "unknownResultKind",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "merge",
+              "fetchedAt": "2026-10-02T09:15:00.000Z"
+            }
+          }
+        },
+        {
+          "name": "resultAsArray",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "succeeded",
+            "error": null,
+            "result": ["fetch", "2026-10-02T09:15:00.000Z"]
+          }
+        },
+        {
+          "name": "tagRemoteRef",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "push",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "push",
+              "remoteRef": "refs/tags/v1.0.0",
+              "pushedSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "created": true
+            }
+          }
+        },
+        {
+          "name": "forcedRemoteRef",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "push",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "push",
+              "remoteRef": "+refs/heads/main",
+              "pushedSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "created": false
+            }
+          }
+        },
+        {
+          "name": "negativeFastForwarded",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "update",
+            "status": "succeeded",
+            "error": null,
+            "result": {
+              "kind": "update",
+              "headSha": "3f786850e387550fdab836ed7e6dc881de23001b",
+              "fastForwarded": -1
+            }
+          }
+        },
+        {
+          "name": "idNotUuid",
+          "value": {
+            "id": "operation-1",
+            "kind": "fetch",
+            "status": "running",
+            "error": null,
+            "result": null
+          }
+        },
+        {
+          "name": "missingError",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "running",
+            "result": null
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "id": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+            "kind": "fetch",
+            "status": "running",
+            "error": null,
+            "result": null,
+            "startedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ]
+    },
+    "errorBody": {
+      "accepted": [
+        {
+          "name": "git_remote_unavailable",
+          "value": {
+            "error": "git_remote_unavailable"
+          }
+        },
+        {
+          "name": "git_auth_failed",
+          "value": {
+            "error": "git_auth_failed"
+          }
+        },
+        {
+          "name": "git_timeout",
+          "value": {
+            "error": "git_timeout"
+          }
+        },
+        {
+          "name": "git_no_remote",
+          "value": {
+            "error": "git_no_remote"
+          }
+        },
+        {
+          "name": "git_remote_unsupported",
+          "value": {
+            "error": "git_remote_unsupported"
+          }
+        },
+        {
+          "name": "git_branch_not_found",
+          "value": {
+            "error": "git_branch_not_found"
+          }
+        },
+        {
+          "name": "git_detached_head",
+          "value": {
+            "error": "git_detached_head"
+          }
+        },
+        {
+          "name": "git_no_upstream",
+          "value": {
+            "error": "git_no_upstream"
+          }
+        },
+        {
+          "name": "git_dirty",
+          "value": {
+            "error": "git_dirty"
+          }
+        },
+        {
+          "name": "git_diverged",
+          "value": {
+            "error": "git_diverged"
+          }
+        },
+        {
+          "name": "git_operation_in_progress",
+          "value": {
+            "error": "git_operation_in_progress"
+          }
+        },
+        {
+          "name": "git_rejected_non_fast_forward",
+          "value": {
+            "error": "git_rejected_non_fast_forward"
+          }
+        },
+        {
+          "name": "git_rejected",
+          "value": {
+            "error": "git_rejected"
+          }
+        },
+        {
+          "name": "git_nothing_to_commit",
+          "value": {
+            "error": "git_nothing_to_commit"
+          }
+        },
+        {
+          "name": "git_identity_missing",
+          "value": {
+            "error": "git_identity_missing"
+          }
+        },
+        {
+          "name": "busy",
+          "value": {
+            "error": "busy"
+          }
+        },
+        {
+          "name": "conflict",
+          "value": {
+            "error": "conflict"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownCode",
+          "value": {
+            "error": "git_exploded"
+          }
+        },
+        {
+          "name": "genericRunnerCode",
+          "value": {
+            "error": "invalid_input"
+          }
+        },
+        {
+          "name": "withMessage",
+          "value": {
+            "error": "git_dirty",
+            "message": "working tree has changes"
+          }
+        },
+        {
+          "name": "missingError",
+          "value": {}
+        }
+      ]
+    },
+    "editorGitRequest": {
+      "accepted": [
+        {
+          "name": "projectBranches",
+          "value": {
+            "operation": "projectBranches",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "projectFetch",
+          "value": {
+            "operation": "projectFetch",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e"
+          }
+        },
+        {
+          "name": "projectStatus",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "projectUpdate",
+          "value": {
+            "operation": "projectUpdate",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e"
+          }
+        },
+        {
+          "name": "threadStatus",
+          "value": {
+            "operation": "threadStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "threadCommit",
+          "value": {
+            "operation": "threadCommit",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "message": "Fix checkout totals"
+          }
+        },
+        {
+          "name": "threadPushThreadBranch",
+          "value": {
+            "operation": "threadPush",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "thread-branch"
+          }
+        },
+        {
+          "name": "threadPushBaseBranch",
+          "value": {
+            "operation": "threadPush",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "base-branch"
+          }
+        },
+        {
+          "name": "operation",
+          "value": {
+            "operation": "operation",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "operationId": "5f0c1d2e-3a4b-4c5d-9e6f-7a8b9c0d1e2f"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "missingOperation",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "unknownOperation",
+          "value": {
+            "operation": "threadMerge",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "missingRunnerId",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront",
+            "path": "/srv"
+          }
+        },
+        {
+          "name": "branchesWithIdempotencyKey",
+          "value": {
+            "operation": "projectBranches",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e"
+          }
+        },
+        {
+          "name": "fetchMissingKey",
+          "value": {
+            "operation": "projectFetch",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "statusWithTaskId",
+          "value": {
+            "operation": "threadStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "commitOversize",
+          "value": {
+            "operation": "threadCommit",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "commitControl",
+          "value": {
+            "operation": "threadCommit",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "message": "a\u0000b"
+          }
+        },
+        {
+          "name": "pushForceTarget",
+          "value": {
+            "operation": "threadPush",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "idempotencyKey": "0b9d6f3e-6a51-4c1f-8d2e-7f1a2b3c4d5e",
+            "target": "+refs/heads/main"
+          }
+        },
+        {
+          "name": "badServerId",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux runner",
+            "runnerId": "linux-runner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "badProjectId",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "projectId": "../storefront"
+          }
+        },
+        {
+          "name": "taskIdNotUuid",
+          "value": {
+            "operation": "threadStatus",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "task-1"
+          }
+        },
+        {
+          "name": "operationIdNotUuid",
+          "value": {
+            "operation": "operation",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "operationId": "op-1"
+          }
+        },
+        {
+          "name": "runnerIdControl",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "linux\nrunner",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "runnerIdBlank",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "  ",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "runnerIdTooLong",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "runnerIdByteOrderMark",
+          "value": {
+            "operation": "projectStatus",
+            "serverId": "linux",
+            "runnerId": "﻿",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "commitByteOrderMarkOnly",
+          "value": {
+            "operation": "threadCommit",
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "message": "﻿"
+          }
+        },
+        {
+          "name": "requestAsArray",
+          "value": ["projectStatus", "linux", "linux-runner", "storefront"]
+        }
+      ]
+    }
+  }
+}

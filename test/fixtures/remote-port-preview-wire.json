@@ -1,0 +1,2232 @@
+{
+  "schemaVersion": 1,
+  "capability": "portPreview",
+  "sections": {
+    "portList": {
+      "accepted": [
+        {
+          "name": "typical",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "empty",
+          "value": {
+            "ports": [],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "truncatedAtLimit",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3001,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3002,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3003,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3004,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3005,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3006,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3007,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3008,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3009,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3010,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3011,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3012,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3013,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3014,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3015,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3016,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3017,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3018,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3019,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3020,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3021,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3022,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3023,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3024,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3025,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3026,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3027,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3028,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3029,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3030,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3031,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": true,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownProcess",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "unknown"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "process15Bytes",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "abcdefghijklmno"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "sameportBothFamilies",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v6",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "sameportBothSources",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "terminal",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "portBounds",
+          "value": {
+            "ports": [
+              {
+                "port": 1024,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 65535,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "address-loopback-v6",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v6",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "address-any-v4",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "any-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "address-any-v6",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "any-v6",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "port0",
+          "value": {
+            "ports": [
+              {
+                "port": 0,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "port80",
+          "value": {
+            "ports": [
+              {
+                "port": 80,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "port1023",
+          "value": {
+            "ports": [
+              {
+                "port": 1023,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "port65536",
+          "value": {
+            "ports": [
+              {
+                "port": 65536,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "fractionalPort",
+          "value": {
+            "ports": [
+              {
+                "port": 3000.5,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "stringPort",
+          "value": {
+            "ports": [
+              {
+                "port": "3000",
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownAddress",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "public-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownSource",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "system",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "processEmpty",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": ""
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "process16Bytes",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "abcdefghijklmnop"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "processNonAscii",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "nöde"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "processControl",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "no\nde"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "portUnknownField",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "pid": 4242
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unsorted",
+          "value": {
+            "ports": [
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "duplicateEntry",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "familiesOutOfOrder",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v6",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "sourcesOutOfOrder",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "terminal",
+                "process": "node"
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "portAsArray",
+          "value": {
+            "ports": [[3000, "loopback-v4", "agent", "node"]],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "tooMany",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3001,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3002,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3003,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3004,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3005,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3006,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3007,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3008,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3009,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3010,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3011,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3012,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3013,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3014,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3015,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3016,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3017,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3018,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3019,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3020,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3021,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3022,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3023,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3024,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3025,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3026,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3027,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3028,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3029,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3030,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3031,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 3032,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": true,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z",
+            "host": "127.0.0.1"
+          }
+        },
+        {
+          "name": "missingScannedAt",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "name": "badScannedAt",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "now"
+          }
+        },
+        {
+          "name": "missingTruncated",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite"
+              }
+            ],
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ]
+    },
+    "portScope": {
+      "accepted": [
+        {
+          "name": "task",
+          "value": {
+            "kind": "task",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "project",
+          "value": {
+            "kind": "project",
+            "projectId": "storefront"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "unknownKind",
+          "value": {
+            "kind": "terminal",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "taskIdNotUuid",
+          "value": {
+            "kind": "task",
+            "taskId": "task-1"
+          }
+        },
+        {
+          "name": "badProjectId",
+          "value": {
+            "kind": "project",
+            "projectId": "../storefront"
+          }
+        },
+        {
+          "name": "taskWithProjectId",
+          "value": {
+            "kind": "task",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66",
+            "projectId": "storefront"
+          }
+        },
+        {
+          "name": "projectWithTaskId",
+          "value": {
+            "kind": "project",
+            "projectId": "storefront",
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "missingKind",
+          "value": {
+            "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+          }
+        },
+        {
+          "name": "scopeAsArray",
+          "value": ["task", "7389088c-29b8-4cec-9a15-e825e1fb2f66"]
+        }
+      ]
+    },
+    "portListRequest": {
+      "accepted": [
+        {
+          "name": "task",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "project",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "project",
+              "projectId": "storefront"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationMaxSafe",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740991,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "missingOwnerId",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "ownerGeneration": 1
+          }
+        },
+        {
+          "name": "missingRunnerId",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "blankOwnerId",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "   ",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerIdControl",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace\n1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerIdByteOrderMark",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "﻿",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "scopeAsArray",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": ["task", "7389088c-29b8-4cec-9a15-e825e1fb2f66"]
+          }
+        },
+        {
+          "name": "requestAsArray",
+          "value": [
+            "linux",
+            "linux-runner",
+            "workspace-1",
+            {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          ]
+        },
+        {
+          "name": "ownerIdTooLong",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "badServerId",
+          "value": {
+            "serverId": "linux runner",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "badScope",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "task-1"
+            }
+          }
+        },
+        {
+          "name": "missingOwnerGeneration",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGeneration0",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 0,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationNegative",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": -1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationFractional",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1.5,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationUnsafe",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740992,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationString",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": "1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        },
+        {
+          "name": "ownerGenerationNull",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": null,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            }
+          }
+        }
+      ]
+    },
+    "portOpenRequest": {
+      "accepted": [
+        {
+          "name": "root",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "httpsWithQuery",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "project",
+              "projectId": "storefront"
+            },
+            "port": 3000,
+            "scheme": "https",
+            "path": "/app?tab=1#top"
+          }
+        },
+        {
+          "name": "ownerIdAt1024Bytes",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "pathAt2048Bytes",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "portBounds",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 65535,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationMaxSafe",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740991,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "port0",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 0,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "port80",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 80,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "port65536",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 65536,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "unknownScheme",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "ftp",
+            "path": "/"
+          }
+        },
+        {
+          "name": "javascriptScheme",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "javascript",
+            "path": "/"
+          }
+        },
+        {
+          "name": "pathWithoutSlash",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "app"
+          }
+        },
+        {
+          "name": "emptyPath",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": ""
+          }
+        },
+        {
+          "name": "absoluteUrlAsPath",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "http://user:pass@127.0.0.1:3000/"
+          }
+        },
+        {
+          "name": "backslashPath",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/a\\b"
+          }
+        },
+        {
+          "name": "controlPath",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/a\nb"
+          }
+        },
+        {
+          "name": "path2049Bytes",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "multibytePathOver2048Bytes",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          }
+        },
+        {
+          "name": "targetHostField",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/",
+            "host": "0.0.0.0"
+          }
+        },
+        {
+          "name": "missingPath",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http"
+          }
+        },
+        {
+          "name": "missingOwnerGeneration",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGeneration0",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 0,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationNegative",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": -1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationFractional",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1.5,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationUnsafe",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740992,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationString",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": "1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        },
+        {
+          "name": "ownerGenerationNull",
+          "value": {
+            "serverId": "linux",
+            "runnerId": "linux-runner",
+            "ownerId": "workspace-1",
+            "ownerGeneration": null,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "scheme": "http",
+            "path": "/"
+          }
+        }
+      ]
+    },
+    "portCloseRequest": {
+      "accepted": [
+        {
+          "name": "task",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "project",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "project",
+              "projectId": "storefront"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationMaxSafe",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740991,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "runnerIdField",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000,
+            "runnerId": "linux-runner"
+          }
+        },
+        {
+          "name": "port80",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 80
+          }
+        },
+        {
+          "name": "missingScope",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "port": 3000
+          }
+        },
+        {
+          "name": "missingOwnerGeneration",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGeneration0",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 0,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationNegative",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": -1,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationFractional",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1.5,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationUnsafe",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740992,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationString",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": "1",
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        },
+        {
+          "name": "ownerGenerationNull",
+          "value": {
+            "serverId": "linux",
+            "ownerId": "workspace-1",
+            "ownerGeneration": null,
+            "scope": {
+              "kind": "task",
+              "taskId": "7389088c-29b8-4cec-9a15-e825e1fb2f66"
+            },
+            "port": 3000
+          }
+        }
+      ]
+    },
+    "portReleaseOwnerRequest": {
+      "accepted": [
+        {
+          "name": "owner",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1
+          }
+        },
+        {
+          "name": "ownerGenerationMaxSafe",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740991
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "serverIdField",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1,
+            "serverId": "linux"
+          }
+        },
+        {
+          "name": "blankOwnerId",
+          "value": {
+            "ownerId": "",
+            "ownerGeneration": 1
+          }
+        },
+        {
+          "name": "missingOwnerId",
+          "value": {
+            "ownerGeneration": 1
+          }
+        },
+        {
+          "name": "requestAsArray",
+          "value": ["workspace-1"]
+        },
+        {
+          "name": "missingOwnerGeneration",
+          "value": {
+            "ownerId": "workspace-1"
+          }
+        },
+        {
+          "name": "ownerGeneration0",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 0
+          }
+        },
+        {
+          "name": "ownerGenerationNegative",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": -1
+          }
+        },
+        {
+          "name": "ownerGenerationFractional",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 1.5
+          }
+        },
+        {
+          "name": "ownerGenerationUnsafe",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": 9007199254740992
+          }
+        },
+        {
+          "name": "ownerGenerationString",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": "1"
+          }
+        },
+        {
+          "name": "ownerGenerationNull",
+          "value": {
+            "ownerId": "workspace-1",
+            "ownerGeneration": null
+          }
+        }
+      ]
+    },
+    "portListing": {
+      "accepted": [
+        {
+          "name": "openAndUnforwarded",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 3000,
+                  "state": "open"
+                }
+              },
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite",
+                "forward": null
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "opening",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 49152,
+                  "state": "opening"
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "empty",
+          "value": {
+            "ports": [],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "missingForward",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node"
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unknownForwardState",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 3000,
+                  "state": "failed"
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "forwardLocalPort0",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 0,
+                  "state": "open"
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "forwardUnknownField",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 3000,
+                  "state": "open",
+                  "pid": 4242
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "forwardMissingState",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 3000
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "forwardAsArray",
+          "value": {
+            "ports": [
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": [3000, "open"]
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        },
+        {
+          "name": "unsorted",
+          "value": {
+            "ports": [
+              {
+                "port": 5173,
+                "address": "any-v6",
+                "source": "terminal",
+                "process": "vite",
+                "forward": null
+              },
+              {
+                "port": 3000,
+                "address": "loopback-v4",
+                "source": "agent",
+                "process": "node",
+                "forward": {
+                  "localPort": 3000,
+                  "state": "open"
+                }
+              }
+            ],
+            "truncated": false,
+            "scannedAt": "2026-10-02T09:15:00.000Z"
+          }
+        }
+      ]
+    },
+    "portOpenResponse": {
+      "accepted": [
+        {
+          "name": "samePort",
+          "value": {
+            "localPort": 3000
+          }
+        },
+        {
+          "name": "ephemeral",
+          "value": {
+            "localPort": 49152
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "name": "port0",
+          "value": {
+            "localPort": 0
+          }
+        },
+        {
+          "name": "privilegedPort",
+          "value": {
+            "localPort": 80
+          }
+        },
+        {
+          "name": "unknownField",
+          "value": {
+            "localPort": 3000,
+            "url": "http://127.0.0.1:3000/"
+          }
+        },
+        {
+          "name": "missingLocalPort",
+          "value": {}
+        }
+      ]
+    }
+  }
+}

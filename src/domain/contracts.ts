@@ -34,7 +34,11 @@ export type TaskEvent = Readonly<{
 export type Page<T> = Readonly<{ items: readonly T[]; nextCursor: number | null }>;
 export type EventPage = Page<TaskEvent> & Readonly<{ subagentLifecycle?: AgentSubagentLifecycle; outputTruncatedBeforeSequence?: number; outputStartsAtLineBoundary?: boolean }>;
 export type ErrorCode = 'delivery_uncertain' | 'invalid_input' | 'not_found' | 'conflict' | 'quota_exceeded' |
-  'unsupported_media' | 'too_large' | 'busy' | 'storage_unavailable';
+  'unsupported_media' | 'too_large' | 'busy' | 'storage_unavailable' |
+  'git_remote_unavailable' | 'git_auth_failed' | 'git_timeout' | 'git_no_remote' | 'git_remote_unsupported' |
+  'git_branch_not_found' | 'git_detached_head' | 'git_no_upstream' | 'git_dirty' | 'git_diverged' |
+  'git_operation_in_progress' | 'git_rejected_non_fast_forward' | 'git_rejected' | 'git_nothing_to_commit' |
+  'git_identity_missing';
 export class RunnerError extends Error {
   constructor(readonly code: ErrorCode) { super(code); this.name = 'RunnerError'; }
 }

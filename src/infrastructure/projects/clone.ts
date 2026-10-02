@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { PreparedClone, ProjectCloner } from '../../application/clone-ports.js';
 import { validCloneBranch, validCloneUrl, type CloneInput } from '../../domain/project-clone.js';
 import { prepareCloneProviderAuth } from './clone-provider-auth.js';
+import { NETWORK_BASE_CONFIG, networkGitEnvironment } from './git-network.js';
 import { retainCloneDirectory } from './clone-directory.js';
 import { RunnerError } from '../../domain/contracts.js';
 
@@ -87,14 +88,8 @@ export class GitCloneAdapter implements ProjectCloner {
 async function cloneGit(cwd: string, destination: string, input: CloneInput, signal: AbortSignal): Promise<void> {
   const providerAuth = await prepareCloneProviderAuth(input.url, signal);
   signal.throwIfAborted();
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-  Object.assign(env, {
-    GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/false', SSH_ASKPASS: '/bin/false', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes -o ConnectTimeout=15',
-  });
-  const args = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
-    '-c', 'credential.helper=', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always',
-    '-c', 'protocol.ssh.allow=always', ...providerAuth, 'clone', '--no-recurse-submodules', '--template=', '--quiet'];
+  const env = networkGitEnvironment();
+  const args = [...NETWORK_BASE_CONFIG, ...providerAuth, 'clone', '--no-recurse-submodules', '--template=', '--quiet'];
   if (input.branch) args.push('--branch', input.branch);
   args.push('--', input.url, destination);
   return new Promise((resolveResult, reject) => {

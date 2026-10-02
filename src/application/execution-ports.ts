@@ -6,6 +6,7 @@ import type { PendingMessage, PendingMessages } from '../domain/pending-message.
 import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-files.js';
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
 import type { Task, TaskIsolation } from '../domain/contracts.js';
+import type { StartBase } from '../domain/git-sync.js';
 import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
 
 /** Each state change and its event must commit atomically. Terminal state wins races. */
@@ -27,7 +28,8 @@ export interface ExecutionRepository {
   setTaskSession(taskId: string, sessionId: string): Promise<void>;
   findContinuation(taskId: string, input: ContinueTask): Promise<Readonly<{ task: Task; created: false }> | null>;
   continueTask(taskId: string, input: ContinueTask): Promise<Readonly<{ task: Task; created: boolean }>>;
-  queueTask(taskId: string, projectId: string): Promise<Task>;
+  queueTask(taskId: string, projectId: string, base?: StartBase): Promise<Task>;
+  getTaskGitBase?(taskId: string): Promise<StartBase | undefined>;
   claimNextTask(): Promise<Task | null>;
   appendTaskOutput(taskId: string, channel: OutputChannel, text: string): Promise<void>;
   finishTask(taskId: string, result: ExecutionResult): Promise<Task>;
@@ -41,7 +43,8 @@ export interface ProjectRegistry {
 /** Creates a task-owned checkout and returns its server-local working directory. */
 export interface ProjectWorkspace {
   repositoryIdentity?(project: RegisteredProject, signal?: AbortSignal): Promise<string | null>;
-  prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation?: TaskIsolation): Promise<string>;
+  prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation?: TaskIsolation, base?: StartBase): Promise<string>;
+  awaitGitLease?(project: RegisteredProject, workspaceTaskId: string, isolation: TaskIsolation, signal?: AbortSignal): Promise<void>;
   diff(taskId: string, project?: RegisteredProject): Promise<WorkspaceDiff>;
   identity?(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<Readonly<{ dev: number; ino: number }>>;
   files(project: RegisteredProject, taskId: string): Promise<WorkspaceFiles>;

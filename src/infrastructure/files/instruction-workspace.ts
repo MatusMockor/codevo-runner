@@ -132,6 +132,30 @@ function parseManifest(value: unknown, root: string): Manifest {
 export class FileInstructionWorkspace {
   constructor(private readonly dataDir: string) {}
 
+  async managedPaths(workspaceTaskId: string | null, cwd: string, isolation: 'in-place' | 'worktree'): Promise<readonly string[]> {
+    if (process.platform !== 'linux') return [];
+    if (isolation === 'worktree' && !isId(workspaceTaskId)) throw new RunnerError('invalid_input');
+    const root = await realpath(cwd);
+    const rootIdentity = await lstat(root);
+    const manifestPath = isolation === 'in-place'
+      ? `checkout-${digest(JSON.stringify([root, String(rootIdentity.dev), String(rootIdentity.ino)]))}.json`
+      : `${workspaceTaskId}.json`;
+    let storage: FileHandle | undefined;
+    let manifests: FileHandle | undefined;
+    try {
+      storage = await openDirectory(await realpath(this.dataDir));
+      try { manifests = await parentHandle(storage, 'instruction-manifests/entry', false); }
+      catch (error) { if (missing(error)) return []; throw error; }
+      const bytes = await readRegular(manifests, manifestPath, 256 * 1024);
+      if (bytes === undefined) return [];
+      const manifest = parseManifest(JSON.parse(bytes.toString('utf8')), root);
+      return [...new Set([...Object.keys(manifest.files), ...Object.keys(manifest.pending ?? {})])];
+    } finally {
+      try { await manifests?.close(); }
+      finally { await storage?.close(); }
+    }
+  }
+
   async apply(workspaceTaskId: string, cwd: string, snapshot: InstructionSnapshot, signal: AbortSignal, isolation: 'in-place' | 'worktree' = 'worktree', expectedIdentity?: Readonly<{ dev: number; ino: number }>): Promise<void> {
     signal.throwIfAborted();
     if (isolation !== 'in-place' && isolation !== 'worktree') throw new RunnerError('invalid_input');

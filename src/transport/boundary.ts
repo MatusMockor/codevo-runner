@@ -23,7 +23,22 @@ const repositoryBodyRoute = /^\/v1\/repositories\/(lookup|search)$/;
 const directoryRoute = '/v1/project-directories';
 const turnChangesRoute = new RegExp(`^/v1/tasks/${uuid}/turn-changes$`);
 const turnFileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/turn-file-diff$`);
+const projectSegment = '[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}';
+const projectGitReadRoute = new RegExp(`^/v1/projects/${projectSegment}/git/(branches|status)$`);
+const projectGitBodyRoute = new RegExp(`^/v1/projects/${projectSegment}/git/(fetch|update)$`);
+const taskGitReadRoute = new RegExp(`^/v1/tasks/${uuid}/git/status$`);
+const taskGitBodyRoute = new RegExp(`^/v1/tasks/${uuid}/git/(commit|push)$`);
+const gitOperationRoute = new RegExp(`^/v1/git-operations/${uuid}$`);
+const portRoute = new RegExp(`^/v1/(?:tasks/${uuid}|projects/${projectSegment})/ports$`);
+const ownedRoutes = [turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+  projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
+  { pattern: projectGitReadRoute, methods: ['GET'] },
+  { pattern: projectGitBodyRoute, methods: ['POST'] },
+  { pattern: taskGitReadRoute, methods: ['GET'] },
+  { pattern: taskGitBodyRoute, methods: ['POST'] },
+  { pattern: gitOperationRoute, methods: ['GET'] },
+  { pattern: portRoute, methods: ['GET'] },
   { pattern: turnChangesRoute, methods: ['GET'] },
   { pattern: turnFileDiffRoute, methods: ['POST'] },
   { pattern: /^\/v1\/repositories\/hosts$/, methods: ['GET'] },
@@ -86,7 +101,7 @@ export class RequestBoundary implements NestMiddleware {
       return this.discovery(request, response, next);
     if (!this.authorized(request.headers.authorization)) return send(response, 401, { error: 'unauthorized' });
     if (!this.matchesIdentity(request, response)) return;
-    const managementRoute = turnChangesRoute.test(request.url) || turnFileDiffRoute.test(request.url) || managementMetadataRoute.test(request.url) || managementOrderRoute.test(request.url) || request.url.startsWith('/v1/thread-metadata') || request.url.startsWith('/v1/repositories/') || request.url === directoryRoute;
+    const managementRoute = ownedRoutes.some(route => route.test(request.url)) || request.url.startsWith('/v1/thread-metadata') || request.url.startsWith('/v1/repositories/') || request.url === directoryRoute;
     if (managementRoute && request.headers['x-codevo-runner-id'] !== this.descriptor.runnerId)
       return send(response, 409, { error: 'runner_identity_mismatch' });
     const matching = routes.filter(candidate => candidate.pattern.test(request.url));
@@ -96,7 +111,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'PATCH' && managementMetadataRoute.test(request.url)) || (request.method === 'POST' &&
-      (turnFileDiffRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
+      (turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

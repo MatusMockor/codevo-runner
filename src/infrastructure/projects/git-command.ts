@@ -1,48 +1,92 @@
 import { spawn } from 'node:child_process';
 const OUTPUT_LIMIT = 256 * 1024;
+const STOP_GRACE_MS = 2_000;
 
-export function git(cwd: string, args: readonly string[], signal?: AbortSignal, identity?: Readonly<{ dev: number; ino: number }>): Promise<{text: string; truncated: boolean; bytes: Buffer}> {
+export type GitIdentity = Readonly<{ dev: number; ino: number }>;
+export type GitProcessRequest = Readonly<{
+  cwd: string;
+  args: readonly string[];
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  identity?: GitIdentity;
+  signal?: AbortSignal;
+  stderrBytes?: number;
+  graceMs?: number;
+}>;
+export type GitProcessResult = Readonly<{
+  code: number | null; stdout: Buffer; truncated: boolean; stderr: string; timedOut: boolean; aborted: boolean;
+}>;
+
+export function localGitEnvironment(): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  return Object.assign(env, { LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+}
+
+export function git(cwd: string, args: readonly string[], signal?: AbortSignal, identity?: GitIdentity): Promise<{text: string; truncated: boolean; bytes: Buffer}> {
   signal?.throwIfAborted();
+  const gitArgs = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'diff.external=', ...args];
+  return runGitProcess({ cwd, args: gitArgs, env: localGitEnvironment(), timeoutMs: 30_000, ...(identity ? { identity } : {}), ...(signal ? { signal } : {}) })
+    .then(result => {
+      if (result.timedOut || result.aborted) throw signal?.reason ?? new Error('Git operation timed out');
+      if (result.code !== 0) throw new Error(`Git operation failed (${result.code})`);
+      return { bytes: result.stdout, text: new TextDecoder().decode(result.stdout, { stream: result.truncated }), truncated: result.truncated };
+    });
+}
+
+export function runGitProcess(request: GitProcessRequest): Promise<GitProcessResult> {
+  const { cwd, args, env, identity, signal } = request;
   return new Promise((resolveResult, reject) => {
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-    Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
-    const gitArgs = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'diff.external=', ...args];
     // Holding the kernel cwd prevents A→B→A pathname replacement from redirecting Git.
     const executable = identity ? 'python3' : 'git';
-    const launchArgs = identity ? ['-I', '-S', '-c', PINNED_GIT] : gitArgs;
+    const launchArgs = identity ? ['-I', '-S', '-c', PINNED_GIT] : [...args];
     const child = spawn(executable, launchArgs, { cwd: identity ? '/' : cwd, env, shell: false,
       detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin.on('error', () => { /* Early process rejection closes stdin. */ });
-    child.stdin.end(identity ? JSON.stringify({ cwd, identity, args: gitArgs }) : undefined);
+    child.stdin.end(identity ? JSON.stringify({ cwd, identity, args }) : undefined);
 
     let size = 0;
     let truncated = false;
     const chunks: Buffer[] = [];
-    let stopped = false;
-    const killGroup = () => {
-      if (process.platform === 'win32' || !child.pid) { child.kill('SIGKILL'); return; }
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Process already exited. */ }
+    const stderrLimit = request.stderrBytes ?? 0;
+    const errors: Buffer[] = [];
+    let errorSize = 0;
+    let timedOut = false;
+    let aborted = false;
+    const signalGroup = (name: NodeJS.Signals) => {
+      if (process.platform === 'win32' || !child.pid) { child.kill(name); return; }
+      try { process.kill(-child.pid, name); } catch { /* Process already exited. */ }
     };
-    const stop = () => { stopped = true; killGroup(); };
+    const killGroup = () => signalGroup('SIGKILL');
+    let escalation: NodeJS.Timeout | undefined;
+    // Git removes its lock files on SIGTERM; SIGKILL follows only if it does not exit in time.
+    const stop = () => {
+      if (escalation) return;
+      signalGroup('SIGTERM');
+      escalation = setTimeout(killGroup, request.graceMs ?? STOP_GRACE_MS);
+    };
+    const timeout = () => { timedOut = true; stop(); };
+    const abort = () => { aborted = true; stop(); };
     // Exit precedes close: descendants may still hold stdout/stderr open after Git exits.
     child.once('exit', killGroup);
-    const timer = setTimeout(stop, 30_000);
-    signal?.addEventListener('abort', stop, { once: true });
-    if (signal?.aborted) stop();
+    const timer = setTimeout(timeout, request.timeoutMs);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     child.stdout.on('data', (chunk: Buffer) => {
       const keep = Math.min(chunk.length, OUTPUT_LIMIT - size);
       if (keep) chunks.push(chunk.subarray(0, keep));
       size += keep;
       if (keep < chunk.length) truncated = true;
     });
-    child.stderr.resume();
-    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', stop); };
+    child.stderr.on('data', (chunk: Buffer) => {
+      const keep = Math.min(chunk.length, stderrLimit - errorSize);
+      if (keep > 0) { errors.push(chunk.subarray(0, keep)); errorSize += keep; }
+    });
+    const cleanup = () => { clearTimeout(timer); clearTimeout(escalation); signal?.removeEventListener('abort', abort); };
     child.once('error', error => { killGroup(); cleanup(); reject(error); });
     child.once('close', code => {
       cleanup();
-      if (stopped || signal?.aborted) return reject(signal?.reason ?? new Error('Git operation timed out'));
-      if (code !== 0) return reject(new Error(`Git operation failed (${code})`));
-      resolveResult({ bytes: Buffer.concat(chunks), text: new TextDecoder().decode(Buffer.concat(chunks), { stream: truncated }), truncated });
+      resolveResult({ code, stdout: Buffer.concat(chunks), truncated, stderr: Buffer.concat(errors).toString('utf8'),
+        timedOut, aborted: aborted || Boolean(signal?.aborted) });
     });
   });
 }
@@ -51,7 +95,7 @@ export function git(cwd: string, args: readonly string[], signal?: AbortSignal, 
 const PINNED_GIT = String.raw`
 import json, os, sys
 try:
-    request = json.load(sys.stdin)
+    request = json.load(sys.stdin.buffer)
     root = os.open(request['cwd'], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     info = os.fstat(root)
     if info.st_dev != request['identity']['dev'] or info.st_ino != request['identity']['ino']:

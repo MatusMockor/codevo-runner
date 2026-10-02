@@ -2,8 +2,12 @@ import { constants } from 'node:fs';
 import { mkdir, realpath, lstat, writeFile, open } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { ProjectRegistry, ProjectWorkspace } from '../../application/execution-ports.js';
+import type { GitWorkdir, GitWorkspaceLeases, GitWorkspaces, OriginBaseResolver, ThreadWorkspace } from '../../application/git-sync-ports.js';
+import { gitLeaseKey } from '../../application/git-coordination.js';
 import { isId, RunnerError } from '../../domain/contracts.js';
 import type { RegisteredProject } from '../../domain/execution.js';
+import { threadBranchName, type StartBase } from '../../domain/git-sync.js';
+import { loadWorkspaceGit, saveWorkspaceGit } from './workspace-git.js';
 
 import { ProjectRepositoryIdentity } from './repository-identity.js';
 import { git } from './git-command.js';
@@ -30,25 +34,31 @@ export class ConfiguredProjectRegistry implements ProjectRegistry {
   }
 }
 
+export type WorkspaceGitSupport = Readonly<{ bases: OriginBaseResolver; leases: GitWorkspaceLeases }>;
+
 /** A worktree isolates normal edits, not malicious processes with the same Unix identity. */
-export class GitProjectWorkspace implements ProjectWorkspace {
+export class GitProjectWorkspace implements ProjectWorkspace, GitWorkspaces {
   private readonly root: string;
   private readonly baselines: string;
   private readonly metadata: string;
+  private readonly gitRecords: string;
   private reviews = 0;
   private readonly repositoryIdentities = new ProjectRepositoryIdentity();
   repositoryIdentity(project: RegisteredProject, signal?: AbortSignal) {
     return this.repositoryIdentities.read(project, signal);
   }
-  constructor(dataDir: string) {
+  constructor(dataDir: string, private readonly git?: WorkspaceGitSupport) {
     this.root = resolve(dataDir, 'workspaces');
     this.baselines = resolve(dataDir, 'workspace-baselines');
     this.metadata = resolve(dataDir, 'workspace-metadata');
+    this.gitRecords = resolve(dataDir, 'workspace-git');
   }
 
-  async prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation: 'in-place' | 'worktree' = 'worktree'): Promise<string> {
+  async prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation: 'in-place' | 'worktree' = 'worktree', startBase?: StartBase): Promise<string> {
     const cwd = this.taskPath(taskId);
     if (isolation !== 'in-place' && isolation !== 'worktree') throw new RunnerError('invalid_input');
+    const originBranch = startBase?.kind === 'origin-branch' ? startBase.branch : undefined;
+    if (originBranch !== undefined && (isolation !== 'worktree' || !this.git)) throw new RunnerError('invalid_input');
     signal?.throwIfAborted();
     const metadata = await captureWorkspace(project, isolation, signal);
     const source = metadata.source;
@@ -62,7 +72,9 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }
-    const base = (await git(source, ['rev-parse', '--verify', 'HEAD'], signal, metadata.sourceIdentity)).text.trim();
+    const origin = originBranch === undefined ? undefined
+      : await this.git!.bases.resolveOriginBase(project, { cwd: source, identity: metadata.sourceIdentity }, originBranch, signal);
+    const base = origin?.sha ?? (await git(source, ['rev-parse', '--verify', 'HEAD'], signal, metadata.sourceIdentity)).text.trim();
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new Error('Invalid Git revision');
     await mkdir(this.baselines, { recursive: true, mode: 0o700 });
     if ((await lstat(this.baselines)).isSymbolicLink()) throw new Error('Baseline root must not contain symlinks');
@@ -70,7 +82,11 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     await validateWorkspace(metadata, project, signal);
     await saveMetadata(this.metadata, taskId, metadata);
     // In-place deliberately preserves every tracked and untracked source edit.
-    if (isolation === 'worktree') await git(source, ['worktree', 'add', '--detach', '--', cwd, base], signal, metadata.sourceIdentity);
+    if (isolation === 'worktree' && origin && originBranch !== undefined) {
+      const threadBranch = await this.freeThreadBranch(source, taskId, metadata.sourceIdentity, signal);
+      await git(source, ['worktree', 'add', '-b', threadBranch, '--', cwd, base], signal, metadata.sourceIdentity);
+      await saveWorkspaceGit(this.gitRecords, taskId, { version: 1, baseBranch: originBranch, baseSha: base, threadBranch, fetchedAt: origin.fetchedAt });
+    } else if (isolation === 'worktree') await git(source, ['worktree', 'add', '--detach', '--', cwd, base], signal, metadata.sourceIdentity);
     await validateWorkspace(metadata, project, signal);
     signal?.throwIfAborted();
     return isolation === 'in-place' ? source : cwd;
@@ -102,6 +118,39 @@ export class GitProjectWorkspace implements ProjectWorkspace {
     if (metadata) await validateWorkspace(metadata, project, signal);
     signal?.throwIfAborted();
     return cwd;
+  }
+
+  async awaitGitLease(project: RegisteredProject, workspaceTaskId: string, isolation: 'in-place' | 'worktree', signal?: AbortSignal): Promise<void> {
+    if (!this.git) return;
+    this.taskPath(workspaceTaskId);
+    if (isolation !== 'in-place' && isolation !== 'worktree') throw new RunnerError('invalid_input');
+    await this.git.leases.awaitWorkspace(gitLeaseKey(isolation, project.id, workspaceTaskId), signal);
+  }
+
+  async checkout(project: RegisteredProject, signal?: AbortSignal): Promise<GitWorkdir> {
+    const metadata = await captureWorkspace(project, 'in-place', signal);
+    return { cwd: metadata.source, identity: metadata.sourceIdentity };
+  }
+
+  async thread(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<ThreadWorkspace> {
+    this.taskPath(workspaceTaskId);
+    const metadata = await loadMetadata(this.metadata, workspaceTaskId);
+    const cwd = await this.resume(project, workspaceTaskId, signal);
+    const info = await lstat(cwd);
+    const identity = metadata?.mode === 'in-place' ? metadata.sourceIdentity : { dev: info.dev, ino: info.ino };
+    if (!info.isDirectory() || info.isSymbolicLink() || info.dev !== identity.dev || info.ino !== identity.ino) throw new RunnerError('conflict');
+    const mode = metadata?.mode ?? 'worktree';
+    const record = mode === 'worktree' ? await loadWorkspaceGit(this.gitRecords, workspaceTaskId) : null;
+    return { mode, workdir: { cwd, identity }, record };
+  }
+
+  private async freeThreadBranch(source: string, taskId: string, identity: Readonly<{ dev: number; ino: number }>, signal?: AbortSignal): Promise<string> {
+    for (const name of [threadBranchName(taskId), threadBranchName(taskId, true)]) {
+      const taken = await git(source, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], signal, identity).then(() => true, () => false);
+      signal?.throwIfAborted();
+      if (!taken) return name;
+    }
+    throw new RunnerError('conflict');
   }
 
   async identity(project: RegisteredProject, taskId: string, signal?: AbortSignal): Promise<{ dev: number; ino: number }> {

@@ -60,6 +60,9 @@ try {
         case 'putAttachment': value = db.putAttachment(...request.args); break;
         case 'getAttachment': value = db.getAttachment(...request.args); break;
         case 'queueTask': value = db.queueTask(...request.args); break;
+        case 'getTaskGitBase': value = db.getTaskGitBase(...request.args); break;
+        case 'conversationActive': value = db.conversationActive(...request.args); break;
+        case 'inPlaceActive': value = db.inPlaceActive(...request.args); break;
         case 'claimNextTask': value = db.claimNextTask(); break;
         case 'appendTaskOutput': value = db.appendTaskOutput(...request.args); break;
         case 'finishTask': value = db.finishTask(...request.args); break;

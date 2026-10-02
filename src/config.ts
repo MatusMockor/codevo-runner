@@ -5,6 +5,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { RegisteredProject } from './domain/execution.js';
+import { validGitAuthorPart } from './domain/git-sync.js';
 
 export function readConfig(env: NodeJS.ProcessEnv) {
   const host = env.CODEVO_HOST ?? '127.0.0.1';
@@ -24,7 +25,13 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     throw new Error('CODEVO_EXECUTION_ISOLATION must be provider or container');
   if (env.CODEVO_PROJECTS_ROOT !== undefined && (!isAbsolute(env.CODEVO_PROJECTS_ROOT) || /[\x00-\x1f\x7f]/.test(env.CODEVO_PROJECTS_ROOT)))
     throw new Error('CODEVO_PROJECTS_ROOT must be an absolute path');
+  const authorName = env.CODEVO_GIT_AUTHOR_NAME;
+  const authorEmail = env.CODEVO_GIT_AUTHOR_EMAIL;
+  if ((authorName === undefined) !== (authorEmail === undefined) ||
+      (authorName !== undefined && (!validGitAuthorPart(authorName) || !validGitAuthorPart(authorEmail))))
+    throw new Error('CODEVO_GIT_AUTHOR_NAME and CODEVO_GIT_AUTHOR_EMAIL must both be set to 1–256 printable bytes');
   return Object.freeze({ host, port: Number(portText), name,
+    gitAuthor: authorName === undefined || authorEmail === undefined ? undefined : Object.freeze({ name: authorName, email: authorEmail }),
     executionEnabled: executionText === 'true',
     executionTimeoutMs: parseExecutionTimeoutMs(env.CODEVO_EXECUTION_TIMEOUT_MS),
     executionConcurrency: parseExecutionConcurrency(env.CODEVO_EXECUTION_CONCURRENCY),

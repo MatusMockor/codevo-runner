@@ -1,11 +1,14 @@
 import { RunnerError } from './contracts.js';
 import type { InstructionFile, InstructionSnapshot } from './instructions.js';
 
+export const GLOBAL_RULES_ROOT = '.claude/rules/codevo-global';
+export const GLOBAL_INSTRUCTIONS_ROOT = '.codevo-instructions/global';
+
 export function materializedInstructionPath(file: InstructionFile): string {
   if (file.scope === 'project') return file.path;
   return file.path.startsWith('rules/')
-    ? `.claude/rules/codevo-global/${file.path.slice(6)}`
-    : `.codevo-instructions/global/${file.path}`;
+    ? `${GLOBAL_RULES_ROOT}/${file.path.slice(6)}`
+    : `${GLOBAL_INSTRUCTIONS_ROOT}/${file.path}`;
 }
 
 /** Closed snapshot imports may never fall back to unrelated files on the server. */

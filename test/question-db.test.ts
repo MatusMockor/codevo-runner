@@ -75,7 +75,7 @@ test('schema seven migration preserves tasks and per-task question quota stays b
     try { assert.equal((await reopened.listQuestions(f.task.id)).length, 32); assert.equal((await reopened.getTask(f.task.id)).status, 'running'); }
     finally { await reopened.close(); }
     const check = new DatabaseSync(join(f.directory, 'runner.sqlite'));
-    assert.equal(check.prepare('PRAGMA user_version').get()!['user_version'], 8); check.close();
+    assert.equal(check.prepare('PRAGMA user_version').get()!['user_version'], 9); check.close();
   } finally { await f.cleanup(); }
 });
 

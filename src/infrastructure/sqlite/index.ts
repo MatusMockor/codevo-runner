@@ -15,13 +15,15 @@ import type { CloneRepository } from '../../application/clone-ports.js';
 import type { CloneInput, CloneJob, StoredClone } from '../../domain/project-clone.js';
 import type { RegisteredProject } from '../../domain/execution.js';
 import type { ExecutionRepository } from '../../application/execution-ports.js';
+import type { GitActivity } from '../../application/git-sync-ports.js';
+import type { StartBase } from '../../domain/git-sync.js';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 import { Worker } from 'node:worker_threads';
 import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
+class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -100,7 +102,10 @@ class SqliteRepository implements ThreadMetadataRepository, RunnerRepository, Ex
   listEvents(taskId: string, after: number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
   putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
-  queueTask(id: string, projectId: string): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId] }); }
+  queueTask(id: string, projectId: string, base?: StartBase): Promise<Task> { return this.call({ method: 'queueTask', args: base === undefined ? [id, projectId] : [id, projectId, base] }); }
+  getTaskGitBase(id: string): Promise<StartBase | undefined> { return this.call({ method: 'getTaskGitBase', args: [id] }); }
+  conversationActive(workspaceTaskId: string): Promise<boolean> { return this.call({ method: 'conversationActive', args: [workspaceTaskId] }); }
+  inPlaceActive(projectId: string): Promise<boolean> { return this.call({ method: 'inPlaceActive', args: [projectId] }); }
   claimNextTask(): Promise<Task | null> { return this.call({ method: 'claimNextTask', args: [] }); }
   appendTaskOutput(id: string, channel: OutputChannel, text: string): Promise<void> { return this.call({ method: 'appendTaskOutput', args: [id, channel, text] }); }
   finishTask(id: string, result: ExecutionResult): Promise<Task> { return this.call({ method: 'finishTask', args: [id, result] }); }
@@ -120,7 +125,7 @@ class SqliteRepository implements ThreadMetadataRepository, RunnerRepository, Ex
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -146,6 +151,7 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
-    case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory': return false;
+    case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory':
+    case 'getTaskGitBase': case 'conversationActive': case 'inPlaceActive': return false;
   }
 }

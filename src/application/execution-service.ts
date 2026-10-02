@@ -8,6 +8,7 @@ import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
 import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
+import { isGitErrorCode, parseStartInput } from '../domain/git-sync.js';
 import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 
@@ -82,12 +83,13 @@ export class ExecutionService implements ExecutionApplication {
   async start(taskId: string, input: unknown): Promise<Task> {
     this.assertAvailable();
     validateId(taskId);
-    const projectId = parseProjectId(input);
+    const { projectId, base } = parseStartInput(input);
     await this.registry.get(projectId);
     const task = await this.tasks.getTask(taskId);
+    if (base?.kind === 'origin-branch' && task.isolation === 'in-place') throw new RunnerError('invalid_input');
     this.executorFor(task);
     this.assertAvailable();
-    const queued = await this.executions.queueTask(taskId, projectId);
+    const queued = await this.executions.queueTask(taskId, projectId, base);
     this.wake();
     return queued;
   }
@@ -253,6 +255,7 @@ export class ExecutionService implements ExecutionApplication {
     if (this.closing || this.workerFailure) abort.abort();
     let inputs: StagedExecutionInputs | undefined;
     let syncingInstructions = false;
+    let awaitingGitLease = false;
     let turnContext: { cwd: string; identity: Readonly<{ dev: number; ino: number }> } | undefined;
     let snapshotFinished = false;
     const finishSnapshot = async () => {
@@ -271,9 +274,14 @@ export class ExecutionService implements ExecutionApplication {
       const project = await this.registry.get(task.projectId);
       const session = await this.executions.getTaskSession(task.id);
       if (task.parentTaskId && !session.sessionId) throw new RunnerError('conflict');
+      const startBase = task.parentTaskId ? undefined : await this.executions.getTaskGitBase?.(task.id);
+      awaitingGitLease = true;
+      await this.workspaces.awaitGitLease?.(project, session.workspaceTaskId, task.isolation ?? 'worktree', abort.signal);
+      awaitingGitLease = false;
+      abort.signal.throwIfAborted();
       const cwd = task.parentTaskId
         ? await this.workspaces.resume(project, session.workspaceTaskId, abort.signal)
-        : await this.workspaces.prepare(project, task.id, abort.signal, task.isolation);
+        : await this.workspaces.prepare(project, task.id, abort.signal, task.isolation, startBase);
       abort.signal.throwIfAborted();
       const cwdIdentity = await this.workspaces.identity?.(project, session.workspaceTaskId, abort.signal);
       if (task.isolation === 'in-place' && !cwdIdentity) throw new RunnerError('conflict');
@@ -327,10 +335,12 @@ export class ExecutionService implements ExecutionApplication {
         if (!complete) await this.executions.appendTaskOutput(task.id, 'stderr', '[Codevo] Some output previews could not be saved.\n');
       }
       if (!this.closing) await this.executions.finishTask(task.id, result);
-    } catch {
+    } catch (error) {
       await finishSnapshot();
       // Do not persist raw exception strings: they may contain credentials or host paths.
-      if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: syncingInstructions ? 'instruction_sync_failed' : 'execution_failed' });
+      const failure = error instanceof RunnerError && isGitErrorCode(error.code) && (error.code.startsWith('git_') || awaitingGitLease) ? error.code
+        : syncingInstructions ? 'instruction_sync_failed' : 'execution_failed';
+      if (!this.closing) await this.executions.finishTask(task.id, { exitCode: null, error: failure });
     } finally {
       abort.abort();
       try {
@@ -340,12 +350,4 @@ export class ExecutionService implements ExecutionApplication {
       finally { await inputs?.cleanup(); }
     }
   }
-}
-
-function parseProjectId(input: unknown): string {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new RunnerError('invalid_input');
-  const record = input as Record<string, unknown>;
-  if (Object.keys(record).length !== 1 || typeof record.projectId !== 'string' ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.projectId)) throw new RunnerError('invalid_input');
-  return record.projectId;
 }

@@ -1,4 +1,6 @@
 import { TurnChangesController } from './transport/turn-changes-controller.js';
+import { GitSyncController } from './transport/git-sync-controller.js';
+import { PortPreviewController } from './transport/port-preview-controller.js';
 import { RepositoryLookupController } from './transport/repository-lookup-controller.js';
 import { ThreadMetadataController } from './transport/thread-metadata-controller.js';
 import { ProjectDirectoriesController } from './transport/project-directories-controller.js';
@@ -29,6 +31,8 @@ export type RunnerDescriptor = Readonly<{
   name: string;
   capabilities: Readonly<{
     turnChanges?: boolean;
+    gitSync?: boolean;
+    portPreview?: boolean;
     projectManagement?: boolean;
     threadManagement?: boolean;
     interactiveQuestions?: boolean;
@@ -67,10 +71,12 @@ class RunnerController {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
     const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
-    const { turnChanges, projectManagement, threadManagement, ...legacy } = this.descriptor.capabilities;
+    const { turnChanges, gitSync, portPreview, projectManagement, threadManagement, ...legacy } = this.descriptor.capabilities;
     send(response, 200, { ...this.descriptor, capabilities: {
       ...legacy,
       ...(supported.has('turnChanges') && turnChanges !== undefined ? { turnChanges } : {}),
+      ...(supported.has('gitSync') && gitSync !== undefined ? { gitSync } : {}),
+      ...(supported.has('portPreview') && portPreview !== undefined ? { portPreview } : {}),
       ...(supported.has('projectManagement') && projectManagement !== undefined ? { projectManagement } : {}),
       ...(supported.has('threadManagement') && threadManagement !== undefined ? { threadManagement } : {}),
     } });
@@ -105,12 +111,12 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
-  } : { ...descriptor, capabilities: { ...descriptor.capabilities, turnChanges: false, projectManagement: false, threadManagement: false } };
+    capabilities: { turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [TurnChangesController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
+    controllers: [RunnerController, ...(services ? [TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),

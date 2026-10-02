@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { LIMITS, RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 
 import { EXECUTION_LIMITS, type ExecutionResult, type OutputChannel } from '../../domain/execution.js';
+import { parseStartBase, readStoredStartBase, serializeStartBase, type StartBase } from '../../domain/git-sync.js';
 
 
 
@@ -56,7 +57,7 @@ export class RepositoryDatabase {
   private migrate(): void {
     this.transaction(() => {
       const version = this.db.prepare('PRAGMA user_version').get()!['user_version'];
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8) throw new RunnerError('storage_unavailable');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9) throw new RunnerError('storage_unavailable');
       this.db.exec(`CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
@@ -68,9 +69,10 @@ export class RepositoryDatabase {
       this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES ('runnerId',?)").run(this.runnerId);
       if (version === 0 || version === 1) this.db.exec('ALTER TABLE events ADD COLUMN data TEXT');
       this.db.exec(`CREATE TABLE IF NOT EXISTS task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0);
-        PRAGMA user_version=8;`);
+        PRAGMA user_version=9;`);
       if (!this.db.prepare('PRAGMA table_info(task_execution)').all().some(column => column['name'] === 'output_truncated_before_sequence')) this.db.exec(`ALTER TABLE task_execution ADD COLUMN output_truncated_before_sequence INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE task_execution ADD COLUMN output_starts_at_line_boundary INTEGER NOT NULL DEFAULT 1;`);
+      if (!this.db.prepare('PRAGMA table_info(tasks)').all().some(column => column['name'] === 'git_base')) this.db.exec('ALTER TABLE tasks ADD COLUMN git_base TEXT');
       this.db.exec(CLONE_SCHEMA);
       this.db.exec(RESUME_SCHEMA);
       this.db.exec(PENDING_SCHEMA);
@@ -153,15 +155,34 @@ export class RepositoryDatabase {
       return this.save({ ...task, status: 'cancelled' }, 'task.cancelled');
     });
   }
-  queueTask(id: string, projectId: string): Task {
+  queueTask(id: string, projectId: string, base?: StartBase): Task {
+    const gitBase = serializeStartBase(base === undefined ? undefined : parseStartBase(base));
     return this.transaction(() => {
       const task = this.getTask(id);
-      if (task.projectId === projectId && task.status !== 'draft') return task;
+      if (task.projectId === projectId && task.status !== 'draft') {
+        const stored = this.db.prepare('SELECT git_base FROM tasks WHERE id=?').get(id)?.['git_base'] ?? null;
+        if (stored !== gitBase) throw new RunnerError('conflict');
+        return task;
+      }
       if (task.status !== 'draft') throw new RunnerError('conflict');
       if (!projectId || projectId.length > 128) throw new RunnerError('invalid_input');
       this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(id);
+      this.db.prepare('UPDATE tasks SET git_base=? WHERE id=?').run(gitBase, id);
       return this.save({ ...task, projectId, status: 'queued' }, 'task.queued');
     });
+  }
+  getTaskGitBase(id: string): StartBase | undefined {
+    const row = this.db.prepare('SELECT git_base FROM tasks WHERE id=?').get(id);
+    if (!row) throw new RunnerError('not_found');
+    return readStoredStartBase(row['git_base']);
+  }
+  conversationActive(workspaceTaskId: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM tasks WHERE json_extract(payload,'$.status') IN ('queued','running')
+      AND (id=? OR json_extract(payload,'$.conversationId')=?) LIMIT 1`).get(workspaceTaskId, workspaceTaskId));
+  }
+  inPlaceActive(projectId: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM tasks WHERE json_extract(payload,'$.status') IN ('queued','running')
+      AND json_extract(payload,'$.projectId')=? AND json_extract(payload,'$.isolation')='in-place' LIMIT 1`).get(projectId));
   }
   claimNextTask(): Task | null {
     return this.transaction(() => {

@@ -85,6 +85,10 @@ following example uses the `codex` account and a checkout at
    PATH=/home/codex/.local/bin:/home/codex/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
    ```
 
+   Optionally set `CODEVO_GIT_AUTHOR_NAME` and `CODEVO_GIT_AUTHOR_EMAIL` (both, at
+   most 256 bytes each) as the identity for commits made from the editor; without
+   them the repository-local `user.name`/`user.email` is used.
+
    Include the actual provider CLI and language-runtime directories in `PATH`.
    Keep `provider` isolation on a direct host; `container` mode is reserved for
    the Docker deployment. Restrict the environment file with
@@ -128,6 +132,11 @@ but active tasks become `interrupted`. Stop the service before updating its file
 or taking a consistent backup, then rebuild and restart it. Back up the data
 directory together with registered repositories and configuration, protecting
 credentials separately. An SSH disconnect alone does not interrupt tasks.
+
+Upgrading to the Git sync release migrates the SQLite schema to version 9. Stop the
+service with no active tasks and back up `CODEVO_DATA_DIR` before upgrading
+(`git pull && npm ci && npm run build`, then start). An older runner refuses the
+migrated database, so a downgrade requires restoring that backup.
 
 ## Clone repositories from the editor
 
