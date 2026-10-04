@@ -51,10 +51,62 @@ test('PNG metadata and segment counts are bounded before native decode', async (
   const bytes = await png();
   assert.throws(() => validateImageEnvelope(insert(bytes, chunk('tEXt', Buffer.alloc(256 * 1024 + 1))), 'image/png'), code('too_large'));
   assert.throws(() => validateImageEnvelope(insert(bytes, ...Array.from({ length: 1024 }, () => chunk('tEXt', Buffer.alloc(0)))), 'image/png'), code('too_large'));
-  assert.throws(() => validateImageEnvelope(insert(bytes, chunk('vpAg', Buffer.from('unknown'))), 'image/png'), code('unsupported_media'));
   const broken = chunk('tEXt', Buffer.alloc(0));
   broken.writeUInt32BE(0xffffffff);
   assert.throws(() => validateImageEnvelope(insert(bytes, broken), 'image/png'), code('unsupported_media'));
+});
+
+test('macOS screenshot shaped PNG passes preflight and still decodes', async () => {
+  const bytes = await png();
+  const screenshot = insert(
+    bytes,
+    chunk('iCCP', Buffer.concat([Buffer.from('name\0\0'), deflateSync(Buffer.from('short text'))])),
+    chunk('cICP', Buffer.from([1, 13, 0, 1])),
+    chunk('eXIf', Buffer.from('MM\0*\0\0\0\x08\0\0\0\0\0\0', 'latin1')),
+    chunk('pHYs', Buffer.alloc(9, 1)),
+    chunk('iTXt', Buffer.from('name\0\0\0en\0title\0text')),
+    chunk('iDOT', Buffer.alloc(28)),
+  );
+  const before = Buffer.from(screenshot);
+  validateImageEnvelope(screenshot, 'image/png');
+  assert.deepEqual(screenshot, before);
+  const decoder = sharp(screenshot, { failOn: 'warning' });
+  const metadata = await decoder.metadata();
+  assert.equal(metadata.format, 'png');
+  assert.equal(metadata.width, 2);
+  assert.equal(metadata.height, 3);
+  await decoder.stats();
+});
+
+test('unknown ancillary PNG chunks are accepted within the metadata and segment bounds', async () => {
+  const bytes = await png();
+  const unknown = (kibibytes: number) => chunk('vpAg', Buffer.alloc(kibibytes * 1024));
+  for (const type of ['vpAg', 'caBX', 'mDCV', 'cLLI', 'orNT']) validateImageEnvelope(insert(bytes, chunk(type, Buffer.from('unknown'))), 'image/png');
+  validateImageEnvelope(insert(bytes, unknown(100), unknown(100)), 'image/png');
+  assert.throws(() => validateImageEnvelope(insert(bytes, chunk('vpAg', Buffer.alloc(256 * 1024 + 1))), 'image/png'), code('too_large'));
+  assert.throws(() => validateImageEnvelope(insert(bytes, unknown(100), unknown(100), unknown(100)), 'image/png'), code('too_large'));
+  assert.throws(() => validateImageEnvelope(insert(bytes, ...Array.from({ length: 1024 }, () => chunk('vpAg', Buffer.alloc(0)))), 'image/png'), code('too_large'));
+});
+
+test('unknown critical PNG chunks and malformed chunk types fail closed', async () => {
+  const bytes = await png();
+  for (const type of ['VpAg', 'XxXx', 'IDOT', 'vpag', 'iD0T', 'v-Ag']) {
+    assert.throws(() => validateImageEnvelope(insert(bytes, chunk(type, Buffer.from('unknown'))), 'image/png'), code('unsupported_media'));
+  }
+});
+
+test('animated PNG chunks are rejected', async () => {
+  const bytes = await png();
+  const control = chunk('acTL', Buffer.alloc(8));
+  const frame = chunk('fcTL', Buffer.alloc(26));
+  const frameData = chunk('fdAT', Buffer.alloc(16));
+  for (const animation of [control, frame, frameData]) {
+    assert.throws(() => validateImageEnvelope(insert(bytes, animation), 'image/png'), code('unsupported_media'));
+  }
+  const first = insert(bytes, control, frame);
+  const animated = Buffer.concat([first.subarray(0, first.length - 12), frame, frameData, first.subarray(first.length - 12)]);
+  assert.throws(() => validateImageEnvelope(animated, 'image/png'), code('unsupported_media'));
+  assert.throws(() => validateImageEnvelope(Buffer.concat([bytes.subarray(0, bytes.length - 12), frame, frameData, bytes.subarray(bytes.length - 12)]), 'image/png'), code('unsupported_media'));
 });
 
 test('JPEG APP metadata budget and malformed segment lengths fail closed', async () => {

@@ -5,7 +5,7 @@ const METADATA_BYTES = 256 * 1024;
 const INFLATED_CHUNK_BYTES = 64 * 1024;
 const MAX_SEGMENTS = 1024;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-const PNG_ANCILLARY = new Set(['cHRM', 'gAMA', 'sBIT', 'sRGB', 'bKGD', 'hIST', 'tRNS', 'pHYs', 'sPLT', 'tIME', 'tEXt', 'eXIf']);
+const PNG_ANIMATION = new Set(['acTL', 'fcTL', 'fdAT']);
 function invalid(): never { throw new RunnerError('unsupported_media'); }
 function oversized(): never { throw new RunnerError('too_large'); }
 
@@ -89,9 +89,8 @@ function png(bytes: Buffer): void {
     }
     metadata += length;
     if (metadata > METADATA_BYTES) oversized();
-    const compressed = type === 'zTXt' || type === 'iCCP' || type === 'iTXt';
-    if (!compressed && !PNG_ANCILLARY.has(type)) invalid();
-    if (compressed) metadata += compressedMetadata(type, data);
+    if (!/^[a-z]/.test(type) || PNG_ANIMATION.has(type)) invalid();
+    if (type === 'zTXt' || type === 'iCCP' || type === 'iTXt') metadata += compressedMetadata(type, data);
     if (metadata > METADATA_BYTES) oversized();
   }
   invalid();

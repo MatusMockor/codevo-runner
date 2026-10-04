@@ -330,8 +330,11 @@ defensive image-envelope bounds are in `src/infrastructure/files/image-preflight
 | Concurrent HTTP image downloads | 2, held until response finish/close |
 | Task or event page | 50 items / 3 MiB serialized item data |
 
-Unsupported image structures or metadata fail closed; a PNG/JPEG extension alone
-does not guarantee acceptance. Quotas are runner-wide, not per user. The attachment-store read limit covers file/metadata
+Unsupported image structures or malformed metadata fail closed; a PNG/JPEG extension
+alone does not guarantee acceptance. Ancillary PNG chunks, including private and
+unregistered ones, are accepted within the metadata and chunk-count limits; unknown
+critical PNG chunks and malformed chunk types are rejected. Animated PNG (APNG
+`acTL`/`fcTL`/`fdAT` chunks) is rejected as well. Quotas are runner-wide, not per user. The attachment-store read limit covers file/metadata
 retrieval until bytes are returned to HTTP. A separate HTTP download limit remains
 held until the response finishes or closes, including slow clients.
 HTTP transport can terminate stalled requests
