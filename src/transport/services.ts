@@ -1,3 +1,4 @@
+import type { AccountUsageApplication } from '../application/account-usage-service.js';
 import type { RepositoryLookupService } from '../application/repository-lookup-service.js';
 import type { ThreadMetadataService } from '../application/thread-metadata.js';
 import type { ProjectDirectories } from '../application/project-directories.js';
@@ -14,6 +15,7 @@ import type { GitSyncApplication } from '../application/git-sync-ports.js';
 import type { PortPreviewApplication } from '../application/port-preview-ports.js';
 
 export interface RunnerServices {
+  readonly accountUsage?: AccountUsageApplication;
   readonly repositories?: RepositoryLookupService;
   readonly threadMetadata?: ThreadMetadataService;
   readonly projectDirectories?: ProjectDirectories;

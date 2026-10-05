@@ -30,9 +30,11 @@ const taskGitReadRoute = new RegExp(`^/v1/tasks/${uuid}/git/status$`);
 const taskGitBodyRoute = new RegExp(`^/v1/tasks/${uuid}/git/(commit|push)$`);
 const gitOperationRoute = new RegExp(`^/v1/git-operations/${uuid}$`);
 const portRoute = new RegExp(`^/v1/(?:tasks/${uuid}|projects/${projectSegment})/ports$`);
-const ownedRoutes = [turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+const accountUsageRoute = /^\/v1\/account-usage\/(claude|codex)$/;
+const ownedRoutes = [accountUsageRoute,turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
+  { pattern: accountUsageRoute, methods: ['GET'] },
   { pattern: projectGitReadRoute, methods: ['GET'] },
   { pattern: projectGitBodyRoute, methods: ['POST'] },
   { pattern: taskGitReadRoute, methods: ['GET'] },

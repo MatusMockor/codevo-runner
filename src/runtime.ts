@@ -1,3 +1,6 @@
+import { AccountUsageService } from './application/account-usage-service.js';
+import { CliAccountUsageReader } from './infrastructure/execution/account-usage.js';
+import type { UsageProcessOptions } from './infrastructure/execution/account-usage-process.js';
 import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
@@ -39,6 +42,7 @@ import { ProcListeningPortScanner } from './infrastructure/execution/listening-p
 
 export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
+  accountUsageCli?: UsageProcessOptions;
   projectsRoot?: string;
   executionTimeoutMs?: number;
   executionConcurrency?: number;
@@ -55,6 +59,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
   const changes = new RunnerChanges();
   const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish());
   try {
+    const accountUsage = new AccountUsageService(new CliAccountUsageReader(options?.accountUsageCli));
     const questions = new QuestionService(repository);
     await questions.expire();
     // Recovery is truthful even when an operator disables execution after a crash.
@@ -115,7 +120,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      surfaces, terminals,
+      accountUsage, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
@@ -123,13 +128,20 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync, ports,
       close(): Promise<void> {
         closing ??= (async () => {
+          // Fence execution synchronously before the first await; usage owns its
+          // separate cancellation and must not reopen the admission window.
+          const executionClosing = execution?.close();
+          const usageClosing = accountUsage.close();
           try {
-            try { await execution?.close(); }
+            try { await executionClosing; }
             finally {
-              try { await terminals?.close(); }
+              try { await usageClosing; }
               finally {
-                try { await clones?.close(); }
-                finally { await gitSync?.close(); }
+                try { await terminals?.close(); }
+                finally {
+                  try { await clones?.close(); }
+                  finally { await gitSync?.close(); }
+                }
               }
             }
           } finally {
