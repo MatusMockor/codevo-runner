@@ -7,7 +7,8 @@ import { isId, RunnerError } from '../../domain/contracts.js';
 import { validateWorkspacePath } from '../../domain/workspace-files.js';
 import type { TurnChangedFile, TurnChangesSummary, TurnFileDiff } from '../../domain/turn-changes.js';
 import type { TurnChanges } from '../../application/turn-changes.js';
-import { validStoredTurn } from './turn-changes-codec.js';
+import { validStoredTurn, validGitCheckpoint, validTurnSummary, validTurnDiff } from './turn-changes-codec.js';
+import { runTurnGit, checkpointFailureReason, type GitCheckpoint } from './turn-git-helper.js';
 import { runTurnHelper, type CapturedFile, type TurnSnapshot } from './turn-capture-helper.js';
 
 type Identity = Readonly<{ dev: number; ino: number }>;
@@ -18,7 +19,7 @@ const QUOTA_BYTES = 256 * 1024 * 1024;
 const unavailable = (turnId: string, reason = 'A complete snapshot of this turn is unavailable.'): TurnChangesSummary =>
   ({ turnId, state: 'unavailable', files: [], truncated: false, reason });
 
-/** Durable, immutable before/after snapshots; never consult HEAD or a later worktree. */
+/** Immutable Git checkpoints with lazy projections; legacy JSON turns remain readable. */
 export class FileTurnChangesStore implements TurnChanges {
   private readonly root: string;
   private serial: Promise<void> = Promise.resolve();
@@ -77,7 +78,7 @@ export class FileTurnChangesStore implements TurnChanges {
     } catch { return null; } finally { await handle.close(); }
     }).catch(() => null);
   }
-  private async write(name: string, value: unknown, signal?: AbortSignal) {
+  private async write(name: string, value: unknown, signal?: AbortSignal, publication?: (phase: 'linking' | 'published') => void) {
     return this.withRoot(async base => {
 
     const bytes = Buffer.from(JSON.stringify(value));
@@ -93,7 +94,7 @@ export class FileTurnChangesStore implements TurnChanges {
     if (total + bytes.length > QUOTA_BYTES) throw new RunnerError('quota_exceeded');
     const temporary = join(base, `${randomUUID()}.tmp`);
     const handle = await open(temporary, 'wx', 0o600);
-    try { await handle.writeFile(bytes); await handle.sync(); signal?.throwIfAborted(); await link(temporary, join(base, name)); }
+    try { await handle.writeFile(bytes); await handle.sync(); signal?.throwIfAborted(); publication?.('linking'); await link(temporary, join(base, name)); publication?.('published'); }
     finally { await handle.close(); await unlink(temporary).catch(() => undefined); }
     }, true);
   }
@@ -101,13 +102,23 @@ export class FileTurnChangesStore implements TurnChanges {
     this.id(taskId);
     await this.owned(async () => {
       if (await this.read(`${taskId}.start`) || await this.read(`${taskId}.end`)) return;
+      const operation = randomUUID();
+      let captured: GitCheckpoint | undefined;
+      let publication: 'preparing' | 'linking' | 'published' = 'preparing';
+      const observe = (phase: 'linking' | 'published') => { publication = phase; };
       try {
         signal.throwIfAborted();
-        const snapshot = await runTurnHelper({ mode: 'capture', cwd, identity }, signal) as TurnSnapshot;
+        const checkpoint = await runTurnGit({ mode: 'capture', taskId, cwd, identity, operation }, signal);
+        if (!validGitCheckpoint(checkpoint, true)) throw new Error('Invalid Git checkpoint record.');
+        captured = checkpoint as GitCheckpoint;
         signal.throwIfAborted();
-        await this.write(`${taskId}.start`, { cwd, identity, snapshot }, signal);
-      } catch {
-        await this.write(`${taskId}.end`, { summary: unavailable(taskId), diffs: [] }).catch(() => undefined);
+        await this.write(`${taskId}.start`, checkpoint, signal, observe);
+      } catch (error) {
+        // A linked or uncertain publication remains authoritative even if sync/post-check failed.
+        if (publication !== 'preparing') return;
+        if (captured) await runTurnGit({ mode: 'cleanup', taskId, cwd, identity, expectedGit: captured, expectedOid: captured.before, side: 'before', operation }, AbortSignal.timeout(5_000)).catch(() => undefined);
+        const reason = checkpointFailureReason(error);
+        await this.write(`${taskId}.end`, { summary: unavailable(taskId, reason), diffs: [] }).catch(() => undefined);
       }
     });
   }
@@ -115,32 +126,70 @@ export class FileTurnChangesStore implements TurnChanges {
     this.id(taskId);
     await this.owned(async () => {
       if (await this.read(`${taskId}.end`)) return;
-      const start = await this.read<Start>(`${taskId}.start`);
+      const start = await this.read<Start | GitCheckpoint>(`${taskId}.start`);
+      const operation = randomUUID();
+      let captured: GitCheckpoint | undefined;
+      let publication: 'preparing' | 'linking' | 'published' = 'preparing';
+      const observe = (phase: 'linking' | 'published') => { publication = phase; };
       try {
         if (!start || start.cwd !== cwd || start.identity.dev !== identity.dev || start.identity.ino !== identity.ino) throw new Error('missing baseline');
         signal.throwIfAborted();
-        const end = await runTurnHelper({ mode: 'capture', cwd, identity, baselinePaths: start.snapshot.files.map(file => file.path) }, signal) as TurnSnapshot;
-        const result = await compare(taskId, start.snapshot, end, signal);
+        let result: Complete | GitCheckpoint;
+        if ('kind' in start) {
+          const checkpoint = await runTurnGit({ mode: 'capture', taskId, cwd, identity, checkpoint: start, operation }, signal);
+          if (!validGitCheckpoint(checkpoint, false)) throw new Error('Invalid Git checkpoint record.');
+          captured = checkpoint as GitCheckpoint;
+          result = captured;
+        } else {
+          const end = await runTurnHelper({ mode: 'capture', cwd, identity, baselinePaths: start.snapshot.files.map(file => file.path) }, signal) as TurnSnapshot;
+          result = await compare(taskId, start.snapshot, end, signal);
+        }
         signal.throwIfAborted();
-        await this.write(`${taskId}.end`, result, signal);
+        await this.write(`${taskId}.end`, result, signal, observe);
         await this.withRoot(base => unlink(join(base, `${taskId}.start`))).catch(() => undefined);
-      } catch {
-        await this.write(`${taskId}.end`, { summary: unavailable(taskId), diffs: [] }).catch(() => undefined);
+      } catch (error) {
+        if (publication !== 'preparing') return;
+        if (captured) await runTurnGit({ mode: 'cleanup', taskId, cwd, identity, expectedGit: captured, expectedOid: captured.after, side: 'after', operation }, AbortSignal.timeout(5_000)).catch(() => undefined);
+        const reason = checkpointFailureReason(error);
+        await this.write(`${taskId}.end`, { summary: unavailable(taskId, reason), diffs: [] }).catch(() => undefined);
       }
     });
   }
   async summary(taskId: string): Promise<TurnChangesSummary> {
     this.id(taskId);
-    const value = await this.read<Complete>(`${taskId}.end`);
-    return value?.summary?.turnId === taskId ? value.summary : unavailable(taskId);
+    return this.owned(async () => {
+      const value = await this.read<Complete | GitCheckpoint>(`${taskId}.end`);
+      if (value && 'kind' in value) {
+        try {
+          const summary = await runTurnGit({ mode: 'summary', taskId, cwd: value.cwd, identity: value.identity, checkpoint: value }, AbortSignal.timeout(60_000));
+          if (!validTurnSummary(summary, taskId)) throw new Error('Invalid checkpoint summary.');
+          return summary as TurnChangesSummary;
+        } catch (error) {
+          return unavailable(taskId, checkpointFailureReason(error));
+        }
+      }
+      return value?.summary?.turnId === taskId ? value.summary : unavailable(taskId);
+    });
   }
   async diff(taskId: string, relativePath: string): Promise<TurnFileDiff> {
     this.id(taskId); validateWorkspacePath(relativePath);
     if (relativePath.includes(':') || relativePath.split('/').length > 64 || /[\x7f-\x9f]/.test(relativePath)) throw new RunnerError('invalid_input');
-    const value = await this.read<Complete>(`${taskId}.end`);
-    const found = value?.summary?.turnId === taskId && value.summary.state === 'ready' && value.diffs.find(item => item.relativePath === relativePath);
-    if (!found) throw new RunnerError('not_found');
-    return found;
+    return this.owned(async () => {
+      const value = await this.read<Complete | GitCheckpoint>(`${taskId}.end`);
+      if (value && 'kind' in value) {
+        try {
+          const diff = await runTurnGit({ mode: 'diff', taskId, cwd: value.cwd, identity: value.identity, checkpoint: value, path: relativePath }, AbortSignal.timeout(60_000));
+          if (!validTurnDiff(diff, relativePath)) throw new RunnerError('storage_unavailable');
+          return diff as TurnFileDiff;
+        } catch (error) {
+          if (error instanceof Error && error.message === 'Changed file not found in the retained turn.') throw new RunnerError('not_found');
+          throw new RunnerError('storage_unavailable');
+        }
+      }
+      const found = value?.summary?.turnId === taskId && value.summary.state === 'ready' && value.diffs.find(item => item.relativePath === relativePath);
+      if (!found) throw new RunnerError('not_found');
+      return found;
+    });
   }
 }
 

@@ -19,6 +19,7 @@ export function validSnapshot(value: unknown): boolean {
 }
 export function validStoredTurn(value: unknown, taskId: string, start: boolean): boolean {
   if (!record(value)) return false;
+  if (value.kind === 'git') return validGitCheckpoint(value, start);
   if (start) return exact(value, ['cwd', 'identity', 'snapshot']) && text(value.cwd, 16384) && value.cwd.startsWith('/') &&
     record(value.identity) && exact(value.identity, ['dev', 'ino']) && ['dev', 'ino'].every(key => Number.isSafeInteger(value.identity && (value.identity as Record<string, unknown>)[key]) && Number((value.identity as Record<string, unknown>)[key]) >= 0) && validSnapshot(value.snapshot);
   if (!exact(value, ['summary', 'diffs']) || !record(value.summary) || !exact(value.summary, ['turnId', 'state', 'files', 'truncated', 'reason']) || !Array.isArray(value.diffs)) return false;
@@ -36,5 +37,36 @@ export function validStoredTurn(value: unknown, taskId: string, start: boolean):
     names.add(file.relativePath);
     if (!['original','modified'].every(key => { const side = diff[key]; return record(side) && exact(side,['text','truncated']) && text(side.text,131072) && typeof side.truncated === 'boolean'; })) return false;
     return diff.unavailableReason === null ? ['addedLines','deletedLines'].every(key => Number.isSafeInteger(file[key]) && Number(file[key]) >= 0) : file.addedLines === null && file.deletedLines === null;
+  });
+}
+
+
+function identity(value: unknown): boolean {
+  return record(value) && exact(value, ['dev', 'ino']) && ['dev', 'ino'].every(key => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0);
+}
+function absolute(value: unknown): boolean {
+  return text(value, 16384) && value.startsWith('/') && !value.includes('\0');
+}
+export function validGitCheckpoint(value: unknown, start: boolean): boolean {
+  return record(value) && exact(value, ['kind', 'cwd', 'identity', 'gitDir', 'gitIdentity', 'commonDir', 'commonIdentity', 'before', 'after']) &&
+    value.kind === 'git' && absolute(value.cwd) && identity(value.identity) && absolute(value.gitDir) && identity(value.gitIdentity) &&
+    absolute(value.commonDir) && identity(value.commonIdentity) && typeof value.before === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.before) &&
+    (start ? value.after === null : typeof value.after === 'string' && value.after.length === value.before.length && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.after));
+}
+export function validTurnSummary(value: unknown, taskId: string): boolean {
+  if (!record(value) || !Array.isArray(value.files)) return false;
+  const diffs = value.files.map((file: unknown) => record(file) ? {
+    relativePath: file.relativePath, original: { text: '', truncated: false }, modified: { text: '', truncated: false },
+    unavailableReason: file.addedLines === null && file.deletedLines === null ? 'binary' : null,
+  } : null);
+  return validStoredTurn({ summary: value, diffs }, taskId, false);
+}
+export function validTurnDiff(value: unknown, relativePath: string): boolean {
+  if (!record(value) || !exact(value, ['relativePath','original','modified','unavailableReason']) || value.relativePath !== relativePath ||
+      ![null,'binary','large'].includes(value.unavailableReason as string | null)) return false;
+  return ['original','modified'].every(key => {
+    const side = value[key];
+    return record(side) && exact(side, ['text','truncated']) && text(side.text,131072) && typeof side.truncated === 'boolean' &&
+      (!side.truncated || value.unavailableReason === 'large' && side.text === '');
   });
 }

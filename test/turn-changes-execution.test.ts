@@ -162,7 +162,9 @@ test('cancelling a provider cannot publish an unfinished capture as a completed 
 
 test('an over-budget baseline remains unavailable while the authorized provider still runs successfully', async t => {
   const { source, dataDir, runnerId, project, cleanupWith } = await workspace(t);
-  await writeFile(join(source, 'too-large.txt'), Buffer.alloc(9 * 1024 * 1024, 65));
+  await writeFile(join(source, 'too-large.txt'), '');
+  const { truncate } = await import('node:fs/promises');
+  await truncate(join(source, 'too-large.txt'), 65 * 1024 * 1024);
   let executed = false;
   const provider: ProviderExecutor = { provider: 'codex', supportsAttachments: false, execute: async request => {
     executed = true;
