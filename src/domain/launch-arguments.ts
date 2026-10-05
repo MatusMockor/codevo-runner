@@ -4,10 +4,11 @@ import type { AgentLaunchOptions, ClaudeLaunchOptions } from './launch.js';
 export function launchArguments(options: AgentLaunchOptions, resumed: boolean): string[] {
   if (options.provider === 'codex') {
     const model = options.model === 'default' ? [] : ['-m', options.model];
-    if (options.mode === 'default') return model;
-    if (options.mode === 'dangerFullAccess') return [...model, '--dangerously-bypass-approvals-and-sandbox'];
+    const effort = !options.effort || options.effort === 'default' ? [] : ['-c', `model_reasoning_effort="${options.effort}"`];
+    if (options.mode === 'default') return [...model, ...effort];
+    if (options.mode === 'dangerFullAccess') return [...model, '--dangerously-bypass-approvals-and-sandbox', ...effort];
     const sandbox = options.mode === 'readOnly' ? 'read-only' : 'workspace-write';
-    return [...model, ...(resumed ? ['-c', `sandbox_mode="${sandbox}"`] : ['--sandbox', sandbox])];
+    return [...model, ...(resumed ? ['-c', `sandbox_mode="${sandbox}"`] : ['--sandbox', sandbox]), ...effort];
   }
   return [...claudeModel(options), ...claudeMode(options), ...claudeEffort(options), ...claudeSettings(options)];
 }

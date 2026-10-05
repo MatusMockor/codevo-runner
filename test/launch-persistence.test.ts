@@ -65,3 +65,29 @@ test('omitting launch preserves legacy task shape and idempotency after reopen',
     await assert.rejects(repository.createTask({ ...request, launch: codex }), { code: 'conflict' });
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+
+test('Codex effort survives continuation retries, inheritance and SQLite reopen', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'launch-codex-effort-'));
+  const identity = randomUUID();
+  let repository = await openSqliteRepository(directory, identity);
+  try {
+    const root = (await repository.createTask(parseTaskInput({ ...input(), provider: 'codex', launch: codex }))).task;
+    await repository.queueTask(root.id, 'project');
+    await repository.claimNextTask();
+    await repository.finishTask(root.id, { exitCode: 0, sessionId: randomUUID() });
+    const request = parseContinueTask({ ...input(), launch: { ...codex, model: 'gpt-6.1-sol', effort: 'high' } });
+    const child = (await repository.continueTask(root.id, request)).task;
+    assert.deepEqual(child.launch, request.launch);
+    assert.equal((await repository.continueTask(root.id, request)).created, false);
+    await assert.rejects(repository.continueTask(root.id, { ...request, launch: { ...codex, model: 'gpt-6.1-sol', effort: 'low' } }), { code: 'conflict' });
+    await repository.claimNextTask();
+    await repository.finishTask(child.id, { exitCode: 0 });
+    await repository.close();
+    repository = await openSqliteRepository(directory, identity);
+    assert.deepEqual((await repository.getTask(child.id)).launch, request.launch);
+    const inherited = (await repository.continueTask(child.id, input())).task;
+    assert.deepEqual(inherited.launch, request.launch);
+    assert.deepEqual((await repository.getTask(root.id)).launch, codex);
+  } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
+});

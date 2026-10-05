@@ -14,6 +14,11 @@ export type ClaudePermissionMode = (typeof CLAUDE_PERMISSION_MODES)[number];
 
 export type CodexModelChoice = string;
 
+export const CODEX_EFFORT_CHOICES = [
+  'default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+] as const;
+export type CodexEffortChoice = (typeof CODEX_EFFORT_CHOICES)[number];
+
 export const CODEX_EXECUTION_MODES = [
   "default",
   "readOnly",
@@ -51,6 +56,7 @@ export interface CodexLaunchOptions {
   readonly provider: "codex";
   readonly model: CodexModelChoice;
   readonly mode: CodexExecutionMode;
+  readonly effort?: CodexEffortChoice;
 }
 
 export type AgentLaunchOptions = ClaudeLaunchOptions | CodexLaunchOptions;
@@ -82,14 +88,18 @@ export function parseLaunchOptions(value: unknown, provider?: 'claude' | 'codex'
   if (input.provider !== 'claudeCode' && input.provider !== 'codex') invalid();
   if (provider !== undefined && (input.provider === 'claudeCode' ? 'claude' : 'codex') !== provider) invalid();
   const keys = input.provider === 'codex'
-    ? ['provider', 'model', 'mode']
+    ? ['provider', 'model', 'mode', 'effort']
     : ['provider', 'model', 'mode', 'effort', 'context', 'fastMode', 'thinkingMode'];
   if (Object.keys(input).some(key => !keys.includes(key))) invalid();
-  if (input.provider === 'codex') return Object.freeze({
-    provider: 'codex',
-    model: modelId(input.model),
-    mode: member(input.mode, CODEX_EXECUTION_MODES),
-  });
+  if (input.provider === 'codex') {
+    const effort = input.effort === undefined ? 'default' : member(input.effort, CODEX_EFFORT_CHOICES);
+    return Object.freeze({
+      provider: 'codex',
+      model: modelId(input.model),
+      mode: member(input.mode, CODEX_EXECUTION_MODES),
+      ...(effort !== 'default' ? { effort } : {}),
+    });
+  }
   const options: ClaudeLaunchOptions = {
     provider: 'claudeCode',
     model: modelId(input.model),

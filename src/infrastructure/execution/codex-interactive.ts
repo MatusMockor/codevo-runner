@@ -45,6 +45,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
   const launch = plan.request.task.launch;
   if (launch && launch.provider !== 'codex') throw new Error('provider_mismatch');
   const model = launch && launch.model !== 'default' ? { model: launch.model } : {};
+  const effort = launch?.effort && launch.effort !== 'default' ? { effort: launch.effort } : {};
   const mode = launch?.mode;
   const sandbox = mode === 'dangerFullAccess' ? 'danger-full-access' : mode === 'readOnly' ? 'read-only'
     : mode === 'workspaceWrite' || mode === 'auto' ? 'workspace-write'
@@ -98,7 +99,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           stage = 'turn';
           await validateProtocolWorkspace(plan);
           await call(send, 3, 'turn/start', {
-            threadId, cwd: plan.cwd, ...model, approvalPolicy: 'never', ...(sandboxPolicy ? { sandboxPolicy } : {}),
+            threadId, cwd: plan.cwd, ...model, ...effort, approvalPolicy: 'never', ...(sandboxPolicy ? { sandboxPolicy } : {}),
             input: [{ type: 'text', text: `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${plan.prompt || 'Inspect the attached images.'}` },
               ...plan.request.attachments.filter(file => file.mediaType !== 'text/plain').map(image => ({ type: 'localImage', path: image.path }))],
           });

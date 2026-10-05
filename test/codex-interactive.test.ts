@@ -1,3 +1,4 @@
+import { parseLaunchOptions } from '../src/domain/launch.js';
 import { SteeringNotSent } from '../src/domain/steering.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -344,4 +345,21 @@ test('Codex steering references text attachments without localImage input', asyn
   assert.ok(input[0]!.text.includes('"/workspace/pasted.txt"'));
   await f.receive({ id: rpc.id, result: { turnId: turn } });
   await pending;
+});
+
+
+test('Codex launch reasoning effort reaches new and resumed provider turns and default stays omitted', async () => {
+  for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'default', undefined]) {
+    for (const resumeSessionId of [undefined, thread]) {
+      const launch = parseLaunchOptions({ provider: 'codex', model: 'gpt-6.1-sol', mode: 'default', ...(effort ? { effort } : {}) });
+      const f = fixture({ ...(resumeSessionId ? { resumeSessionId } : {}), task: {
+        id: 'task', sequence: 1, runnerId: 'runner', provider: 'codex', status: 'running', parts: [], createdAt: '', launch,
+      } });
+      await f.ready();
+      const params = f.sent[3]!.params as Record<string, unknown>;
+      assert.equal(params.model, 'gpt-6.1-sol');
+      if (effort && effort !== 'default') assert.equal(params.effort, effort);
+      else assert.equal(Object.hasOwn(params, 'effort'), false);
+    }
+  }
 });

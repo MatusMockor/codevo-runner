@@ -37,7 +37,7 @@ const claude = (overrides: Record<string, unknown> = {}) => parseLaunchOptions({
 test('launch parser rejects unknown keys, invalid closed choices and provider mismatch', () => {
   for (const value of [null, [], 'claude', {},
     { provider: 'claudeCode', model: 'default', mode: 'default' },
-    { provider: 'codex', model: 'default', mode: 'default', effort: 'high' },
+    { provider: 'codex', model: 'default', mode: 'default', effort: 'extreme' },
     { provider: 'codex', model: 'default', mode: 'workspaceWrite', args: ['--help'] },
     { provider: 'codex', model: 'gpt-6-astra --help', mode: 'default' },
     { provider: 'codex', model: 'default', mode: 'acceptEdits' },
@@ -151,5 +151,25 @@ test('non-haiku thinking merges with fast mode and ultracode in one settings obj
     assert.deepEqual(launchArguments(claude({ model: 'claude-haiku-4-5', thinkingMode }), false), [
       '--model', 'claude-haiku-4-5', '--settings', JSON.stringify({ alwaysThinkingEnabled: thinkingMode ?? false }),
     ]);
+  }
+});
+
+
+test('Codex editor reasoning effort accepts closed values and preserves CLI first/resumed settings', () => {
+  for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+    const launch = parseLaunchOptions({ provider: 'codex', model: 'gpt-6.1-sol', mode: 'workspaceWrite', effort }, 'codex');
+    assert.equal(launch.provider === 'codex' && launch.effort, effort);
+    for (const resumed of [false, true]) assert.deepEqual(launchArguments(launch, resumed), [
+      '-m', 'gpt-6.1-sol', ...(resumed ? ['-c', 'sandbox_mode="workspace-write"'] : ['--sandbox', 'workspace-write']),
+      '-c', `model_reasoning_effort="${effort}"`,
+    ]);
+  }
+  for (const effort of [undefined, 'default']) {
+    const launch = parseLaunchOptions({ provider: 'codex', model: 'default', mode: 'default', ...(effort ? { effort } : {}) });
+    assert.deepEqual(launch, { provider: 'codex', model: 'default', mode: 'default' });
+    assert.deepEqual(launchArguments(launch, false), []);
+  }
+  for (const effort of [null, 1, true, {}, [], 'HIGH', 'high"; command', 'extreme', 'high\n']) {
+    assert.throws(() => parseLaunchOptions({ provider: 'codex', model: 'default', mode: 'default', effort }), { code: 'invalid_input' });
   }
 });
