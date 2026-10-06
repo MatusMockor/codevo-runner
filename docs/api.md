@@ -28,7 +28,7 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id/events?after=0` | `{ items, nextCursor }` containing task events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
 | `GET /v1/attachments/:id` | Attachment metadata |
-| `GET /v1/attachments/:id/content` | Original validated image bytes |
+| `GET /v1/attachments/:id/content` | Original validated image or text bytes |
 
 Task status is `draft`, `queued`, `running`, `succeeded`, `failed`, `interrupted` or
 `cancelled`. Lifecycle events use `task.<status>` (draft creation is `task.created`).
@@ -140,8 +140,9 @@ parts are ordered nonblank text or attachment references, with no duplicate atta
 
 `X-File-Name` is required and percent-encoded (for example `screen%20shot.png`).
 It is display metadata, at most 255 UTF-8 bytes after decoding, with no path
-separators or control characters. Upload content type is exactly `image/png` or
-`image/jpeg`; the binary body must match and decode as a supported single image.
+separators or control characters. Upload content type is exactly `image/png`,
+`image/jpeg` or `text/plain`; images must match and decode as a supported single image,
+and text must be nonempty valid UTF-8 without NUL.
 Content is sent directly, not base64 or multipart. No client filesystem path is
 accepted by the API.
 
@@ -182,7 +183,7 @@ curl --fail-with-body "$RUNNER_URL/v1/tasks/$TASK_ID/diff" \
   -H "Authorization: Bearer $RUNNER_TOKEN"
 ```
 
-Start accepts exactly `projectId`, never paths, clone URLs, executable names or
+Start accepts `projectId` and optional `base`, never paths, clone URLs, executable names or
 shell commands. Admission is persisted before the response. Retrying the same task
 and project does not launch it twice; choosing another project conflicts. Terminal
 tasks are not restarted. Provider installation and authentication happen on the
@@ -262,12 +263,12 @@ The eligibility response is exactly one of:
 ```
 
 A finished task can continue only when it is the latest turn and has saved session
-metadata and a usable original Git worktree. This check does not query the provider's
+metadata and a usable original Git workspace (worktree or registered checkout). This check does not query the provider's
 history store or prove login readiness. Missing, expired or rejected provider
 history can still fail execution. The runner does not fall back to a new session.
 
 Upload any new images before submitting their references. The continuation body
-contains exactly `idempotencyKey` and `parts`, with the same UUID, message-part,
+contains `idempotencyKey` and `parts`, with optional `launch` and `instructions`, and the same UUID, message-part,
 prompt and attachment limits as draft creation:
 
 ```json
@@ -281,7 +282,7 @@ Successful admission creates and queues a new task atomically; no separate start
 request is needed. Its provider and project come from the parent. The task includes
 `parentTaskId` and `conversationId` (the original task ID). Existing task records
 may omit these optional fields. Each turn has its own events and status, while
-all turns share the original worktree and baseline. Only the latest turn can admit
+all turns share the original workspace and baseline. Only the latest turn can admit
 a successor; continuation does not branch from older turns. Every new turn counts
 against the runner-wide task and output quotas.
 
@@ -295,7 +296,7 @@ checked against its expected session ID; a mismatched session or provider-report
 failure cannot be treated as successful continuation. Cancellation or service
 restart stops the process as for other tasks. A finished failed, cancelled or
 interrupted latest turn can be eligible for another explicit follow-up if its
-session metadata and worktree remain available.
+session metadata and workspace remain available.
 
 Historical tasks may recover a session ID from retained structured stdout, bounded
 by the existing event/output limits. Recovery does not copy or repair the provider's
@@ -315,7 +316,7 @@ defensive image-envelope bounds are in `src/infrastructure/files/image-preflight
 
 | Resource | Maximum |
 | --- | --- |
-| Task JSON body | 65,536 bytes |
+| Task JSON body | 4 MiB (4,194,304 bytes) reader limit; smaller per-route limits are listed in [HTTP boundary and capability negotiation](#http-boundary-and-capability-negotiation) |
 | Combined prompt text | 48,000 UTF-8 bytes |
 | Ordered parts / distinct attachments per draft | 16 / 8 |
 | One uploaded image | 8 MiB |
@@ -431,7 +432,7 @@ The task ID in each route identifies its server-owned conversation; callers neve
 provide a provider session ID or workspace path.
 
 - `GET /v1/tasks/:id/pending` returns `{ items }` in FIFO order, at most 16 active messages.
-- `POST /v1/tasks/:id/pending` accepts the same closed `{ idempotencyKey, parts, launch? }`
+- `POST /v1/tasks/:id/pending` accepts the same closed `{ idempotencyKey, parts, launch?, instructions? }`
   body as continuation. It returns `{ pending, created }` (202, or 200 for an identical retry).
 - `DELETE /v1/tasks/:id/pending/:pendingId` returns the cancelled message. Repeating
   removal is safe; removing an already dispatched message returns conflict.
@@ -439,7 +440,7 @@ provide a provider session ID or workspace path.
   explicitly resumes a paused queue only when the latest turn has a usable saved session.
 
 A pending message contains `id`, `conversationId`, `status`, `parts`, `createdAt`,
-`taskId` (null until dispatched), and optional `launch`. Status is `queued`, `paused`,
+`taskId` (null until dispatched), and optional `launch`. Status is `queued`, `paused`, `uncertain`,
 `dispatched`, or `cancelled`; the list excludes dispatched and cancelled records.
 Both message content and image references are retained in SQLite. The queue has a
 16-message active limit per conversation and a 1,000-record lifetime retention limit
@@ -593,7 +594,7 @@ are not overwritten to admit new snapshots.
 ## Git sync
 
 Clients announcing `gitSync` in `X-Codevo-Client-Capabilities` discover the optional
-`gitSync` capability; it is true whenever execution is enabled. All routes require
+`gitSync` capability; the `gitSync` field is true when both execution and the Git sync service are present. All routes require
 bearer authentication and the exact `X-Codevo-Runner-Id` (missing or foreign: 409).
 Paths are exact; query strings are 404 and bodies on GET are 400. Bodies are closed
 JSON objects: unknown fields are 400. `:projectId` uses the registered project id
@@ -714,3 +715,465 @@ the turn's tracked process tree when the provider exits. Use the conversation's
 terminal for a server that should keep running. Process trees are observed every
 100 ms for turns and every second for terminals; a server that detaches from its tree
 faster than that (for example a double-forking daemon) is neither tracked nor listed.
+
+## HTTP boundary and capability negotiation
+
+The current JSON reader accepts at most 4 MiB (4,194,304 bytes), including for task
+creation, continuation, steering, pending messages and surface/terminal commands.
+Repository lookup/search and thread metadata/order use 4 KiB, project directories
+and turn-file-diff use 8 KiB, Git fetch/update/push use 1 KiB, and Git commit uses
+32 KiB. JSON requires `application/json`, optionally `; charset=utf-8`, and rejects
+Content-Encoding with 415 `unsupported_media`. Invalid JSON or UTF-8 is 400
+`invalid_input`; exceeding the applicable body limit is 413 `too_large`.
+Attachment uploads have a separate 8 MiB transport bound, with the text-specific
+limit described below. These are current reader limits for the additional contracts.
+
+The HTTP boundary matches the complete request URL against the allowlist before
+controller dispatch. Lowercase UUID v4 path identifiers and project IDs matching
+`[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}` are required where those segments occur.
+After the 401 and identity checks (including the missing-identity 409 for any URL
+under `/v1/repositories/` or beginning `/v1/thread-metadata`), an unlisted URL is
+404 `not_found`; a URL matching a listed pattern for a different method is 405
+`method_not_allowed`. Queries are allowed only in the forms documented for that
+route. In particular, task creation with `?after=...` is rejected with 404.
+Requests carrying any Origin header receive 403 `origin_not_allowed`, including
+health and discovery. A body on a route that does not accept one receives 400
+`body_not_allowed`. Bearer authentication failure is 401 `unauthorized`.
+
+`X-Codevo-Runner-Id` is optional on ordinary task, attachment, clone, project-list,
+history-search, steering, surface and terminal routes. When supplied on any `/v1/`
+HTTP route it must equal the runner identity, otherwise 409
+`runner_identity_mismatch`; duplicate identity headers are 400
+`duplicate_runner_identity`. It is required on account usage, Git sync, port
+preview, turn changes, repository lookup/hosts/search, project directories and
+thread metadata/order routes (including the metadata list); missing identity there
+is 409 `runner_identity_mismatch`. Repository identity also requires it, but its
+controller returns 409 `conflict` when it is missing. Discovery accepts an optional
+matching identity. Disabled services return 404 `not_found` on their routes.
+Unexpected controller failures return 500 `internal_error`. Other route-specific
+errors below use the same `{ "error": "code" }` envelope.
+
+`X-Codevo-Client-Capabilities` is comma-separated, case-sensitive, and optional.
+The reader accepts at most 512 printable ASCII characters and 16 comma-separated
+entries, trims each entry, and retains tokens matching `[A-Za-z][A-Za-z0-9]{0,63}`.
+An oversized, non-ASCII or non-string header, or more than 16 entries, announces
+nothing; invalid individual tokens are ignored. The complete list of tokens that
+currently change server behavior is:
+
+| Token | What it switches on |
+| --- | --- |
+| `accountUsage` | Adds the boolean `accountUsage` discovery field; true when an account-usage service exists. |
+| `turnChanges` | Adds the boolean `turnChanges` discovery field; true when execution supports both turn summary and turn file diff. |
+| `gitSync` | Adds the boolean `gitSync` discovery field; true when execution and Git sync services exist. |
+| `portPreview` | Adds the boolean `portPreview` discovery field; true on Linux when execution and port services exist. |
+| `projectManagement` | Adds the boolean `projectManagement` discovery field; true when repository, directory and clone services all exist. |
+| `threadManagement` | Adds the boolean `threadManagement` discovery field; true when thread metadata exists. |
+| `subagentLifecycleRetention` | Selects the retained subagent lifecycle shape on task event reads, as described in [Start and observe a task](#start-and-observe-a-task). |
+
+The first six fields are omitted unless announced and defined in the descriptor.
+These tokens do not gate route access. Other syntactically valid tokens have no
+current effect. In particular, `taskLaunchOptions`, `taskSteering`, `taskIsolation`,
+`instructionSync`, `textAttachments`, `pendingMessages`, `interactiveQuestions`,
+`outputArtifacts`, `subagentTelemetry`, `taskFileDiffs`, `taskContinuation`,
+`taskExecution`, `eventReplay`, `taskDrafts`, `imageAttachments` and `projectCloning`
+are discovery fields, not additional recognized header switches. With services
+installed, execution determines the task feature booleans; questions, artifacts
+and cloning depend on their services. Instruction sync additionally requires Linux.
+Drafts, image/text attachments, event replay and subagent lifecycle retention are
+advertised as true in that configuration. Surface support is discovered per project
+using the route below, rather than through another client token.
+
+## Task launch, isolation and instruction input
+
+`POST /v1/tasks` accepts the closed body
+`{ idempotencyKey, provider, parts, isolation?, launch?, instructions? }`.
+`provider` remains `claude` or `codex`. `POST /v1/tasks/:id/continue` and
+`POST /v1/tasks/:id/pending` accept the closed body
+`{ idempotencyKey, parts, launch?, instructions? }`; they inherit the provider and
+isolation. These routes require bearer authentication, accept optional matching
+runner identity, and have no client-capability gate. Their success responses and
+retry statuses are as described in the draft, continuation and pending sections.
+Task responses include optional `isolation` and `launch`; pending responses include
+optional `launch`. Controllers remove `instructions` from both public record types.
+The public Task shape is `{ id, sequence, runnerId, provider, status, parts,
+createdAt, projectId?, conversationId?, parentTaskId?, isolation?, launch? }`;
+`createdAt` is a string and `sequence` is a number.
+
+`isolation` is `worktree` or `in-place`; omission uses worktree execution.
+In-place execution uses the registered checkout. Continuations retain their parent's
+isolation. Start's optional `base` is described in [Git sync](#git-sync);
+`origin-branch` with in-place isolation is 400 `invalid_input`.
+
+`launch` is a closed provider-specific object. It must match the draft or inherited
+provider (`claudeCode` for `claude`, `codex` for `codex`). `model` and `mode` are
+required. A model is 1-96 lowercase ASCII characters matching
+`[a-z0-9][a-z0-9._-]{0,95}`; `default` emits no model override. The parser does not
+validate model availability against a provider catalog.
+
+| Launch provider | Fields and accepted values |
+| --- | --- |
+| `codex` | Required `provider: "codex"`, `model: string`, `mode: "default" | "readOnly" | "workspaceWrite" | "auto" | "dangerFullAccess"`; optional `effort: "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"`. Omitted/default effort is normalized away. |
+| `claudeCode` | Required `provider: "claudeCode"`, `model: string`, `mode: "default" | "plan" | "supervised" | "acceptEdits" | "auto" | "bypassPermissions"`, `effort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink"`; optional `context: "200k" | "1m"` (default `200k`), `fastMode: boolean` and `thinkingMode: boolean` (both default false). |
+
+The shipped runtime runs Codex through `codex app-server`: a nondefault `model`
+is sent on thread start/resume and turn start, and a nondefault `effort` on
+`turn/start`. `default` mode sends no sandbox override; `readOnly` sends `read-only`;
+`workspaceWrite` and `auto` send `workspace-write` (network access off, writable
+root is the workspace); `dangerFullAccess` sends `danger-full-access`, always with
+`approvalPolicy: "never"`. The `-m`, `--sandbox`, `-c sandbox_mode=...`,
+`-c model_reasoning_effort=...` and `--dangerously-bypass-approvals-and-sandbox`
+arguments apply only to the non-interactive `codex exec` path.
+Claude `default` supplies no permission override, `supervised` supplies permission
+mode `default`, `bypassPermissions` emits `--dangerously-skip-permissions`, and the
+other modes pass through. Nondefault model emits `--model`; context `1m` appends
+`[1m]` except for `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-5` and
+`claude-haiku-4-5`. `ultracode` maps to CLI effort `xhigh` and the ultracode setting;
+`ultrathink` modifies the prompt with `Ultrathink:` unless already prefixed or a
+slash command, and emits no effort flag. Other nondefault efforts pass through.
+Fast/thinking flags set provider settings when true; Haiku instead always receives
+the thinking boolean and does not receive fast/ultracode settings from this mapper.
+These are argument mappings, not guarantees about the installed CLI's behavior.
+
+Omitting `launch` on continuation or pending admission inherits the latest launch.
+`instructions` is a closed `{ version: 1, files: [...] }` snapshot. Each file is
+exactly `{ scope: "global" | "project", path: string, content: string }`.
+At most 128 files, 65,536 UTF-8 bytes per content, and 524,288 aggregate content bytes
+are allowed. Paths are relative Markdown paths (case-insensitive `.md` suffix),
+at most 512 UTF-8 bytes and 32 segments. Empty, dot, parent, trailing-dot or
+trailing-space segments, backslashes, colon, control characters and DEL are invalid.
+Paths cannot duplicate or prefix-conflict within a scope after NFC normalization
+and lowercasing. Files are sorted for retry comparison. An empty file list is valid.
+A continuation/pending request must supply a snapshot if its parent/latest task had
+one; omission is 400 `invalid_input` rather than implicit inheritance.
+
+Malformed/unknown fields and provider mismatches return 400 `invalid_input`;
+exceeded text, attachment-count or instruction bounds return 413 `too_large`.
+Missing attachment records return 404 `not_found`; changed retry input or
+ineligible continuation returns 409 `conflict`; disk capacity can return 429
+`quota_exceeded`, execution starting, stopping or failed returns 503 `busy`, and
+unavailable storage returns 503 `storage_unavailable`. See the shared
+body/media rules above for transport errors.
+
+## Steering a running turn
+
+`taskSteering` is advertised with execution enabled. Neither steering route has a
+client-header capability gate or requires the runner identity when omitted.
+
+| Route | Body / response |
+| --- | --- |
+| `POST /v1/tasks/:id/steer` | Exactly `{ idempotencyKey, parts }`; HTTP 200 `{ taskId, messageId, status: "accepted" }`. |
+| `POST /v1/tasks/:id/pending/:pendingId/steer` | No body; HTTP 200 with the same receipt, using the stored pending message. |
+
+The key is a lowercase UUID v4; `parts` has the same closed text/attachment shapes
+as a draft, 1-16 parts, up to eight distinct attachment references and 48,000 UTF-8
+bytes of combined nonblank text. Upload attachments first. Launch and instruction
+overrides are not accepted in direct steering. The addressed task must be the
+latest running turn and have a ready provider steering handler. Pending steering
+requires a queued message from the same unpaused conversation with launch and
+instructions exactly matching the running task. A provider tool boundary can also
+consume a compatible head pending message automatically.
+
+Acceptance persists a `task.input` event with `messageId` and `parts`. Pending
+acceptance marks that message dispatched to this task, without creating a new turn.
+An identical accepted retry returns the receipt even after the turn ends. A changed
+key payload, inactive/unready turn, paused/incompatible message or definitive
+provider rejection returns 409 `conflict`. An uncertain provider write or unaccepted
+persisted claim returns 409 `delivery_uncertain`; it is retained to prevent duplicate
+delivery, including after restart. Do not replace the key to redeliver blindly.
+Pending messages with an unaccepted claim can be listed with status `uncertain`.
+
+Zero or more than 16 parts, blank text and duplicate attachment IDs are 400
+`invalid_input`; more than 48,000 text bytes or more than eight attachment references
+is 413 `too_large`. Other invalid input is 400 `invalid_input`; missing pending/attachment
+records can be 404 `not_found`; execution disabled is also 404. An unknown or
+non-running task ID on either steering route is 409 `conflict` when no accepted
+retry receipt exists. Other errors include
+unavailable attachment staging 415 `unsupported_media`, retained quota exhaustion
+429 `quota_exceeded`, overlapping steering on one turn or execution starting,
+stopping or failed 503 `busy`, and storage
+failure 503 `storage_unavailable`. At most 32 steering claims per task and 1,000
+runner-wide are retained. At most eight additional staged attachments are retained
+for a live provider process through its completion.
+
+## Account usage
+
+`GET /v1/account-usage/:provider` accepts exactly `claude` or `codex`, no query or
+body, and requires the exact `X-Codevo-Runner-Id`. Announce `accountUsage` to see its
+discovery boolean; the route itself is not gated by that token.
+
+HTTP 200 returns `{ provider, fetchedAtEpochMs, windows, accountIdentity? }`.
+The response provider is `claudeCode` or `codex`. `fetchedAtEpochMs` is a nonnegative
+safe integer. There are 1-12 windows, each exactly `{ id, label, usedPercent,
+windowDurationMinutes, resetsAtEpochMs, resetsLabel }`. IDs are unique; ID and label
+are nonblank strings of at most 160 UTF-8 bytes without control characters.
+`usedPercent` is finite and between 0 and 100 inclusive. Duration and reset time
+are nullable nonnegative safe integers; `resetsLabel` is null or nonblank text of
+at most 200 UTF-8 bytes without control characters. Optional `accountIdentity` is
+null or `account:v1:sha256:` followed by 64 lowercase hex characters.
+
+Reads are account-level and concurrent requests for the same provider share one
+in-flight read (at most two provider reads). Missing service or unsupported URL is
+404 `not_found`; provider-read, validation or shutdown failures are 503
+`storage_unavailable`. Identity and other boundary failures follow the rules above.
+
+## Project workspace surfaces
+
+These routes accept optional matching runner identity and have no client capability
+gate. `GET /v1/projects/:id/surface/capabilities` accepts no body/query and returns
+HTTP 200 `{ files: boolean, history: boolean, terminal: boolean }`. It resolves the
+registered project; files/history are false on Windows and terminal reflects service
+availability. Missing surface service returns 404 `not_found`.
+
+All operations below are HTTP POST and return HTTP 200. Bodies are closed JSON
+objects; all listed fields are required, with optional `taskId` on every operation.
+`taskId` is a lowercase UUID v4 selecting that task's conversation workspace and
+must belong to this project. Without it the operation uses the registered checkout.
+
+| Exact path | Body | Response |
+| --- | --- | --- |
+| `/v1/projects/:id/surface/tree` | `{ path: string, offset: number, taskId? }` | `{ entries: [{ name, path, kind }], nextOffset: number | null, truncated: boolean }`; kind is `file`, `directory` or `symlink`. |
+| `/v1/projects/:id/surface/read` | `{ path: string, taskId? }` | `{ path, text, version, unavailableReason }`. |
+| `/v1/projects/:id/surface/write` | `{ path: string, text: string, expectedVersion: string, taskId? }` | The same file shape, containing saved text and new version. |
+| `/v1/projects/:id/surface/history` | `{ offset: number, taskId? }` | `{ commits: [{ id, parents: string[], subject, authorName, authoredAt }], nextOffset: number | null, truncated: boolean }`. Commit fields other than parents are strings. |
+| `/v1/projects/:id/surface/commit-files` | `{ commit: string, taskId? }` | `{ files: [{ path, status, oldPath? }], truncated: boolean }`; status is `added`, `modified`, `deleted` or `renamed`. |
+| `/v1/projects/:id/surface/commit-diff` | `{ commit: string, path: string, taskId? }` | `{ path, original: { text, truncated }, modified: { text, truncated }, unavailableReason }`. |
+
+Paths are relative, nonempty, at most 4096 UTF-8 bytes, with no backslash or
+control character U+0000-U+001F (DEL is accepted), absolute/drive prefix, empty/dot/parent segment or `.git` segment
+(case-insensitive). Tree alone accepts `path: ""` for the root. Offsets are safe
+integers from 0 through 100,000. Commit IDs are 40 or 64 lowercase hex characters,
+reachable ancestors of HEAD. `expectedVersion` is a 64-character lowercase SHA-256
+hex digest returned by read. Write text is at most 65,536 UTF-8 bytes with no NUL;
+wrong types, NUL or excessive text return 413 `too_large` in this parser.
+
+Tree scans at most 10,000 entries, omits `.git`, and returns at most 200 entries,
+directories first then by name. Symlinks are listed but not traversed. File reads
+and writes require an existing regular file with one hard link, never follow
+symlinks, and bound text to 64 KiB. A readable file returns a SHA-256 `version`
+and null `unavailableReason`; binary/invalid UTF-8 or large files return empty text,
+null version and `binary` or `large`. Write atomically replaces the existing file
+only if the version and file/workspace identity still match; it does not create a
+missing file. Concurrent writes to the same workspace/path conflict.
+
+History reads HEAD with 50 commits per page; `authoredAt` is a date string from Git.
+Commit files compare the first parent (or the empty tree for a root commit), up to
+1,000 files and 256 KiB of serialized file entries. Commit diff uses that listing,
+including renamed old paths; each text side is bounded to 64 KiB. If either side
+is binary or large, both texts are empty; large sets both side truncation flags.
+`unavailableReason` is null, `binary` or `large`.
+
+Errors are 400 `invalid_input` for field/path/offset/hash validation, 404 `not_found`
+for missing service/project/task/file or unreachable commit, 409 `conflict` for
+unsafe/replaced workspaces, symlinks/hardlinks, stale versions or concurrent saves,
+503 `busy` when four surface operations are already active, and 503
+`storage_unavailable` for failed file helpers or invalid helper/Git results.
+The operation signal has a 15-second budget; the file helper has a 10-second budget.
+Unclassified failures use 500 `internal_error`, not a separate surface timeout code.
+
+## Project and conversation terminals
+
+Terminal routes have no client-capability gate and accept optional matching runner
+identity. Check `GET /v1/projects/:id/surface/capabilities` for `terminal` support.
+All successful terminal commands return HTTP 200.
+
+| Route | Request / response |
+| --- | --- |
+| `POST /v1/projects/:id/terminals` | Closed `{ cols: number, rows: number, taskId?: string }` -> TerminalSnapshot. No query accepted. |
+| `GET /v1/projects/:id/terminals/:terminalId` | Optional `?after=<digits>`, `?taskId=<uuid>`, or both in either order -> TerminalPage. No body. |
+| `POST /v1/projects/:id/terminals/:terminalId/input` | Closed `{ data: string }`; optional `?taskId=<uuid>` -> `{ accepted: true }`. |
+| `POST /v1/projects/:id/terminals/:terminalId/resize` | Closed `{ cols: number, rows: number }`; optional `?taskId=<uuid>` -> TerminalSnapshot. |
+| `DELETE /v1/projects/:id/terminals/:terminalId` | Optional `?taskId=<uuid>`, no body -> `{ closed: true }`. |
+
+Columns are integers 2-500 and rows integers 1-300. Input data is nonempty and at
+most 65,536 UTF-8 bytes. Terminal/task IDs are lowercase UUID v4. Opening with a
+task selects its conversation workspace; omission selects the project checkout.
+Every later request must supply the same task scope (or omit it for a project
+terminal), otherwise 404 `not_found`. Unknown/duplicate query fields are rejected
+by the exact allowlist. `after` defaults to zero and must be a nonnegative safe
+integer no greater than the terminal's current sequence.
+
+TerminalSnapshot is `{ id, projectId, taskId, cols, rows, status, exitCode, sequence }`:
+`taskId` and numeric `exitCode` are nullable; status is `running` or `exited`.
+TerminalPage adds `{ chunks: [{ sequence: number, data: string }], truncated: boolean }`.
+Chunks have strictly increasing sequence numbers. Poll using the last received chunk
+sequence, since the snapshot's sequence can be ahead of the returned page.
+`truncated` is true when output after the requested cursor was evicted before this
+read (the oldest retained chunk is newer than `after + 1`), so the page does not
+start immediately after the cursor. It is false when only output at or before the
+cursor was evicted, and it never means a page is full. Pages contain at most 256 KiB of chunk data; retention is 1 MiB or 4096
+chunks, and each chunk is at most 16 KiB.
+
+Open reuses a running terminal for the exact project/task scope (the existing size
+is retained); it does not require an idempotency key. Sessions survive transport
+reconnects in memory, expire after 24 hours without activity, and are removed on
+close/shutdown. Closing twice returns 404 on the second request. The PTY runs the
+fixed `/bin/bash -l` in the selected workspace. Input and resize require a running
+session; exited sessions retain bounded readable output until removed/expired.
+
+Errors are 400 `invalid_input` for bad sizes, input or cursor, 404 `not_found` for
+missing service/project/task/session or mismatched scope, 409 `conflict` for an
+exited session's input/resize or changed workspace, 503 `busy` for session admission
+or over 256 KiB input per session per one-second window. After service shutdown,
+open returns 503 `storage_unavailable` and every other terminal request returns
+404 `not_found`; an unusable PTY descriptor is 503 `storage_unavailable` and other
+spawn failures are 500 `internal_error`. Session/opening admission
+is bounded by a 16-slot check. Shared JSON/media/boundary errors also apply.
+
+## Project repository identity
+
+`GET /v1/projects/:id/repository-identity` requires the exact `X-Codevo-Runner-Id`,
+accepts no body/query and has no client-capability gate. HTTP 200 returns exactly
+`{ repositoryKey: string | null }`, derived from the registered checkout's local
+`remote.origin.url`. It is a display grouping identity, not workspace authority.
+
+The canonical key is `host[:nondefault-port]/path`: host is lowercase, default
+scheme ports, trailing slashes and a final `.git` are removed, and github.com paths
+are lowercased. HTTPS, HTTP, SSH, Git and scp-style inputs can be recognized; an
+absent, unsupported or uncanonicalizable origin yields null. Raw origin URLs and
+credentials are not returned. The lookup pins/revalidates the workspace, admits
+at most two concurrent reads and uses a five-second signal deadline.
+
+Missing identity is 409 `conflict`; foreign/duplicate identity follows the shared
+boundary rules. Missing execution/identity service or project is 404 `not_found`,
+concurrent read exhaustion and execution that is not initialized, is shutting down
+or has a failed worker are 503 `busy`; changed workspace can be 409 `conflict`,
+and a closed or failed SQLite repository is 503 `storage_unavailable`. Unclassified
+lookup/cancellation failures use 500 `internal_error`.
+
+## Text attachments
+
+`PUT /v1/attachments/:id` also accepts exact content type `text/plain`, without
+Content-Encoding, using the same required percent-encoded `X-File-Name` and UUID
+rules as image uploads. The body is raw, nonempty valid UTF-8 with no NUL and at
+most 5 MiB; the upload transport's 8 MiB ceiling still applies. Success is
+`{ attachment, created }`, 201 for new or 200 for identical retry.
+
+`GET /v1/attachments/:id` returns text metadata `{ id, runnerId, name, bytes,
+sha256, createdAt, mediaType: "text/plain" }`, without image width/height.
+`GET /v1/attachments/:id/content` returns the original text bytes with the same
+no-store/nosniff and attachment-download behavior as images. These routes accept
+optional matching runner identity and have no capability-token gate. The
+`textAttachments` discovery boolean advertises support. Draft/continuation/pending
+parts reference text files with the existing attachment part shape.
+
+Invalid UTF-8, empty or NUL-containing text is 415 `unsupported_media`; excessive
+bytes are 413 `too_large`. Shared attachment errors include 400 `invalid_input`,
+404 `not_found`, 409 `conflict` for changed retry bytes/metadata, 429
+`quota_exceeded`, 503 `busy`/`storage_unavailable`, and upload timeout 408
+`request_timeout`. Text files share the 256-file/256 MiB attachment store and
+per-task eight-reference limit with images.
+
+## Additional repository and question contract details
+
+The repository routes in [Project and thread management](#project-and-thread-management)
+require the runner identity, but have no client-header capability gate. Hosts,
+lookup and search return HTTP 200 for their typed outcomes. Lookup/search bodies
+are closed: `provider` is `github` or `gitlab`, `host` is lowercase ASCII matching
+`[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?`, at most 253 characters. Lookup `path` is at
+most 255 characters with no `..`, exactly two slash-separated segments for GitHub
+or 2-20 for GitLab, each matching `[A-Za-z0-9][A-Za-z0-9._-]*`. Search `query` must
+already be trimmed (leading or trailing whitespace is 400 `invalid_input`),
+1-100 characters matching `[A-Za-z0-9][A-Za-z0-9._ /-]*`, with no `..`;
+`page` is an integer 1-10. Invalid bodies are 400 `invalid_input`; absent services
+are 404 `not_found`; body/media errors follow the shared rules.
+
+`GET /v1/repositories/hosts` returns `{ github: HostsState, gitlab: HostsState }`.
+HostsState is `{ status: "ready", hosts: [{ provider, host, auth }], truncated }`,
+where auth is `authenticated` or `notAuthenticated`, or `{ status: "cliMissing" }`,
+or `{ status: "failed", reason: "timedOut" | "invalidOutput" | "busy" }`.
+Lookup success is `{ status: "ok", repository }`; search success is the shape
+already listed. Repository is `{ provider, host, fullPath, description, visibility,
+defaultBranch, sshUrl, httpsUrl }`; description (up to 200 code points), branch and
+URLs are nullable strings, and visibility is `public`, `private`, `internal` or
+`unknown`. Failure outcomes are `{ status }` with `notFound`, `cliMissing`,
+`notAuthenticated`, `hostNotAllowed`, `timedOut` or `superseded`;
+`{ status: "rateLimited", retryAfterSeconds: number | null }`; or
+`{ status: "failed", reason: "network" | "invalidOutput" | "outputTooLarge" | "busy" | "unknown" }`.
+These statuses are JSON outcomes rather than HTTP error codes.
+
+`GET /v1/tasks/:id/questions` and
+`POST /v1/tasks/:id/questions/:requestId/answer` have no capability-header gate;
+runner identity is optional when omitted. Both return HTTP 200 with the shapes
+in [Interactive questions](#interactive-questions). Requests contain 1-4 questions,
+each with at most 12 options. Question/option identifiers match
+`[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Header/prompt/option label/description limits
+are 128/8192/512/2048 UTF-8 bytes; header and description may be blank. Prompts and
+labels are nonblank. All reject NUL. Answers are closed objects containing all
+three fields `questionId`, `optionIds`, `text`; text can be empty, up to 8192 UTF-8
+bytes, without NUL. Selection IDs cannot duplicate; non-multiple questions accept
+at most one. Every question must have a selection or nonblank custom text; custom
+text is forbidden when `allowCustom` is false. Invalid answers are 400
+`invalid_input`, missing service/task/request 404 `not_found`, stale/different
+answers 409 `conflict`; shared JSON/media and storage errors also apply.
+
+## Additional management and Git response details
+
+`POST /v1/project-directories` returns HTTP 200. Its closed body is `{ path? }`;
+omission selects the projects root. A supplied path is an absolute string of at
+most 4096 UTF-8 bytes without control characters or DEL/C1 controls or a `..`
+segment. Invalid input is 400 `invalid_input`, missing service 404 `not_found`,
+outside-root, missing or symlink-alias selections are 400 `invalid_input`, four
+concurrent listings cause 503 `busy`, and lost directory ownership returns 503
+`storage_unavailable`. The
+controller aborts after ten seconds; unclassified filesystem/abort errors return
+500 `internal_error`. It requires runner identity and has no capability-header gate.
+
+All thread metadata/order successes are HTTP 200. `expectedRevision` is a
+nonnegative safe integer. A non-null title must be nonblank without ASCII controls
+or DEL. The resulting metadata cannot have both non-null `snoozedUntil` and
+`settledAt`. `targetTaskId` is a string matching `[a-zA-Z0-9_-]{1,128}`; the route's
+own task ID and the metadata-list `after` cursor are restricted by the boundary
+to UUID v4. Invalid input is 400 `invalid_input`, missing task/service 404
+`not_found`, stale revision or incompatible reorder 409 `conflict`, and revision,
+section or storage capacity exhaustion 429 `quota_exceeded`. All require the
+runner identity and have no capability-header gate.
+
+For the Git routes already listed in [Git sync](#git-sync), `dirty` is
+`{ tracked: number, untracked: number, truncated: boolean }` with counts 0-10,000.
+Project `upstream` and task `published` are nullable
+`{ ref: string, ahead: number, behind: number }`. Task `base` is nullable
+`{ branch: string, sha: string, fetchedAt: string | null, ahead: number, behind: number }`.
+Counts are nonnegative safe integers. Branch fields are nullable where permitted
+by their response shape, and `fetchedAt` is a nullable timestamp string.
+Project operation state is `none`, `merge`, `rebase`, `cherry-pick`, `revert` or
+`bisect`; task mode is `worktree` or `in-place`.
+
+GitOperation status is `running`, `succeeded` or `failed`. Running has null
+`error` and `result`; failed has a Git error code and null result; succeeded has
+null error and a kind-specific result:
+
+| Kind | Result |
+| --- | --- |
+| `fetch` | `{ kind: "fetch", fetchedAt: string }` |
+| `update` | `{ kind: "update", headSha: string, fastForwarded: number }` |
+| `push` | `{ kind: "push", remoteRef: string, pushedSha: string, created: boolean }` |
+
+`remoteRef` begins `refs/heads/`; `fastForwarded` is a nonnegative safe integer.
+Fetch/update/push keys are lowercase UUID v4. These routes require runner identity;
+`gitSync` only gates discovery, not requests. Read successes and commit are HTTP
+200; fetch/update/push admission is 202, including idempotent job retries.
+
+## Additional pending and artifact errors
+
+Pending routes accept optional matching runner identity and have no capability
+header gate. GET, DELETE and resume successes are HTTP 200; enqueue returns 202
+or 200 as described above. In addition to enqueue's shared message/launch/instruction
+validation, missing task/message/service is 404 `not_found`, changed retry input,
+dispatched-message removal or unavailable resume is 409 `conflict`. Every pending
+route except DELETE also returns 409 `conflict` for a task that was never started
+(a draft or project-less task). Capacity exhaustion is 429 `quota_exceeded`,
+execution starting, stopping or failed is 503 `busy`, and unavailable storage is
+503 `storage_unavailable`. Resume and removal accept no body.
+
+Artifact routes likewise have no capability-header gate and accept optional matching
+runner identity. Capture's closed `{ path: string }` body permits at most 4096 UTF-8
+bytes, rejects backslashes, control characters U+0000-U+001F (DEL is accepted),
+URI scheme prefixes and `..`/`.git`
+segments, and supports the extensions `.png`, `.jpg`, `.jpeg`, `.webp`, `.html`,
+`.htm` (case-insensitive). Malformed paths are 400 `invalid_input`; unsupported
+media is 415 `unsupported_media`; missing service/task/file/snapshot is 404
+`not_found`; active or obsolete uncaptured turns and unsafe sources conflict with
+409 `conflict`; file bounds are 413 `too_large`, store limits 429
+`quota_exceeded`, concurrent admission 503 `busy`, and storage failure 503
+`storage_unavailable`. List and content successes are HTTP 200; capture is 201 or
+200 as already described.
