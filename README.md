@@ -89,6 +89,11 @@ following example uses the `codex` account and a checkout at
    most 256 bytes each) as the identity for commits made from the editor; without
    them the repository-local `user.name`/`user.email` is used.
 
+   Optionally set `CODEVO_SPEECH_URL` to the bare loopback origin of a local
+   speech-to-text sidecar, for example `http://127.0.0.1:8001`, to enable
+   [speech transcription](#speech-transcription). Only `http://` with a loopback
+   IP literal and an optional port is accepted; any other value fails startup.
+
    Include the actual provider CLI and language-runtime directories in `PATH`.
    Keep `provider` isolation on a direct host; `container` mode is reserved for
    the Docker deployment. Restrict the environment file with
@@ -593,7 +598,20 @@ older client always receives the oldest contract. The runner advertises the
 capabilities it can serve in `GET /v1/runner`. `projectManagement` and
 `threadManagement` are included only when the matching token is announced, so
 strict older editors remain compatible. `subagentLifecycleRetention` additionally
-negotiates lifecycle event encoding per request.
+negotiates lifecycle event encoding per request. `speechTranscription` is likewise
+included only when its token is announced.
+
+### Speech transcription
+
+When `CODEVO_SPEECH_URL` names a speech-to-text sidecar on the runner's own loopback
+interface, the editor can send a clip of at most 30 seconds (raw PCM16, mono,
+16 kHz) to `POST /v1/speech/transcriptions?language=<sk|en|cs>` and receive its
+text. The runner forwards the clip to the sidecar's `POST /transcribe` and keeps one
+request in flight with at most four waiting. Audio and transcripts are never stored
+or logged. Without the variable the route returns 404 and the capability is false.
+In the Docker deployment a loopback address refers to the runner container itself,
+so the sidecar must listen inside that container's network namespace. See
+[speech transcription API](docs/api.md#speech-transcription).
 
 ### Project and thread management
 

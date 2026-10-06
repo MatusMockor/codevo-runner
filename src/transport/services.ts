@@ -1,3 +1,4 @@
+import type { SpeechApplication } from '../application/speech-transcription-service.js';
 import type { AccountUsageApplication } from '../application/account-usage-service.js';
 import type { CommandCatalogApplication } from '../application/command-catalog-service.js';
 import type { RepositoryLookupService } from '../application/repository-lookup-service.js';
@@ -17,6 +18,7 @@ import type { GitSyncApplication } from '../application/git-sync-ports.js';
 import type { PortPreviewApplication } from '../application/port-preview-ports.js';
 
 export interface RunnerServices {
+  readonly speech?: SpeechApplication;
   readonly accountUsage?: AccountUsageApplication;
   readonly commandCatalog?: CommandCatalogApplication;
   readonly repositories?: RepositoryLookupService;

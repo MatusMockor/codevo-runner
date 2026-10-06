@@ -19,6 +19,7 @@ const statusCodes: Record<ErrorCode, number> = {
   git_remote_unsupported: 409, git_branch_not_found: 409, git_detached_head: 409, git_no_upstream: 409,
   git_dirty: 409, git_diverged: 409, git_operation_in_progress: 409, git_rejected_non_fast_forward: 409,
   git_rejected: 409, git_nothing_to_commit: 409, git_identity_missing: 409,
+  speech_unavailable: 503,
 };
 
 export async function handle(response: ServerResponse, action: () => Promise<void>) {

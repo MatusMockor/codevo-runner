@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { AUTHORIZE, DESCRIPTOR, EXTENDED, type Authorize } from './services.js';
 import { send } from './http.js';
 import type { RunnerDescriptor } from '../server.js';
+import { SPEECH_LANGUAGES } from '../domain/speech.js';
 
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const startRoute = new RegExp(`^/v1/tasks/${uuid}/start$`);
@@ -33,10 +34,12 @@ const taskGitBodyRoute = new RegExp(`^/v1/tasks/${uuid}/git/(commit|push)$`);
 const gitOperationRoute = new RegExp(`^/v1/git-operations/${uuid}$`);
 const portRoute = new RegExp(`^/v1/(?:tasks/${uuid}|projects/${projectSegment})/ports$`);
 const accountUsageRoute = /^\/v1\/account-usage\/(claude|codex)$/;
+const speechRoute = new RegExp(`^/v1/speech/transcriptions\\?language=(?:${SPEECH_LANGUAGES.join('|')})$`);
 const commandCatalogRoute = new RegExp(`^/v1/projects/${projectSegment}/command-catalog/(claude|codex)$`);
-const ownedRoutes = [accountUsageRoute, commandCatalogRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
+  { pattern: speechRoute, methods: ['POST'] },
   { pattern: accountUsageRoute, methods: ['GET'] },
   { pattern: commandCatalogRoute, methods: ['GET'] },
   { pattern: projectGitReadRoute, methods: ['GET'] },
@@ -119,7 +122,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'PATCH' && managementMetadataRoute.test(request.url)) || (request.method === 'POST' &&
-      (turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
+      (speechRoute.test(request.url) || turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

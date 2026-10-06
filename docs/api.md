@@ -345,7 +345,8 @@ Do not manually delete database rows/files to work around quotas.
 
 Error bodies use `{ "error": "code" }`: invalid input is 400, missing records 404,
 conflicting retries 409, oversized payloads 413, unsupported media 415, exhausted
-quotas 429, and busy/unavailable storage 503. Authentication failures are 401;
+quotas 429, and busy/unavailable storage 503. An unusable speech sidecar is 503
+`speech_unavailable`. Authentication failures are 401;
 Origin requests are 403. Upload deadline expiry may return 408 `request_timeout`
 or close a stalled connection. Error responses never contain token or file contents.
 
@@ -1238,3 +1239,65 @@ it is 10 minutes old; a failure is never cached. At most 32 keys are cached (the
 oldest fetch is evicted first) and at most two probes run runner-wide: a further key
 is answered from its last good catalog or refused immediately with 503 `busy`.
 Shutdown aborts running probes.
+
+## Speech transcription
+
+Optional. The runner forwards one short audio clip to a speech-to-text HTTP sidecar
+on the same host and returns its text. It is enabled only when `CODEVO_SPEECH_URL`
+is set to a bare loopback origin: scheme `http://`, a loopback IP literal as host
+(`127.0.0.0/8` in canonical dotted form, or `[::1]`), an optional port, and no path
+other than a single `/`, no query, fragment or user information, for example
+`http://127.0.0.1:8001`. Host names such as `localhost`, `https://` and any other
+value fail startup. When the variable is unset the feature is absent.
+
+Clients announcing `speechTranscription` in `X-Codevo-Client-Capabilities` discover
+the `speechTranscription` capability: true when the sidecar URL is configured, false
+otherwise. Other clients receive the unchanged older descriptor without that field.
+
+`POST /v1/speech/transcriptions?language=<sk|en|cs>` requires bearer authentication
+and the exact `X-Codevo-Runner-Id`. The `language` query is required and exact: a
+missing, repeated, percent-encoded or additional parameter is 404, and any other
+method is 405.
+
+- Request: `Content-Type: application/octet-stream` without parameters and no
+  `Content-Encoding`. The body is raw signed PCM16 little-endian, mono, 16,000 Hz,
+  from 640 to 960,000 bytes inclusive (20 ms to 30 s) with an even byte count.
+- Response: `200 {"text": string}`. The text is trimmed, holds at most 4,000
+  characters and is `""` for silence.
+
+| Status and error | Cause |
+| --- | --- |
+| 409 `runner_identity_mismatch` | Missing or foreign `X-Codevo-Runner-Id` |
+| 404 `not_found` | `CODEVO_SPEECH_URL` is not configured |
+| 415 `unsupported_media` | Another content type, or any `Content-Encoding` |
+| 413 `too_large` | More than 960,000 bytes, declared or received |
+| 400 `invalid_input` | Fewer than 640 bytes, or an odd byte count |
+| 503 `busy` | Admission is full, or the deadline passed before the clip reached the sidecar |
+| 503 `speech_unavailable` | The sidecar is unreachable, timed out, answered anything but a valid 200, or the runner is shutting down |
+
+Checks run in that order, except that admission is decided after the declared
+`Content-Length` is checked and before the body is buffered, so a full runner never
+holds a refused clip in memory.
+
+The runner sends `POST {CODEVO_SPEECH_URL}/transcribe?language=<language>` with
+`Content-Type: application/octet-stream` and the identical bytes. The only accepted
+answer is status 200 with a JSON object whose single field is `text`, a string of at
+most 4,000 characters, in a body of at most 32,768 bytes. Any other status
+(redirects are not followed), field, type, encoding or size is `speech_unavailable`.
+
+Admission is runner-wide: one sidecar request is in flight and at most four further
+requests wait, served in the order their uploads complete; a sixth concurrent
+request is refused with `busy`.
+Each admitted request has one 30-second deadline covering its upload, its wait and
+the sidecar call. A request that has not been forwarded by then answers `busy`; one
+that is waiting for the sidecar answers `speech_unavailable`. A client disconnect or
+runner shutdown aborts the sidecar request and releases the slot immediately.
+
+A request refused at admission (`busy`, or `speech_unavailable` during shutdown) is
+answered only after its body has been read and discarded, so the JSON error reaches
+a client that is still uploading instead of a connection reset. Discarding stops at
+960,000 bytes or after 5 seconds, whichever comes first; a body beyond either bound
+is answered at once and may be cut off. A discarded body holds no admission slot.
+
+Audio and transcript text exist only in memory for the duration of the request.
+They are never written to the data directory and never logged.

@@ -6,6 +6,7 @@ import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { RegisteredProject } from './domain/execution.js';
 import { validGitAuthorPart } from './domain/git-sync.js';
+import { parseSpeechOrigin } from './domain/speech.js';
 
 export function readConfig(env: NodeJS.ProcessEnv) {
   const host = env.CODEVO_HOST ?? '127.0.0.1';
@@ -30,7 +31,8 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   if ((authorName === undefined) !== (authorEmail === undefined) ||
       (authorName !== undefined && (!validGitAuthorPart(authorName) || !validGitAuthorPart(authorEmail))))
     throw new Error('CODEVO_GIT_AUTHOR_NAME and CODEVO_GIT_AUTHOR_EMAIL must both be set to 1–256 printable bytes');
-  return Object.freeze({ host, port: Number(portText), name,
+  const speechUrl = env.CODEVO_SPEECH_URL === undefined ? undefined : parseSpeechOrigin(env.CODEVO_SPEECH_URL);
+  return Object.freeze({ host, port: Number(portText), name, speechUrl,
     gitAuthor: authorName === undefined || authorEmail === undefined ? undefined : Object.freeze({ name: authorName, email: authorEmail }),
     executionEnabled: executionText === 'true',
     executionTimeoutMs: parseExecutionTimeoutMs(env.CODEVO_EXECUTION_TIMEOUT_MS),

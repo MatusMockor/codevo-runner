@@ -1,3 +1,5 @@
+import { SpeechTranscriptionService } from './application/speech-transcription-service.js';
+import { HttpSpeechTranscriber } from './infrastructure/speech/http-transcriber.js';
 import { AccountUsageService } from './application/account-usage-service.js';
 import { CliAccountUsageReader } from './infrastructure/execution/account-usage.js';
 import type { UsageProcessOptions } from './infrastructure/execution/account-usage-process.js';
@@ -57,8 +59,12 @@ export type RunnerExecutionOptions = Readonly<{
   gitSync?: Readonly<{ coordination?: GitCoordinationOptions; timeouts?: GitRepositoryTimeouts; service?: Omit<GitSyncOptions, 'author'> }>;
 }>;
 
+export type RunnerSpeechOptions = Readonly<{ url: string; timeoutMs?: number }>;
+
 /** Composition root: concrete infrastructure is wired only at the outside edge. */
-export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions) {
+export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions, speechOptions?: RunnerSpeechOptions) {
+  const speech = speechOptions
+    ? new SpeechTranscriptionService(new HttpSpeechTranscriber(speechOptions.url), { timeoutMs: speechOptions.timeoutMs }) : undefined;
   const timeoutMs = executionTimeoutMs(options?.executionTimeoutMs);
   const changes = new RunnerChanges();
   const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish());
@@ -131,7 +137,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      accountUsage, commandCatalog, surfaces, terminals,
+      speech, accountUsage, commandCatalog, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
@@ -145,10 +151,11 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           const executionClosing = execution?.close();
           const usageClosing = accountUsage.close();
           const catalogClosing = commandCatalog?.close();
+          const speechClosing = speech?.close();
           try {
             try { await executionClosing; }
             finally {
-              try { await usageClosing; }
+              try { await speechClosing; await usageClosing; }
               finally {
                 try { await catalogClosing; }
                 finally {
