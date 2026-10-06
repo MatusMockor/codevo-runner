@@ -1,4 +1,5 @@
 import type { AccountUsageApplication } from '../application/account-usage-service.js';
+import type { CommandCatalogApplication } from '../application/command-catalog-service.js';
 import type { RepositoryLookupService } from '../application/repository-lookup-service.js';
 import type { ThreadMetadataService } from '../application/thread-metadata.js';
 import type { ProjectDirectories } from '../application/project-directories.js';
@@ -17,6 +18,7 @@ import type { PortPreviewApplication } from '../application/port-preview-ports.j
 
 export interface RunnerServices {
   readonly accountUsage?: AccountUsageApplication;
+  readonly commandCatalog?: CommandCatalogApplication;
   readonly repositories?: RepositoryLookupService;
   readonly threadMetadata?: ThreadMetadataService;
   readonly projectDirectories?: ProjectDirectories;

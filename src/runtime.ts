@@ -1,6 +1,8 @@
 import { AccountUsageService } from './application/account-usage-service.js';
 import { CliAccountUsageReader } from './infrastructure/execution/account-usage.js';
 import type { UsageProcessOptions } from './infrastructure/execution/account-usage-process.js';
+import { CommandCatalogService } from './application/command-catalog-service.js';
+import { CliCommandCatalogReader, type CommandCatalogCliOptions } from './infrastructure/execution/command-catalog.js';
 import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
@@ -44,6 +46,7 @@ import { ProcListeningPortScanner } from './infrastructure/execution/listening-p
 export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
   accountUsageCli?: UsageProcessOptions;
+  commandCatalogCli?: CommandCatalogCliOptions;
   projectsRoot?: string;
   executionTimeoutMs?: number;
   executionConcurrency?: number;
@@ -75,6 +78,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let clones: ProjectCloneService | undefined;
     let gitSync: GitSyncService | undefined;
     let ports: PortPreviewService | undefined;
+    let commandCatalog: CommandCatalogService | undefined;
     try {
       if (options) {
         const configured = new ConfiguredProjectRegistry(options.projects);
@@ -101,6 +105,11 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           await createExecutionAttachmentStager(dataDir, attachments),
           (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership, approvals);
         await execution.initialize();
+        // Catalogs describe the provider CLIs tasks launch; injected executors need an explicit probe configuration.
+        if (options.providers === undefined || options.commandCatalogCli) {
+          commandCatalog = new CommandCatalogService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
+            new CliCommandCatalogReader(options.commandCatalogCli));
+        }
         if (process.platform === 'linux') {
           ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,
             new ProcListeningPortScanner(), { excludedPorts: options.listenPort === undefined ? [] : [options.listenPort] });
@@ -122,7 +131,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      accountUsage, surfaces, terminals,
+      accountUsage, commandCatalog, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
@@ -131,19 +140,23 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync, ports,
       close(): Promise<void> {
         closing ??= (async () => {
-          // Fence execution synchronously before the first await; usage owns its
-          // separate cancellation and must not reopen the admission window.
+          // Fence execution synchronously before the first await; usage and catalog
+          // probes own separate cancellations and must not reopen the admission window.
           const executionClosing = execution?.close();
           const usageClosing = accountUsage.close();
+          const catalogClosing = commandCatalog?.close();
           try {
             try { await executionClosing; }
             finally {
               try { await usageClosing; }
               finally {
-                try { await terminals?.close(); }
+                try { await catalogClosing; }
                 finally {
-                  try { await clones?.close(); }
-                  finally { await gitSync?.close(); }
+                  try { await terminals?.close(); }
+                  finally {
+                    try { await clones?.close(); }
+                    finally { await gitSync?.close(); }
+                  }
                 }
               }
             }

@@ -26,6 +26,13 @@ export type CliExecutorOptions = Readonly<{
 const ENVIRONMENT_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR',
   'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR'] as const;
 
+/** Every provider launch inherits only this allowlist of the runner's environment. */
+export function providerEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of ENVIRONMENT_KEYS) if (process.env[key]) env[key] = process.env[key];
+  return env;
+}
+
 /** Provider-specific command translation; credentials remain on the execution host. */
 export class CliProviderExecutor implements ProviderExecutor {
   readonly supportsAttachments = true;
@@ -103,8 +110,7 @@ export class CliProviderExecutor implements ProviderExecutor {
     const stdin = this.provider === 'codex' ? `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${prompt || 'Inspect the attached images.'}` : `${JSON.stringify({
       type: 'user', message: { role: 'user', content: [...images, ...(prompt ? [{ type: 'text', text: prompt }] : [])] },
     })}\n`;
-    const env: NodeJS.ProcessEnv = {};
-    for (const key of ENVIRONMENT_KEYS) if (process.env[key]) env[key] = process.env[key];
+    const env = providerEnvironment();
     // The CLI's default 10-minute background wait can terminate unfinished agents.
     // Runner cancellation and the finite execution deadline remain authoritative.
     if (this.provider === 'claude') env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = '0';

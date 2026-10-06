@@ -1177,3 +1177,64 @@ media is 415 `unsupported_media`; missing service/task/file/snapshot is 404
 `quota_exceeded`, concurrent admission 503 `busy`, and storage failure 503
 `storage_unavailable`. List and content successes are HTTP 200; capture is 201 or
 200 as already described.
+
+## Command catalog
+
+Clients announcing `commandCatalog` in `X-Codevo-Client-Capabilities` discover the
+optional `commandCatalog` capability. It is true when execution is enabled and tasks
+launch the provider CLIs; otherwise it is false and the route returns 404.
+Authentication, runner identity, exact paths and query-string rules match Git sync;
+only GET is allowed.
+
+| Route | Response |
+| --- | --- |
+| `GET /v1/projects/:projectId/command-catalog/:provider` | `{version:1,provider,truncated,entries:[{kind,name,label,description,argumentHint,builtin}]}` |
+
+`:provider` is `claude` (response `provider` is `claudeCode`, every entry has `kind`
+`command`) or `codex` (`provider` is `codex`, every entry has `kind` `skill`). An
+unknown project or provider is 404 `not_found`. The object is closed: no other
+fields are returned, and `label`, `description` and `argumentHint` are always present
+as a string or `null`.
+
+The catalog is what a task of that project would see: the runner starts the same
+provider executable with the same environment allowlist as a task launch, in the
+registered checkout, pinned by directory identity before exec. Claude Code is asked
+for its `initialize` control response with hooks, session persistence and MCP servers
+disabled, so slash commands contributed by MCP servers are not listed. Codex is
+asked for `skills/list` of the checkout through `codex app-server`, and only the
+single listing for exactly that directory is used: a reply without it, or with it
+more than once, fails the read instead of returning another directory's skills.
+Neither probe sends a prompt. Only command and skill names, labels, descriptions and argument hints
+are read; account data, model lists and skill file paths are never returned or
+logged. Task worktrees are not probed separately, so a command file that differs in
+a conversation worktree is reported as it exists in the registered checkout.
+
+Names match `^[A-Za-z0-9][A-Za-z0-9:_.-]*$` and are at most 128 bytes; entries with
+any other name, including provider-internal names starting with `__`, disabled Codex
+skills and repeated names (the first wins) are omitted. Text fields are trimmed,
+whitespace and control characters collapse to single spaces, an empty value becomes
+`null`, and longer values are cut on a code point boundary to 128 UTF-8 bytes
+(`label`, `argumentHint`) or 512 (`description`). At most 512 entries are returned in
+provider order; `truncated` is true when more valid entries existed, and also when
+Codex reports skills that failed to load (the failure text and paths are not
+returned). `builtin` marks CLI built-in commands and Codex `system` skills.
+
+A Codex read can take a few seconds. Codex loads user and plugin skills
+asynchronously after startup and gives no completion signal, so the runner polls
+`skills/list` inside one app-server process: one request at a time, re-sent every
+400 ms, until the ordered list of names has been unchanged for 2 seconds or 6
+seconds have passed since the handshake, whichever comes first. The latest listing
+is returned. A skill that appears later than that is picked up by the next refresh.
+
+A probe is bounded to 5 seconds of checkout validation and 20 seconds for Claude Code
+or 15 seconds for Codex. Claude Code output is bounded to 2 MiB; each Codex reply
+line is bounded to 2 MiB and all Codex output of one probe to 16 MiB, with earlier
+polls released once parsed. Exceeding any of these, a non-zero exit, an error or
+invalid reply or a checkout that fails validation is 503 `storage_unavailable` and
+the whole process tree is killed. Output over the cap is never served as a shortened catalog. A catalog is
+cached per project and provider for 60 seconds and concurrent reads of one key share
+one probe. When a refresh fails, the last good catalog of that key is served until
+it is 10 minutes old; a failure is never cached. At most 32 keys are cached (the
+oldest fetch is evicted first) and at most two probes run runner-wide: a further key
+is answered from its last good catalog or refused immediately with 503 `busy`.
+Shutdown aborts running probes.

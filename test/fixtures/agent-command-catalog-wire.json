@@ -1,0 +1,488 @@
+{
+  "schemaVersion": 1,
+  "ipcCommand": "get_agent_command_catalog",
+  "remoteIpcCommand": "remote_runner_get_command_catalog",
+  "remoteRunnerCapability": "commandCatalog",
+  "remoteRunnerRoute": "/v1/projects/{projectId}/command-catalog/{claude|codex}",
+  "limits": {
+    "maxEntries": 512,
+    "maxNameBytes": 128,
+    "maxLabelBytes": 128,
+    "maxDescriptionBytes": 512,
+    "maxArgumentHintBytes": 128,
+    "maxRepositoryRootBytes": 4096,
+    "namePattern": "^[A-Za-z0-9][A-Za-z0-9:_.-]*$"
+  },
+  "requests": [
+    {
+      "name": "claudeWorkspace",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "claudeCode"
+      }
+    },
+    {
+      "name": "codexWorkspace",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "codex"
+      }
+    }
+  ],
+  "rejectedRequests": [
+    {
+      "name": "unknownField",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "codex",
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "name": "unknownProvider",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "gemini"
+      }
+    },
+    {
+      "name": "emptyRoot",
+      "value": {
+        "repositoryRoot": "",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "relativeRoot",
+      "value": {
+        "repositoryRoot": "project",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "missingProvider",
+      "value": {
+        "repositoryRoot": "/Users/dev/project"
+      }
+    }
+  ],
+  "remoteRequests": [
+    {
+      "name": "claudeProject",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "claude"
+      }
+    },
+    {
+      "name": "codexProject",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    }
+  ],
+  "rejectedRemoteRequests": [
+    {
+      "name": "unknownField",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "codex",
+        "repositoryRoot": "/srv/project"
+      }
+    },
+    {
+      "name": "localProviderName",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "claudeCode"
+      }
+    },
+    {
+      "name": "emptyProjectId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "projectIdWithSlash",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "a/b",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "projectIdTooLong",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "missingRunnerId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "emptyRunnerId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    }
+  ],
+  "catalogs": [
+    {
+      "name": "claudeCommands",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "design-login",
+            "label": null,
+            "description": "Sign in to the design workspace.",
+            "argumentHint": null,
+            "builtin": false
+          },
+          {
+            "kind": "command",
+            "name": "superpowers:brainstorming",
+            "label": null,
+            "description": "Explore requirements before building.",
+            "argumentHint": "[topic]",
+            "builtin": false
+          },
+          {
+            "kind": "command",
+            "name": "code-review",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "codexSkills",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "skill",
+            "name": "work-pets:create-pet",
+            "label": "Create Pet",
+            "description": "Create a new pet for this workspace.",
+            "argumentHint": null,
+            "builtin": false
+          },
+          {
+            "kind": "skill",
+            "name": "skill-creator",
+            "label": null,
+            "description": "Create or update a skill.",
+            "argumentHint": null,
+            "builtin": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "emptyCatalog",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": []
+      }
+    },
+    {
+      "name": "truncatedCatalog",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": true,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": "Open a pull request.",
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    }
+  ],
+  "rejectedCatalogs": [
+    {
+      "name": "unknownEnvelopeField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": [],
+        "cwd": "/Users/dev/project"
+      }
+    },
+    {
+      "name": "unknownEntryField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "skill",
+            "name": "imagegen",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false,
+            "path": "/Users/dev/.codex/skills/imagegen/SKILL.md"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupportedVersion",
+      "value": {
+        "version": 2,
+        "provider": "codex",
+        "truncated": false,
+        "entries": []
+      }
+    },
+    {
+      "name": "unknownProvider",
+      "value": {
+        "version": 1,
+        "provider": "gemini",
+        "truncated": false,
+        "entries": []
+      }
+    },
+    {
+      "name": "unknownKind",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "prompt",
+            "name": "imagegen",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "skillInClaudeCatalog",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "skill",
+            "name": "pdf",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "commandInCodexCatalog",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "compact",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "nameWithSpace",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "code review",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "nameWithLeadingSlash",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "/pr",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "emptyName",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicateName",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": false
+          },
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": "Duplicate.",
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "emptyDescription",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": "",
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "controlCharacterInDescription",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": "Open a\npull request.",
+            "argumentHint": null,
+            "builtin": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "builtinNotBoolean",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "entries": [
+          {
+            "kind": "command",
+            "name": "pr",
+            "label": null,
+            "description": null,
+            "argumentHint": null,
+            "builtin": "yes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missingTruncated",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "entries": []
+      }
+    }
+  ]
+}
