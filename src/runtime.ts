@@ -13,6 +13,7 @@ import { SurfaceService } from './application/surface-service.js';
 import { RegisteredSurfaceWorkspaceResolver } from './infrastructure/projects/surface-workspace.js';
 import { executionTimeoutMs } from './domain/execution-policy.js';
 import { QuestionService } from './application/question-service.js';
+import { ApprovalService } from './application/approval-service.js';
 import { FileInstructionWorkspace } from './infrastructure/files/instruction-workspace.js';
 import { ArtifactService } from './application/artifact-service.js';
 import { FileArtifactBlobs } from './infrastructure/artifacts/blobs.js';
@@ -62,6 +63,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     const accountUsage = new AccountUsageService(new CliAccountUsageReader(options?.accountUsageCli));
     const questions = new QuestionService(repository);
     await questions.expire();
+    const approvals = new ApprovalService(repository);
     // Recovery is truthful even when an operator disables execution after a crash.
     await repository.interruptRunningTasks();
     await repository.interruptClones();
@@ -97,7 +99,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), executionWorkspace,
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership);
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership, approvals);
         await execution.initialize();
         if (process.platform === 'linux') {
           ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,
@@ -125,6 +127,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
       questions: execution ? questions : undefined,
+      approvals: execution ? approvals : undefined,
       historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync, ports,
       close(): Promise<void> {
         closing ??= (async () => {

@@ -13,6 +13,8 @@ const pendingRoute = new RegExp(`^/v1/tasks/${uuid}/pending$`);
 const fileDiffRoute = new RegExp(`^/v1/tasks/${uuid}/file-diff$`);
 const artifactRoute = new RegExp(`^/v1/tasks/${uuid}/artifacts$`);
 const answerRoute = new RegExp(`^/v1/tasks/${uuid}/questions/${uuid}/answer$`);
+const approvalsRoute = new RegExp(`^/v1/tasks/${uuid}/approvals$`);
+const approvalAnswerRoute = new RegExp(`^/v1/tasks/${uuid}/approvals/${uuid}/answer$`);
 const surfaceRoute = /^\/v1\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\/surface\/(tree|read|write|history|commit-files|commit-diff)$/;
 const terminalBase = '/v1/projects/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}/terminals';
 const terminalOpenRoute = new RegExp(`^${terminalBase}$`);
@@ -58,6 +60,8 @@ const routes = [
   { pattern: surfaceRoute, methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/questions$`), methods: ['GET'] },
   { pattern: answerRoute, methods: ['POST'] },
+  { pattern: approvalsRoute, methods: ['GET'] },
+  { pattern: approvalAnswerRoute, methods: ['POST'] },
   { pattern: artifactRoute, methods: ['GET', 'POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/artifacts/${uuid}/content$`), methods: ['GET'] },
   { pattern: steerRoute, methods: ['POST'] },
@@ -113,7 +117,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'PATCH' && managementMetadataRoute.test(request.url)) || (request.method === 'POST' &&
-      (turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url)));
+      (turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

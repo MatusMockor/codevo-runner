@@ -1,5 +1,6 @@
 import type { ProviderSteer } from './steering.js';
 import type { AgentQuestion, AgentQuestionResponse } from './questions.js';
+import type { AgentApprovalInput, AgentApprovalOutcome } from './approvals.js';
 import type { Task } from './contracts.js';
 import type { ProcessOwnershipSink } from './process-ownership.js';
 
@@ -15,6 +16,7 @@ export type ExecutionRequest = Readonly<{
   onToolBoundary?: () => Promise<void>;
   resumeSessionId?: string;
   onQuestion?: (questions: readonly AgentQuestion[]) => Promise<AgentQuestionResponse>;
+  onApproval?: (request: AgentApprovalInput, signal: AbortSignal) => Promise<AgentApprovalOutcome>;
   onSession?: (sessionId: string) => Promise<void>;
   attachments: readonly StagedExecutionAttachment[];
   cwd: string;

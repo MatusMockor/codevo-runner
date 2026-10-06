@@ -1,15 +1,16 @@
-import { EXECUTION_LIMITS } from '../domain/execution.js';
+import { EXECUTION_LIMITS, type ExecutionRequest } from '../domain/execution.js';
 import type { TurnChanges } from './turn-changes.js';
 import { SubagentLifecycleCollector } from '../domain/subagent-lifecycle.js';
 import { SteeringService } from './steering-service.js';
 import type { QuestionService } from './question-service.js';
+import type { ApprovalService } from './approval-service.js';
 import { ProviderArtifactReferences } from '../domain/artifact-output.js';
 import { parseWorkspaceFileInput } from '../domain/workspace-files.js';
 import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
 import { isGitErrorCode, parseStartInput } from '../domain/git-sync.js';
-import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs } from './execution-ports.js';
+import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs, TurnOptions } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 import type { AgentProcessOwnership, ProcessOwnershipLease } from './process-ownership.js';
 
@@ -37,6 +38,7 @@ export class ExecutionService implements ExecutionApplication {
     private readonly turnChanges?: TurnChanges,
     private readonly concurrency: number = EXECUTION_LIMITS.activeTasks,
     private readonly processOwnership?: AgentProcessOwnership,
+    private readonly approvals?: ApprovalService,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > EXECUTION_LIMITS.activeTasks) throw new RunnerError('invalid_input');
     this.steering = new SteeringService(executions, attachments);
@@ -57,14 +59,14 @@ export class ExecutionService implements ExecutionApplication {
     return this.executions.listPending(validateId(taskId));
   }
 
-  async enqueue(taskId: string, input: unknown) {
+  async enqueue(taskId: string, input: unknown, turn?: TurnOptions) {
     this.assertAvailable();
     validateId(taskId);
     const parsed = parseContinueTask(input);
     const task = await this.tasks.getTask(taskId);
     this.executorFor({ ...task, parts: parsed.parts });
     this.assertAvailable();
-    const result = await this.executions.enqueuePending(taskId, parsed);
+    const result = await this.executions.enqueuePending(taskId, parsed, turn?.approvals === true);
     this.wake();
     return result;
   }
@@ -82,7 +84,7 @@ export class ExecutionService implements ExecutionApplication {
     return result;
   }
 
-  async start(taskId: string, input: unknown): Promise<Task> {
+  async start(taskId: string, input: unknown, turn?: TurnOptions): Promise<Task> {
     this.assertAvailable();
     validateId(taskId);
     const { projectId, base } = parseStartInput(input);
@@ -91,7 +93,7 @@ export class ExecutionService implements ExecutionApplication {
     if (base?.kind === 'origin-branch' && task.isolation === 'in-place') throw new RunnerError('invalid_input');
     this.executorFor(task);
     this.assertAvailable();
-    const queued = await this.executions.queueTask(taskId, projectId, base);
+    const queued = await this.executions.queueTask(taskId, projectId, base, turn?.approvals === true);
     this.wake();
     return queued;
   }
@@ -110,7 +112,7 @@ export class ExecutionService implements ExecutionApplication {
     return this.executions.getResumeState(taskId);
   }
 
-  async continue(taskId: string, input: unknown) {
+  async continue(taskId: string, input: unknown, turn?: TurnOptions) {
     this.assertAvailable();
     validateId(taskId);
     const parsed = parseContinueTask(input);
@@ -122,7 +124,7 @@ export class ExecutionService implements ExecutionApplication {
     const session = await this.executions.getTaskSession(taskId);
     await this.workspaces.resume(await this.registry.get(task.projectId), session.workspaceTaskId);
     this.assertAvailable();
-    const result = await this.executions.continueTask(taskId, parsed);
+    const result = await this.executions.continueTask(taskId, parsed, turn?.approvals === true);
     this.wake();
     return result;
   }
@@ -252,6 +254,13 @@ export class ExecutionService implements ExecutionApplication {
     if (this.closing || this.workerFailure) abort.abort();
   }
 
+  private async approvalHandler(task: Task, signal: AbortSignal): Promise<ExecutionRequest['onApproval']> {
+    const approvals = this.approvals;
+    if (!approvals || !this.executions.getTaskApprovals) return undefined;
+    if (!await this.executions.getTaskApprovals(task.id)) return undefined;
+    return (input, requestSignal) => approvals.ask(task, input, AbortSignal.any([signal, requestSignal]));
+  }
+
   private async run(task: Task, abort: AbortController): Promise<void> {
     const steering = this.steering.open(task.id, abort.signal);
     if (this.closing || this.workerFailure) abort.abort();
@@ -261,6 +270,7 @@ export class ExecutionService implements ExecutionApplication {
     let turnContext: { cwd: string; identity: Readonly<{ dev: number; ino: number }> } | undefined;
     let processes: ProcessOwnershipLease | undefined;
     let snapshotFinished = false;
+    let onApproval: ExecutionRequest['onApproval'];
     const finishSnapshot = async () => {
       if (snapshotFinished || !turnContext || this.closing || abort.signal.aborted) return;
       snapshotFinished = true;
@@ -277,6 +287,7 @@ export class ExecutionService implements ExecutionApplication {
       const project = await this.registry.get(task.projectId);
       const session = await this.executions.getTaskSession(task.id);
       if (task.parentTaskId && !session.sessionId) throw new RunnerError('conflict');
+      onApproval = await this.approvalHandler(task, abort.signal);
       const startBase = task.parentTaskId ? undefined : await this.executions.getTaskGitBase?.(task.id);
       awaitingGitLease = true;
       await this.workspaces.awaitGitLease?.(project, session.workspaceTaskId, task.isolation ?? 'worktree', abort.signal);
@@ -314,6 +325,7 @@ export class ExecutionService implements ExecutionApplication {
       processes = this.processOwnership?.open({ conversationId: session.workspaceTaskId, projectId: project.id, isolation: task.isolation ?? 'worktree' });
       const result = await executor.execute({ task, cwd, ...(processes ? { processes } : {}), onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
+        ...(onApproval ? { onApproval } : {}),
         onSession: async (sessionId) => {
           abort.signal.throwIfAborted();
           await this.executions.setTaskSession(task.id, sessionId);
@@ -350,7 +362,10 @@ export class ExecutionService implements ExecutionApplication {
       abort.abort();
       try {
         try { await steering.close(); }
-        finally { await this.questions?.expire(task.id); }
+        finally {
+          try { await this.questions?.expire(task.id); }
+          finally { if (onApproval) await this.approvals?.expire(task.id); }
+        }
       }
       finally { await inputs?.cleanup(); }
     }

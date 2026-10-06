@@ -21,6 +21,7 @@ export type Task = Readonly<{
   isolation?: TaskIsolation;
   instructions?: InstructionSnapshot; id: string; sequence: number; runnerId: string; provider: 'codex' | 'claude';
   launch?: AgentLaunchOptions; status: TaskStatus; projectId?: string; conversationId?: string; parentTaskId?: string; parts: readonly MessagePart[]; createdAt: string;
+  awaiting?: 'approval';
 }>;
 export type Attachment = Readonly<{
   id: string; runnerId: string; name: string; bytes: number;

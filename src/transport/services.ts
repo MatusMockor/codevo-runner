@@ -5,6 +5,7 @@ import type { ProjectDirectories } from '../application/project-directories.js';
 import type { TerminalService } from '../application/terminal-service.js';
 import type { SurfaceService } from '../application/surface-service.js';
 import type { QuestionService } from '../application/question-service.js';
+import type { ApprovalService } from '../application/approval-service.js';
 import type { ArtifactApplication } from '../application/artifact-ports.js';
 import type { HistorySearchApplication } from '../application/history-search.js';
 import type { RunnerChangeSource } from '../application/runner-changes.js';
@@ -22,6 +23,7 @@ export interface RunnerServices {
   readonly surfaces?: SurfaceService;
   readonly terminals?: TerminalService;
   readonly questions?: QuestionService;
+  readonly approvals?: ApprovalService;
   readonly artifacts?: ArtifactApplication;
   readonly historySearch?: HistorySearchApplication;
   readonly changes?: RunnerChangeSource;

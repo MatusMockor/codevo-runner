@@ -29,6 +29,13 @@ try {
         case 'listQuestions': value = db.questions.listQuestions(...request.args); break;
         case 'answerQuestion': value = db.questions.answerQuestion(...request.args); break;
         case 'expireQuestions': value = db.questions.expireQuestions(...request.args); break;
+        case 'createApproval': value = db.approvals.createApproval(...request.args); break;
+        case 'listApprovals': value = db.approvals.listApprovals(...request.args); break;
+        case 'answerApproval': value = db.approvals.answerApproval(...request.args); break;
+        case 'timeoutApproval': value = db.approvals.timeoutApproval(...request.args); break;
+        case 'settleApproval': value = db.approvals.settleApproval(...request.args); break;
+        case 'expireApprovals': value = db.approvals.expireApprovals(...request.args); break;
+        case 'getTaskApprovals': value = db.getTaskApprovals(...request.args); break;
         case 'listArtifactIds': value = db.artifacts.listArtifactIds(); break;
         case 'putArtifact': value = db.artifacts.putArtifact(...request.args); break;
         case 'findArtifact': value = db.artifacts.findArtifact(...request.args); break;
@@ -53,8 +60,8 @@ try {
         case 'continueTask': value = db.continueTask(...request.args); break;
         case 'setTaskSession': value = db.setTaskSession(...request.args); break;
         case 'createTask': value = db.createTask(...request.args); break;
-        case 'getTask': value = db.getTask(...request.args); break;
-        case 'listTasks': value = db.listTasks(...request.args); break;
+        case 'getTask': value = db.readTask(...request.args); break;
+        case 'listTasks': value = db.readTasks(...request.args); break;
         case 'cancelTask': value = db.cancelTask(...request.args); break;
         case 'listEvents': value = db.listEvents(...request.args); break;
         case 'putAttachment': value = db.putAttachment(...request.args); break;

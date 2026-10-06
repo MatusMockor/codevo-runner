@@ -369,3 +369,35 @@ for (const provider of ['codex', 'claude'] as const) {
     } finally { await f.close(); }
   });
 }
+
+test('an approval callback selects the interactive Claude protocol and answers the permission request', async () => {
+  const f = await fixture(`
+    const session = '${sessionId}';
+    const emit = frame => console.log(JSON.stringify(frame));
+    const lines = require('node:readline').createInterface({ input: process.stdin });
+    lines.on('line', line => {
+      const frame = JSON.parse(line);
+      if (frame.type === 'control_request') emit({type:'control_response',response:{subtype:'success',request_id:'codevo-initialize'}});
+      if (frame.type === 'user') {
+        const flag = process.argv.indexOf('--permission-prompt-tool');
+        if (flag < 0 || process.argv[flag + 1] !== 'stdio') process.exit(9);
+        emit({type:'system',subtype:'init',session_id:session});
+        emit({type:'control_request',request_id:'perm-1',request:{subtype:'can_use_tool',tool_name:'Bash',tool_use_id:'toolu_1',input:{command:'npm test'}}});
+      }
+      if (frame.type === 'control_response') {
+        const answer = frame.response.response;
+        if (frame.response.request_id !== 'perm-1' || answer.behavior !== 'allow' || answer.toolUseID !== 'toolu_1' || answer.updatedInput.command !== 'npm test') process.exit(7);
+        emit({type:'result',subtype:'success',is_error:false,session_id:session,result:'Approved'});
+      }
+    });
+    lines.on('close', () => process.exit(0));
+  `);
+  try {
+    const asked: string[] = [];
+    const result = await new CliProviderExecutor('claude', { executable: f.executable, timeoutMs: 15_000 })
+      .execute({ ...f.request, task: { ...f.request.task, provider: 'claude' }, onApproval: async input => { asked.push(`${input.kind}:${input.detail}`); return 'allowOnce'; } });
+    assert.deepEqual(result, { exitCode: 0, sessionId });
+    assert.deepEqual(asked, ['command:npm test']);
+    assert.match(f.output(), /Approved/);
+  } finally { await f.close(); }
+});

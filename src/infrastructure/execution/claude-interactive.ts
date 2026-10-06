@@ -9,7 +9,9 @@ import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.j
 import type { AgentQuestion } from '../../domain/questions.js';
 import { isProviderSessionId } from '../../domain/provider-output.js';
 import { ClaudeBackgroundTasks } from '../../domain/claude-background-tasks.js';
-import { emitInteractiveOutput, runInteractiveProcess, type InteractiveProcessPlan, type InteractiveProtocol } from './interactive-process.js';
+import { emitInteractiveOutput, runInteractiveProcess, type InteractiveProcessPlan, type InteractiveProtocol, type InteractiveSend } from './interactive-process.js';
+import { claudeApprovalResponse, claudeSessionRules, describeClaudePermission } from './claude-approvals.js';
+import type { AgentApprovalInput } from '../../domain/approvals.js';
 
 type ClaudePlan = Omit<InteractiveProcessPlan, 'onOutput'> & Readonly<{
   request: ExecutionRequest; prompt: string; images: readonly unknown[];
@@ -70,13 +72,40 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   let sessionId: string | undefined;
   let questionId: string | undefined;
   const seen = new Set<string>();
+  const askApproval = plan.request.onApproval;
+  const seenLimit = askApproval ? 4096 : 128;
+  const approvals = new Map<string, { abort: AbortController; settled: boolean }>();
+  const cancelApproval = (id: string): boolean => {
+    const approval = approvals.get(id);
+    if (!approval) return false;
+    approval.settled = true;
+    approvals.delete(id);
+    approval.abort.abort();
+    return true;
+  };
+  const cancelApprovals = () => { for (const id of [...approvals.keys()]) cancelApproval(id); };
+  const openApproval = (id: string, request: Record<string, unknown>, input: AgentApprovalInput, ask: NonNullable<typeof askApproval>, send: InteractiveSend) => {
+    const approval = { abort: new AbortController(), settled: false };
+    approvals.set(id, approval);
+    const original = record(request.input);
+    const rules = claudeSessionRules(request, String(request.tool_name));
+    const reply = async (response: Record<string, unknown>) => {
+      if (approval.settled) return;
+      approval.settled = true;
+      approvals.delete(id);
+      await send({ type: 'control_response', response: { subtype: 'success', request_id: id, response } }).catch(() => {});
+    };
+    void ask(input, approval.abort.signal)
+      .catch(() => 'unanswered' as const)
+      .then(outcome => reply(claudeApprovalResponse(outcome, original, request.tool_use_id, rules, input.kind === 'plan')));
+  };
   const backgroundTasks = new ClaudeBackgroundTasks();
   // A resumed CLI replays pending task notifications before init; only the resumed session may own them.
   const taskSession = (frame: Record<string, unknown>) => sessionId
     ?? (frame.subtype === 'task_notification' && plan.request.resumeSessionId !== undefined && frame.session_id === plan.request.resumeSessionId
       ? plan.request.resumeSessionId : undefined);
   return {
-    dispose() { done = true; clearCommands(); plan.request.onSteeringReady?.(undefined); },
+    dispose() { done = true; clearCommands(); cancelApprovals(); plan.request.onSteeringReady?.(undefined); },
     async start(send) {
       await send({ type: 'control_request', request_id: 'codevo-initialize', request: { subtype: 'initialize', hooks: {} } });
     },
@@ -107,14 +136,14 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
           if (frame.state === 'completed') command.completed = true;
           settleCompleted();
           if (lastSuccess && !commands.size && !backgroundTasks.active) {
-            done = true; plan.request.onSteeringReady?.(undefined); return lastSuccess;
+            done = true; cancelApprovals(); plan.request.onSteeringReady?.(undefined); return lastSuccess;
           }
         } else if (['cancelled', 'discarded', 'refused'].includes(String(frame.state))) {
           clearTimeout(command.timer); commands.delete(String(frame.command_uuid));
           if (!command.acknowledged) {
             command.reject(new SteeringNotSent('provider_steering_rejected'));
             if (lastSuccess && !commands.size && !backgroundTasks.active) {
-              done = true; plan.request.onSteeringReady?.(undefined); return lastSuccess;
+              done = true; cancelApprovals(); plan.request.onSteeringReady?.(undefined); return lastSuccess;
             }
           }
           else { done = true; clearCommands(); plan.request.onSteeringReady?.(undefined); return { exitCode: 1, error: 'provider_steering_failed', ...(sessionId ? { sessionId } : {}) }; }
@@ -124,7 +153,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
       if (frame.type === 'control_request') {
         if (!initialized || !sessionId) throw new Error('question_before_session');
         const id = text(frame.request_id, 256);
-        if (seen.has(id) || seen.size >= 128 || questionId) throw new Error('duplicate_or_concurrent_question');
+        if (seen.has(id) || seen.size >= seenLimit || (questionId && !askApproval)) throw new Error('duplicate_or_concurrent_question');
         seen.add(id);
         const request = record(frame.request);
         let response: Record<string, unknown> = { behavior: 'deny', message: 'Interactive permission approval is not supported by this runner.' };
@@ -135,6 +164,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
           }
         }
         if (request.subtype === 'can_use_tool' && request.tool_name === 'AskUserQuestion') {
+          if (questionId) throw new Error('duplicate_or_concurrent_question');
           const input = record(request.input);
           const questions = parseClaudeQuestions(input);
           if (!plan.request.onQuestion) throw new Error('questions_unavailable');
@@ -168,9 +198,15 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
           });
           return;
         }
+        const approval = askApproval && !done && !plan.signal.aborted && response.behavior === 'deny' && request.subtype === 'can_use_tool'
+          ? describeClaudePermission(request) : undefined;
+        if (askApproval && approval) { openApproval(id, request, approval, askApproval, send); return; }
         await send({ type: 'control_response', response: { subtype: 'success', request_id: id,
           response: { ...response, ...(typeof request.tool_use_id === 'string' ? { toolUseID: request.tool_use_id } : {}) } } });
         return;
+      }
+      if (frame.type === 'control_cancel_request' && askApproval && typeof frame.request_id === 'string' && frame.request_id !== questionId) {
+        if (cancelApproval(frame.request_id) || seen.has(frame.request_id)) return;
       }
       if (frame.type === 'control_cancel_request') { questionId = undefined; return { exitCode: null, error: 'provider_question_cancelled' }; }
       if (frame.type === 'system' && frame.subtype === 'init') {
@@ -179,7 +215,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
         await plan.request.onSession?.(sessionId);
         registerSteering = () => { if (lifecycleSupported && !done) plan.request.onSteeringReady?.(async input => {
           const ownedSession = sessionId;
-          const assertOwner = () => { if (done || plan.signal.aborted || questionId || sessionId !== ownedSession) throw new SteeringNotSent('steering_unavailable'); };
+          const assertOwner = () => { if (done || plan.signal.aborted || questionId || approvals.size || sessionId !== ownedSession) throw new SteeringNotSent('steering_unavailable'); };
           assertOwner();
           if (steering || commands.size >= 32) throw new SteeringNotSent('steering_unavailable');
           steering = true;
@@ -250,7 +286,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
           void plan.request.onToolBoundary?.().catch(() => {});
           return;
         }
-        done = true; plan.request.onSteeringReady?.(undefined);
+        done = true; cancelApprovals(); plan.request.onSteeringReady?.(undefined);
         return { exitCode: frame.is_error === false && frame.subtype === 'success' ? 0 : 1, sessionId,
           ...(frame.is_error === false && frame.subtype === 'success' ? {} : { error: 'provider_reported_failure' }) };
       }

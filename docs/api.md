@@ -233,7 +233,7 @@ still stop execution with `output_persistence_failed`. The runner checks actual 
 headroom for state transitions; exhausted admission capacity returns a quota error.
 SQLite has no application-specific database size ceiling.
 This is persisted CLI stdout/stderr, not a parsed provider conversation. There is
-no live SSE or approval interaction API.
+no live SSE API. Approval interaction is described in [approvals.md](approvals.md).
 Cancellation of a running task aborts its process group. Restart marks formerly
 running tasks `interrupted` and leaves queued tasks eligible for execution; it does
 not automatically resume an interrupted provider session. An explicit follow-up

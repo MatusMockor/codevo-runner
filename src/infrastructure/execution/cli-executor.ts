@@ -108,7 +108,7 @@ export class CliProviderExecutor implements ProviderExecutor {
     // The CLI's default 10-minute background wait can terminate unfinished agents.
     // Runner cancellation and the finite execution deadline remain authoritative.
     if (this.provider === 'claude') env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = '0';
-    if (this.interactiveQuestions || (this.provider === 'claude' && request.attachments.some(file => file.mediaType === 'text/plain'))) {
+    if (this.interactiveQuestions || request.onApproval || (this.provider === 'claude' && request.attachments.some(file => file.mediaType === 'text/plain'))) {
       const plan = { executable: this.executable, cwd: request.cwd, ...(request.cwdIdentity ? { cwdIdentity: request.cwdIdentity } : {}), env, signal: request.signal, timeoutMs: this.timeoutMs, request, prompt };
       return this.provider === 'codex'
         ? executeCodexInteractive({ ...plan, sandbox: this.sandbox })

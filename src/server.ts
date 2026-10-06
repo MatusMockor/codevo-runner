@@ -8,6 +8,8 @@ import { ProjectDirectoriesController } from './transport/project-directories-co
 import { TerminalController } from './transport/terminal-controller.js';
 import { SurfaceController } from './transport/surface-controller.js';
 import { QuestionController } from './transport/question-controller.js';
+import { ApprovalController } from './transport/approval-controller.js';
+import { INTERACTIVE_APPROVALS } from './domain/approvals.js';
 import { ArtifactController } from './transport/artifact-controller.js';
 import { HistorySearchController } from './history-search-controller.js';
 import { RunnerChangeTransport } from './transport/changes.js';
@@ -38,6 +40,7 @@ export type RunnerDescriptor = Readonly<{
     projectManagement?: boolean;
     threadManagement?: boolean;
     interactiveQuestions?: boolean;
+    interactiveApprovals?: boolean;
     instructionSync?: boolean;
     taskIsolation?: boolean;
     taskExecution: boolean;
@@ -73,7 +76,7 @@ class RunnerController {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
     const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
-    const { accountUsage, turnChanges, gitSync, portPreview, projectManagement, threadManagement, ...legacy } = this.descriptor.capabilities;
+    const { accountUsage, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, ...legacy } = this.descriptor.capabilities;
     send(response, 200, { ...this.descriptor, capabilities: {
       ...legacy,
       ...(supported.has('accountUsage') && accountUsage !== undefined ? { accountUsage } : {}),
@@ -82,6 +85,7 @@ class RunnerController {
       ...(supported.has('portPreview') && portPreview !== undefined ? { portPreview } : {}),
       ...(supported.has('projectManagement') && projectManagement !== undefined ? { projectManagement } : {}),
       ...(supported.has('threadManagement') && threadManagement !== undefined ? { threadManagement } : {}),
+      ...(supported.has(INTERACTIVE_APPROVALS) && interactiveApprovals !== undefined ? { interactiveApprovals } : {}),
     } });
   }
 }
@@ -115,12 +119,12 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { accountUsage: Boolean(services.accountUsage), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
-  } : { ...descriptor, capabilities: { ...descriptor.capabilities, accountUsage: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false } };
+    capabilities: { accountUsage: Boolean(services.accountUsage), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, accountUsage: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [AccountUsageController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
+    controllers: [RunnerController, ...(services ? [AccountUsageController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ApprovalController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),

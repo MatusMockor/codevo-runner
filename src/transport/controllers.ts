@@ -3,13 +3,24 @@ import type { Request, Response } from 'express';
 import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
 import { clientCapabilities, cursor, handle, jsonBody, send } from './http.js';
 import { SUBAGENT_LIFECYCLE_RETENTION } from '../domain/subagent-lifecycle.js';
+import { INTERACTIVE_APPROVALS } from '../domain/approvals.js';
 import type { PendingMessage } from '../domain/pending-message.js';
 import type { RunnerDescriptor } from '../server.js';
 import { DESCRIPTOR, SERVICES, type RunnerServices } from './services.js';
 
-function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions'> {
-  const { instructions: _instructions, ...publicValue } = record;
+function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions' | 'awaiting'> {
+  const { instructions: _instructions, awaiting: _awaiting, ...publicValue } = record as T & Pick<Task, 'awaiting'>;
   return publicValue;
+}
+
+function publicTask(task: Task, approvals: boolean): Omit<Task, 'instructions'> {
+  const value = publicRecord(task);
+  if (approvals && task.awaiting === 'approval') return { ...value, awaiting: task.awaiting };
+  return value;
+}
+
+function announcesApprovals(request: Request): boolean {
+  return clientCapabilities(request.headers['x-codevo-client-capabilities']).has(INTERACTIVE_APPROVALS);
 }
 
 @Controller('v1/tasks')
@@ -28,13 +39,14 @@ export class TaskController {
   list(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const page = await this.services.tasks.list(cursor(request));
-      send(response, 200, { ...page, items: page.items.map(publicRecord) });
+      const approvals = announcesApprovals(request);
+      send(response, 200, { ...page, items: page.items.map(task => publicTask(task, approvals)) });
     });
   }
 
   @Get(':id')
-  get(@Param('id') id: string, @Res() response: Response) {
-    return handle(response, async () => send(response, 200, publicRecord(await this.services.tasks.get(id))));
+  get(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => send(response, 200, publicTask(await this.services.tasks.get(id), announcesApprovals(request))));
   }
 
   @Post(':id/cancel')
@@ -49,7 +61,7 @@ export class TaskController {
   start(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      const task = await this.services.execution.start(id, await jsonBody(request));
+      const task = await this.services.execution.start(id, await jsonBody(request), { approvals: announcesApprovals(request) });
       send(response, 202, publicRecord(task));
     });
   }
@@ -66,7 +78,7 @@ export class TaskController {
   continue(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      const result = await this.services.execution.continue(id, await jsonBody(request));
+      const result = await this.services.execution.continue(id, await jsonBody(request), { approvals: announcesApprovals(request) });
       send(response, result.created ? 202 : 200, { ...result, task: publicRecord(result.task) });
     });
   }
@@ -100,7 +112,7 @@ export class TaskController {
   enqueue(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
-      const result = await this.services.execution.enqueue(id, await jsonBody(request));
+      const result = await this.services.execution.enqueue(id, await jsonBody(request), { approvals: announcesApprovals(request) });
       send(response, result.created ? 202 : 200, { ...result, pending: publicRecord(result.pending) });
     });
   }

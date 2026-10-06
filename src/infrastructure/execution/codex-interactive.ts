@@ -6,6 +6,8 @@ import { ARTIFACT_HINT } from '../../domain/artifact-hint.js';
 import { isProviderSessionId } from '../../domain/provider-output.js';
 import { parseAgentQuestionRequest, parseAgentQuestionResponse } from '../../domain/questions.js';
 import { emitInteractiveOutput, runInteractiveProcess, type InteractiveProtocol, type InteractiveSend } from './interactive-process.js';
+import { CodexApprovalItems, codexApprovalPolicy, codexApprovalResult, codexDeclineResult, describeCodexApproval, isCodexApprovalMethod } from './codex-approvals.js';
+import type { AgentApprovalInput } from '../../domain/approvals.js';
 
 export interface CodexInteractivePlan {
   readonly executable: string;
@@ -27,7 +29,7 @@ function identifier(value: unknown): string {
   return value;
 }
 
-/** One app-server process owns exactly one thread and one turn. No approval escalation. */
+/** One app-server process owns exactly one thread and one turn. */
 export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProtocol {
   let stage: 'initialize' | 'thread' | 'turn' | 'running' | 'done' = 'initialize';
   let threadId: string | undefined;
@@ -40,13 +42,37 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
   let steeringSequence = 3;
   let pendingSteer: { id: number; resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } | undefined;
   const rejectSteer = () => { if (pendingSteer) { clearTimeout(pendingSteer.timer); pendingSteer.reject(new Error('steering_unavailable')); pendingSteer = undefined; } };
-  const dispose = () => { stage = 'done'; rejectSteer(); plan.request.onSteeringReady?.(undefined); };
+  const askApproval = plan.request.onApproval;
+  const approvalItems = new CodexApprovalItems();
+  const approvals = new Map<string, { abort: AbortController; settled: boolean }>();
+  const cancelApproval = (key: string): boolean => {
+    const approval = approvals.get(key);
+    if (!approval) return false;
+    approval.settled = true;
+    approvals.delete(key);
+    approval.abort.abort();
+    return true;
+  };
+  const cancelApprovals = () => { for (const key of [...approvals.keys()]) cancelApproval(key); };
+  const openApproval = (id: string | number, key: string, input: AgentApprovalInput, ask: NonNullable<typeof askApproval>, send: InteractiveSend) => {
+    const approval = { abort: new AbortController(), settled: false };
+    approvals.set(key, approval);
+    void ask(input, approval.abort.signal).catch(() => 'unanswered' as const).then(async outcome => {
+      if (approval.settled) return;
+      approval.settled = true;
+      approvals.delete(key);
+      await send({ id, result: codexApprovalResult(outcome) }).catch(() => {});
+    });
+  };
+  const dispose = () => { stage = 'done'; rejectSteer(); cancelApprovals(); plan.request.onSteeringReady?.(undefined); };
 
   const launch = plan.request.task.launch;
   if (launch && launch.provider !== 'codex') throw new Error('provider_mismatch');
   const model = launch && launch.model !== 'default' ? { model: launch.model } : {};
   const effort = launch?.effort && launch.effort !== 'default' ? { effort: launch.effort } : {};
   const mode = launch?.mode;
+  const approvalPolicy = codexApprovalPolicy(mode, askApproval !== undefined);
+  const approvalRouting = askApproval ? { approvalPolicy, approvalsReviewer: 'user' } : { approvalPolicy };
   const sandbox = mode === 'dangerFullAccess' ? 'danger-full-access' : mode === 'readOnly' ? 'read-only'
     : mode === 'workspaceWrite' || mode === 'auto' ? 'workspace-write'
     : !launch ? (plan.sandbox === 'external-sandbox' ? 'danger-full-access' : 'workspace-write') : undefined;
@@ -57,6 +83,19 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
   const call = (send: InteractiveSend, id: number, method: string, params: unknown) => send({ id, method, params });
   const owner = (params: Record<string, unknown>) => {
     if (!threadId || !turnId || params.threadId !== threadId || params.turnId !== turnId) throw new Error('provider_owner_mismatch');
+  };
+  const ownsTurn = (params: Record<string, unknown>) => Boolean(threadId && turnId && params.threadId === threadId && params.turnId === turnId);
+  const answerApprovalRequest = async (id: string | number, key: string, method: unknown, params: Record<string, unknown>, send: InteractiveSend): Promise<boolean> => {
+    if (!askApproval) return false;
+    const declined = codexDeclineResult(method);
+    if (!declined) return false;
+    const input = isCodexApprovalMethod(method) && ownsTurn(params) ? describeCodexApproval(method, params, approvalItems) : undefined;
+    if (!input) {
+      await send({ id, result: declined });
+      return true;
+    }
+    openApproval(id, key, input, askApproval, send);
+    return true;
   };
   return {
     dispose,
@@ -86,7 +125,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           await send({ method: 'initialized', params: {} });
           await validateProtocolWorkspace(plan);
           await call(send, 2, plan.request.resumeSessionId ? 'thread/resume' : 'thread/start', {
-            cwd: plan.cwd, ...model, ...(sandbox ? { sandbox } : {}), approvalPolicy: 'never',
+            cwd: plan.cwd, ...model, ...(sandbox ? { sandbox } : {}), ...approvalRouting,
             ...(plan.request.resumeSessionId ? { threadId: plan.request.resumeSessionId, excludeTurns: true } : {}),
           });
         } else if (stage === 'thread' && frame.id === 2) {
@@ -99,7 +138,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           stage = 'turn';
           await validateProtocolWorkspace(plan);
           await call(send, 3, 'turn/start', {
-            threadId, cwd: plan.cwd, ...model, ...effort, approvalPolicy: 'never', ...(sandboxPolicy ? { sandboxPolicy } : {}),
+            threadId, cwd: plan.cwd, ...model, ...effort, ...approvalRouting, ...(sandboxPolicy ? { sandboxPolicy } : {}),
             input: [{ type: 'text', text: `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${plan.prompt || 'Inspect the attached images.'}` },
               ...plan.request.attachments.filter(file => file.mediaType !== 'text/plain').map(image => ({ type: 'localImage', path: image.path }))],
           });
@@ -110,9 +149,9 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
           await emit({ type: 'turn.started' });
           plan.request.onSteeringReady?.(async input => {
             const ownedTurn = turnId;
-            if (stage !== 'running' || pendingQuestion || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
+            if (stage !== 'running' || pendingQuestion || approvals.size || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
             try { await validateProtocolWorkspace(plan); } catch { throw new SteeringNotSent('workspace_identity_changed'); }
-            if (stage !== 'running' || turnId !== ownedTurn || pendingQuestion || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
+            if (stage !== 'running' || turnId !== ownedTurn || pendingQuestion || approvals.size || pendingSteer || plan.signal.aborted) throw new SteeringNotSent('steering_unavailable');
             const id = ++steeringSequence;
             await new Promise<void>((resolve, reject) => {
               const timer = setTimeout(() => { if (pendingSteer?.id === id) { pendingSteer = undefined; reject(new Error('steering_timeout')); } }, 15_000);
@@ -167,6 +206,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
         if (requestIds.has(key) || requestIds.size >= 1024) throw new Error('provider_request_duplicate_or_limit');
         requestIds.add(key);
         if (frame.method !== 'item/tool/requestUserInput') {
+          if (await answerApprovalRequest(frame.id, key, frame.method, params, send)) return;
           // Approval and dynamic-tool requests never receive an implicit allow.
           await send({ id: frame.id, error: { code: -32601, message: 'Unsupported server request' } });
           return;
@@ -200,6 +240,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
         }).catch(() => { if (!plan.signal.aborted && stage !== 'done') fail?.('provider_question_failed'); });
         return;
       }
+      if (frame.method === 'serverRequest/resolved' && params.threadId === threadId && cancelApproval(`${typeof params.requestId}:${params.requestId}`)) return;
       if (frame.method === 'serverRequest/resolved') {
         if (params.threadId === threadId && pendingQuestion === `${typeof params.requestId}:${params.requestId}`) {
           pendingQuestion = undefined; stage = 'done';
@@ -212,6 +253,7 @@ export function createCodexProtocol(plan: CodexInteractivePlan): InteractiveProt
         const completed = frame.method === 'item/completed';
         const eventType = completed ? 'item.completed' : 'item.started';
         const id = identifier(item.id);
+        if (askApproval && !completed) approvalItems.observe(id, item);
         if (completed && (item.type === 'agentMessage' || item.type === 'reasoning')) {
           const text = item.type === 'agentMessage' ? item.text : Array.isArray(item.summary) ? item.summary.join('\n') : '';
           if (typeof text !== 'string') throw new Error('provider_item_invalid');

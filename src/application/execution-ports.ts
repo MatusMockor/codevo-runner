@@ -18,7 +18,7 @@ export interface ExecutionRepository {
   claimPendingSteer?(taskId: string, pendingId?: string): Promise<SteerClaim | null>;
   releaseSteer?(taskId: string, messageId: string): Promise<void>;
   acceptSteer?(taskId: string, messageId: string): Promise<SteerReceipt>;
-  enqueuePending(taskId: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }>;
+  enqueuePending(taskId: string, input: ContinueTask, approvals?: boolean): Promise<{ pending: PendingMessage; created: boolean }>;
   listPending(taskId: string): Promise<PendingMessages>;
   removePending(taskId: string, pendingId: string): Promise<PendingMessage>;
   resumePending(taskId: string): Promise<PendingMessages>;
@@ -27,8 +27,9 @@ export interface ExecutionRepository {
   getTaskSession(taskId: string): Promise<TaskSession>;
   setTaskSession(taskId: string, sessionId: string): Promise<void>;
   findContinuation(taskId: string, input: ContinueTask): Promise<Readonly<{ task: Task; created: false }> | null>;
-  continueTask(taskId: string, input: ContinueTask): Promise<Readonly<{ task: Task; created: boolean }>>;
-  queueTask(taskId: string, projectId: string, base?: StartBase): Promise<Task>;
+  continueTask(taskId: string, input: ContinueTask, approvals?: boolean): Promise<Readonly<{ task: Task; created: boolean }>>;
+  queueTask(taskId: string, projectId: string, base?: StartBase, approvals?: boolean): Promise<Task>;
+  getTaskApprovals?(taskId: string): Promise<boolean>;
   getTaskGitBase?(taskId: string): Promise<StartBase | undefined>;
   claimNextTask(): Promise<Task | null>;
   appendTaskOutput(taskId: string, channel: OutputChannel, text: string): Promise<void>;
@@ -57,19 +58,20 @@ export interface ProviderExecutor {
   readonly supportsAttachments: boolean;
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
+export type TurnOptions = Readonly<{ approvals?: boolean }>;
 export interface ExecutionApplication {
   turnSummary?(taskId: string): Promise<TurnChangesSummary>;
   turnFileDiff?(taskId: string, input: unknown): Promise<TurnFileDiff>;
   repositoryIdentity?(projectId: string, signal?: AbortSignal): Promise<Readonly<{ repositoryKey: string | null }>>;
   steer(taskId: string, input: unknown): Promise<SteerReceipt>;
   steerPending(taskId: string, pendingId: string): Promise<SteerReceipt>;
-  enqueue(taskId: string, input: unknown): Promise<{ pending: PendingMessage; created: boolean }>;
+  enqueue(taskId: string, input: unknown, turn?: TurnOptions): Promise<{ pending: PendingMessage; created: boolean }>;
   pending(taskId: string): Promise<PendingMessages>;
   removePending(taskId: string, pendingId: string): Promise<PendingMessage>;
   resumePending(taskId: string): Promise<PendingMessages>;
-  start(taskId: string, input: unknown): Promise<Task>;
+  start(taskId: string, input: unknown, turn?: TurnOptions): Promise<Task>;
   resumeState(taskId: string): Promise<ResumeState>;
-  continue(taskId: string, input: unknown): Promise<Readonly<{ task: Task; created: boolean }>>;
+  continue(taskId: string, input: unknown, turn?: TurnOptions): Promise<Readonly<{ task: Task; created: boolean }>>;
   cancel(taskId: string): Promise<Task>;
   projects(): Promise<readonly ProjectSummary[]>;
   diff(taskId: string): Promise<WorkspaceDiff>;

@@ -6,6 +6,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionRequest } from '../src/domain/execution.js';
+import type { AgentApprovalInput, AgentApprovalOutcome } from '../src/domain/approvals.js';
 import { executeCodexInteractive, createCodexProtocol, type CodexInteractivePlan } from '../src/infrastructure/execution/codex-interactive.js';
 
 const thread = '01998cf0-1111-7111-8111-111111111111';
@@ -362,4 +363,271 @@ test('Codex launch reasoning effort reaches new and resumed provider turns and d
       else assert.equal(Object.hasOwn(params, 'effort'), false);
     }
   }
+});
+
+type ApprovalCall = Readonly<{
+  input: AgentApprovalInput; signal: AbortSignal;
+  resolve(outcome: AgentApprovalOutcome): void; reject(error: Error): void;
+}>;
+function approvalFixture(overrides: Partial<ExecutionRequest> = {}) {
+  const calls: ApprovalCall[] = [];
+  const f = fixture({ onApproval: (input, signal) => new Promise<AgentApprovalOutcome>((resolve, reject) => { calls.push({ input, signal, resolve, reject }); }), ...overrides });
+  return { ...f, calls };
+}
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const commandApproval = (id: string | number, extra: Record<string, unknown> = {}) => ({ id, method: 'item/commandExecution/requestApproval',
+  params: { threadId: thread, turnId: turn, itemId: 'cmd-1', startedAtMs: 1, command: 'npm test', cwd: '/workspace', ...extra } });
+const fileApproval = (id: string | number, extra: Record<string, unknown> = {}) => ({ id, method: 'item/fileChange/requestApproval',
+  params: { threadId: thread, turnId: turn, itemId: 'patch-1', startedAtMs: 1, ...extra } });
+const unsupported = { code: -32601, message: 'Unsupported server request' };
+const launched = (mode: string): ExecutionRequest['task'] => ({ id: 'task', sequence: 1, runnerId: 'runner', provider: 'codex', status: 'running', parts: [], createdAt: '',
+  launch: parseLaunchOptions({ provider: 'codex', model: 'default', mode }) });
+
+test('Codex approval policy stays never without the callback and follows the access mode with it', async () => {
+  const expected = { default: 'never', readOnly: 'never', workspaceWrite: 'untrusted', auto: 'on-request', dangerFullAccess: 'never' };
+  for (const [mode, policy] of Object.entries(expected)) {
+    for (const resumeSessionId of [undefined, thread]) {
+      const session = resumeSessionId ? { resumeSessionId } : {};
+      const legacy = fixture({ ...session, task: launched(mode) });
+      await legacy.ready();
+      assert.deepEqual(legacy.sent.slice(2).map(frame => (frame.params as Record<string, unknown>).approvalPolicy), ['never', 'never']);
+      const interactive = approvalFixture({ ...session, task: launched(mode) });
+      await interactive.ready();
+      assert.deepEqual(interactive.sent.slice(2).map(frame => frame.method), [resumeSessionId ? 'thread/resume' : 'thread/start', 'turn/start']);
+      assert.deepEqual(interactive.sent.slice(2).map(frame => (frame.params as Record<string, unknown>).approvalPolicy), [policy, policy]);
+      assert.deepEqual(interactive.sent.slice(2).map(frame => (frame.params as Record<string, unknown>).approvalsReviewer), ['user', 'user']);
+      assert.ok(legacy.sent.every(frame => !JSON.stringify(frame).includes('approvalsReviewer')));
+      for (const index of [2, 3]) {
+        const legacyParams = legacy.sent[index]!.params as Record<string, unknown>;
+        const { approvalsReviewer: _reviewer, ...interactiveParams } = interactive.sent[index]!.params as Record<string, unknown>;
+        assert.deepEqual(interactiveParams, { ...legacyParams, approvalPolicy: policy });
+        assert.deepEqual(Object.keys(interactiveParams), Object.keys(legacyParams));
+      }
+    }
+  }
+  const unlaunched = approvalFixture();
+  await unlaunched.ready();
+  assert.deepEqual(unlaunched.sent.slice(2).map(frame => (frame.params as Record<string, unknown>).approvalPolicy), ['never', 'never']);
+  assert.deepEqual(unlaunched.sent.slice(2).map(frame => (frame.params as Record<string, unknown>).approvalsReviewer), ['user', 'user']);
+  const plain = fixture();
+  await plain.ready();
+  assert.equal(JSON.stringify(plain.sent[2]), JSON.stringify({ id: 2, method: 'thread/start', params: { cwd: '/workspace', sandbox: 'workspace-write', approvalPolicy: 'never' } }));
+  assert.deepEqual(Object.keys(plain.sent[3]!.params as Record<string, unknown>), ['threadId', 'cwd', 'approvalPolicy', 'sandboxPolicy', 'input']);
+});
+
+test('Codex command approvals map each decision and respect the offered decisions', async () => {
+  const f = approvalFixture();
+  await f.ready();
+  const before = f.sent.length;
+  await f.receive(commandApproval(88, { reason: 'Needs the network', availableDecisions: ['accept', 'acceptForSession', { acceptWithExecpolicyAmendment: { execpolicy_amendment: ['npm'] } }, 'decline', 'cancel'] }));
+  assert.equal(f.sent.length, before);
+  assert.deepEqual(f.calls[0]!.input, { kind: 'command', title: 'Run a command?', detail: 'npm test', detailTruncated: false,
+    facts: [{ label: 'Directory', value: '/workspace' }, { label: 'Reason', value: 'Needs the network' }], decisions: ['allowOnce', 'allowForSession', 'deny'] });
+  f.calls[0]!.resolve('allowOnce');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 88, result: { decision: 'accept' } });
+  await f.receive(commandApproval('89', { availableDecisions: null }));
+  assert.deepEqual(f.calls[1]!.input.decisions, ['allowOnce', 'allowForSession', 'deny']);
+  f.calls[1]!.resolve('allowForSession');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: '89', result: { decision: 'acceptForSession' } });
+  await f.receive(commandApproval(90, { availableDecisions: ['accept', 'decline'] }));
+  assert.deepEqual(f.calls[2]!.input.decisions, ['allowOnce', 'deny']);
+  f.calls[2]!.resolve('deny');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 90, result: { decision: 'decline' } });
+  await f.receive(commandApproval(91, { command: null, networkApprovalContext: { host: 'registry.npmjs.org', protocol: 'https' }, additionalPermissions: { network: { enabled: true } } }));
+  assert.deepEqual(f.calls[3]!.input, { kind: 'command', title: 'Allow network access?', detail: '', detailTruncated: false,
+    facts: [{ label: 'Directory', value: '/workspace' }, { label: 'Network host', value: 'registry.npmjs.org' }, { label: 'Additional permissions', value: '{"network":{"enabled":true}}' }],
+    decisions: ['allowOnce', 'allowForSession', 'deny'] });
+  f.calls[3]!.reject(new Error('busy'));
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 91, result: { decision: 'decline' } });
+  await f.receive({ method: 'item/started', params: { threadId: thread, turnId: turn, item: { id: 'cmd-2', type: 'commandExecution', command: 'python3 -i' } } });
+  await f.receive(commandApproval(92, { itemId: 'cmd-2', kind: 'writeStdin', command: null, cwd: null }));
+  assert.deepEqual(f.calls[4]!.input, { kind: 'command', title: 'Send input to a running command?', detail: 'python3 -i', detailTruncated: false,
+    facts: [{ label: 'Action', value: 'Codex wants to type into a terminal it already started.' }], decisions: ['allowOnce', 'allowForSession', 'deny'] });
+  await f.receive(commandApproval(93, { command: 'x'.repeat(20_000) }));
+  assert.equal(f.calls[5]!.input.detailTruncated, true);
+  assert.equal(f.calls[5]!.input.detail.length, 16 * 1024);
+  await assert.rejects(f.receive(commandApproval(93)), /duplicate/);
+});
+
+test('Codex file-change approvals show the announced files and offer a session grant only for a complete list', async () => {
+  const f = approvalFixture();
+  await f.ready();
+  const started = (id: string, changes: unknown[]) => f.receive({ method: 'item/started', params: { threadId: thread, turnId: turn, item: { id, type: 'fileChange', status: 'inProgress', changes } } });
+  const shown = [{ path: 'src/a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-old\n+new' }, { path: 'docs/b.md', kind: { type: 'add' }, diff: '' }];
+  await started('patch-1', shown);
+  await f.receive(fileApproval(70, { reason: 'Outside the workspace', grantRoot: '/srv/shared' }));
+  assert.deepEqual(f.calls[0]!.input, { kind: 'fileChange', title: 'Apply file changes?',
+    detail: 'src/a.ts\ndocs/b.md\n\nsrc/a.ts:\n@@ -1 +1 @@\n-old\n+new', detailTruncated: false,
+    facts: [{ label: 'Reason', value: 'Outside the workspace' }, { label: 'Write access requested for', value: '/srv/shared' }],
+    decisions: ['allowOnce', 'allowForSession', 'deny'] });
+  f.calls[0]!.resolve('allowForSession');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 70, result: { decision: 'acceptForSession' } });
+  const many = Array.from({ length: 23 }, (_, index) => ({ path: `src/file-${index}.ts`, kind: { type: 'update' }, diff: '' }));
+  await started('patch-many', many);
+  await f.receive(fileApproval(71, { itemId: 'patch-many' }));
+  assert.deepEqual(f.calls[1]!.input, { kind: 'fileChange', title: 'Apply file changes?',
+    detail: [...many.slice(0, 20).map(change => change.path), '+3 more'].join('\n'), detailTruncated: true, facts: [], decisions: ['allowOnce', 'deny'] });
+  f.calls[1]!.resolve('unanswered');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 71, result: { decision: 'decline' } });
+  await f.receive(fileApproval(72, { itemId: 'unknown-patch' }));
+  assert.deepEqual(f.calls[2]!.input, { kind: 'fileChange', title: 'Apply file changes?', detail: '', detailTruncated: false,
+    facts: [{ label: 'Files', value: 'Codex did not list the files for this change.' }], decisions: ['allowOnce', 'deny'] });
+  f.calls[2]!.resolve('deny');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 72, result: { decision: 'decline' } });
+  await started('patch-large', [{ path: 'big.txt', diff: 'é'.repeat(9000) }, { path: 'after.txt', diff: 'never shown' }]);
+  await f.receive(fileApproval(73, { itemId: 'patch-large' }));
+  const large = f.calls[3]!.input;
+  assert.equal(large.detailTruncated, true);
+  assert.ok(large.detail.startsWith('big.txt\nafter.txt\n\nbig.txt:\n'));
+  assert.ok(Buffer.byteLength(large.detail) <= 16 * 1024);
+  assert.equal(large.detail.includes('never shown'), false);
+  assert.deepEqual(large.decisions, ['allowOnce', 'allowForSession', 'deny']);
+  const partial = [
+    [{ path: 'ok.txt', diff: '' }, { diff: 'no path' }],
+    [{ path: 'ok.txt', diff: '' }, { path: 'p'.repeat(2049), diff: '' }],
+    Array.from({ length: 20 }, (_, index) => ({ path: `${index}`.padEnd(1000, 'p'), diff: '' })),
+    [],
+  ];
+  for (const [index, changes] of partial.entries()) {
+    await started(`partial-${index}`, changes);
+    await f.receive(fileApproval(80 + index, { itemId: `partial-${index}` }));
+    assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny'], `case ${index}`);
+  }
+  for (const [index, path] of ['safe.ts\n\nreal/target.ts', 'a\rb.ts', 'a\tb.ts', 'a\u007fb.ts', 'a\u0085b.ts', 'a\u2028b.ts', 'a\u0000b.ts'].entries()) {
+    await started(`control-${index}`, [{ path: 'ok.ts', diff: '+ok' }, { path, diff: '+hidden' }]);
+    await f.receive(fileApproval(100 + index, { itemId: `control-${index}` }));
+    assert.deepEqual(f.calls.at(-1)!.input, { kind: 'fileChange', title: 'Apply file changes?', detail: 'ok.ts\n+1 more\n\nok.ts:\n+ok',
+      detailTruncated: true, facts: [], decisions: ['allowOnce', 'deny'] }, JSON.stringify(path));
+  }
+  await f.receive(fileApproval(110, { itemId: 'patch-1', grantRoot: '/srv/shared\n/etc' }));
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny']);
+  await f.receive(fileApproval(111, { itemId: 'patch-1', grantRoot: `/${'r'.repeat(2048)}` }));
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny']);
+  await f.receive(commandApproval(112, { networkApprovalContext: { host: 'good.example\nevil.example', protocol: 'https' } }));
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny']);
+  await f.receive(commandApproval(113, { command: 'printf "a\nb"\nls', networkApprovalContext: { host: 'good.example', protocol: 'https' } }));
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'allowForSession', 'deny']);
+  assert.equal(f.calls.at(-1)!.input.detail, 'printf "a\nb"\nls');
+  await f.receive(fileApproval(90, { itemId: 'patch-1', availableDecisions: ['accept', 'decline'] }));
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny']);
+  for (let index = 0; index < 64; index++) await started(`later-${index}`, shown);
+  await f.receive(fileApproval(91));
+  assert.equal(f.calls.at(-1)!.input.detail, '');
+  assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'deny']);
+});
+
+test('Codex declines foreign, child and non-interactive requests without registering an approval', async () => {
+  const f = approvalFixture();
+  await f.ready();
+  await f.receive({ method: 'item/completed', params: { threadId: thread, turnId: turn, item: { id: 'spawn', type: 'subAgentActivity', kind: 'started', agentThreadId: 'child' } } });
+  await f.receive({ method: 'turn/started', params: { threadId: 'child', turn: { id: 'child-turn' } } });
+  const declined = [
+    commandApproval(1, { turnId: 'earlier-turn' }),
+    commandApproval(2, { threadId: 'child', turnId: 'child-turn' }),
+    fileApproval(3, { threadId: 'foreign' }),
+    commandApproval(4, { command: null }),
+    commandApproval(5, { command: '   ' }),
+    commandApproval(6, { kind: 'unknownKind' }),
+    commandApproval(7, { availableDecisions: 'accept' }),
+  ];
+  for (const request of declined) {
+    await f.receive(request);
+    assert.deepEqual(f.sent.at(-1), { id: request.id, result: { decision: 'decline' } });
+  }
+  await f.receive({ id: 8, method: 'item/permissions/requestApproval', params: { threadId: thread, turnId: turn, itemId: 'perm', cwd: '/workspace', permissions: {} } });
+  assert.deepEqual(f.sent.at(-1), { id: 8, result: { permissions: {}, scope: 'turn' } });
+  await f.receive({ id: 9, method: 'mcpServer/elicitation/request', params: { threadId: thread, serverName: 'github', message: 'Confirm?' } });
+  assert.deepEqual(f.sent.at(-1), { id: 9, result: { action: 'decline' } });
+  for (const [index, method] of ['item/tool/call', 'execCommandApproval', 'applyPatchApproval', 'account/chatgptAuthTokens/refresh'].entries()) {
+    await f.receive({ id: 10 + index, method, params: { threadId: thread, turnId: turn } });
+    assert.deepEqual(f.sent.at(-1), { id: 10 + index, error: unsupported });
+  }
+  assert.equal(f.calls.length, 0);
+  const legacy = fixture();
+  await legacy.ready();
+  for (const [index, method] of ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval', 'mcpServer/elicitation/request'].entries()) {
+    await legacy.receive({ id: index, method, params: { threadId: thread, turnId: turn, itemId: 'item', command: 'npm test' } });
+    assert.deepEqual(legacy.sent.at(-1), { id: index, error: unsupported });
+  }
+});
+
+test('Codex resolved notification cancels its pending approval and the turn still completes', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  const f = approvalFixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+  await f.ready();
+  await f.receive(commandApproval(88));
+  await f.receive(commandApproval(89));
+  const before = f.sent.length;
+  await assert.rejects(steer!({ idempotencyKey: 'blocked', prompt: 'next', attachments: [] }), SteeringNotSent);
+  assert.equal(await f.receive({ method: 'serverRequest/resolved', params: { threadId: 'child', requestId: 88 } }), undefined);
+  assert.equal(f.calls[0]!.signal.aborted, false);
+  assert.equal(await f.receive({ method: 'serverRequest/resolved', params: { threadId: thread, requestId: '88' } }), undefined);
+  assert.equal(f.calls[0]!.signal.aborted, false);
+  assert.equal(await f.receive({ method: 'serverRequest/resolved', params: { threadId: thread, requestId: 88 } }), undefined);
+  assert.deepEqual(f.calls.map(call => call.signal.aborted), [true, false]);
+  f.calls[0]!.resolve('allowOnce');
+  await settle();
+  assert.equal(f.sent.length, before);
+  f.calls[1]!.resolve('allowOnce');
+  await settle();
+  assert.deepEqual(f.sent.at(-1), { id: 89, result: { decision: 'accept' } });
+  assert.equal(await f.receive({ method: 'serverRequest/resolved', params: { threadId: thread, requestId: 89 } }), undefined);
+  assert.deepEqual(await f.receive({ method: 'turn/completed', params: { threadId: thread, turn: { id: turn, status: 'completed' } } }), { exitCode: 0, sessionId: thread });
+});
+
+test('Codex turn completion cancels a pending approval and a late decision sends nothing', async () => {
+  const f = approvalFixture();
+  await f.ready();
+  await f.receive(commandApproval(88));
+  await f.receive(fileApproval(89));
+  const before = f.sent.length;
+  assert.deepEqual(await f.receive({ method: 'turn/completed', params: { threadId: thread, turn: { id: turn, status: 'completed' } } }), { exitCode: 0, sessionId: thread });
+  assert.deepEqual(f.calls.map(call => call.signal.aborted), [true, true]);
+  f.calls[0]!.resolve('allowOnce');
+  f.calls[1]!.reject(new Error('conflict'));
+  await settle();
+  assert.equal(f.sent.length, before);
+});
+
+test('real subprocess approval round trip accepts the command and completes the turn', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'codevo-codex-approval-'));
+  const executable = join(cwd, 'provider');
+  try {
+    await writeFile(executable, `#!${process.execPath}
+const readline = require('node:readline');
+const send = value => console.log(JSON.stringify(value));
+readline.createInterface({ input: process.stdin }).on('line', line => {
+ const frame=JSON.parse(line);
+ if(frame.method==='initialize') send({id:frame.id,result:{}});
+ if(frame.method==='thread/start') {
+   if(frame.params.approvalPolicy !== 'untrusted') process.exit(4);
+   send({id:frame.id,result:{thread:{id:'${thread}'}}});
+ }
+ if(frame.method==='turn/start') {
+   if(frame.params.approvalPolicy !== 'untrusted') process.exit(5);
+   send({id:frame.id,result:{turn:{id:'${turn}'}}});
+   send(${JSON.stringify(commandApproval(88))});
+ }
+ if(frame.id===88 && frame.method===undefined) {
+   if(!frame.result || frame.result.decision !== 'accept') process.exit(3);
+   send({method:'serverRequest/resolved',params:{threadId:'${thread}',requestId:88}});
+   send({method:'turn/completed',params:{threadId:'${thread}',turn:{id:'${turn}',status:'completed'}}});
+ }
+});
+setInterval(()=>{},1000);
+`, { mode: 0o700 });
+    const asked: AgentApprovalInput[] = [];
+    const request: ExecutionRequest = { task: launched('workspaceWrite'), cwd, attachments: [], signal: new AbortController().signal, onOutput: async () => {},
+      onApproval: async input => { asked.push(input); return 'allowOnce'; } };
+    const result = await executeCodexInteractive({ executable, cwd, env: {}, signal: request.signal, timeoutMs: 3000, request, prompt: 'test', sandbox: 'workspace-write' });
+    assert.deepEqual(result, { exitCode: 0, sessionId: thread });
+    assert.deepEqual(asked.map(input => [input.kind, input.title, input.detail]), [['command', 'Run a command?', 'npm test']]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
 });

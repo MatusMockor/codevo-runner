@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS pending_messages (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,
  root_id TEXT NOT NULL REFERENCES pending_queues(root_id), key TEXT UNIQUE NOT NULL,
  fingerprint TEXT NOT NULL, dispatch_key TEXT UNIQUE NOT NULL,
- payload TEXT NOT NULL
+ payload TEXT NOT NULL, approvals INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS pending_messages_root ON pending_messages(root_id, sequence);
 CREATE TABLE IF NOT EXISTS pending_attachments (
@@ -30,7 +30,7 @@ type Dependencies = Readonly<{
  requireCapacity(): void;
  getAttachment(id: string): unknown;
  resumeState(id: string): ResumeState;
- continueTask(id: string, input: ContinueTask): { task: Task; created: boolean };
+ continueTask(id: string, input: ContinueTask, approvals: boolean): { task: Task; created: boolean };
 }>;
 
 /** Durable queue state never replaces the currently running turn's session authority. */
@@ -57,7 +57,7 @@ export class PendingDatabase {
    const rows = this.db.prepare("SELECT payload FROM pending_messages WHERE root_id=? AND json_extract(payload,'$.status')='queued' ORDER BY sequence LIMIT ?").all(root, PENDING_LIMITS.perConversation);
    return { items: rows.map(row => this.record(row)) };
  }
- enqueuePending(id: string, input: ContinueTask): { pending: PendingMessage; created: boolean } {
+ enqueuePending(id: string, input: ContinueTask, approvals = false): { pending: PendingMessage; created: boolean } {
    input = parseContinueTask(input);
    return this.dependencies.transaction(() => {
      const root = this.root(id);
@@ -78,7 +78,7 @@ export class PendingDatabase {
      const paused = ['failed', 'cancelled', 'interrupted'].includes(latest.status) ? 1 : 0;
      this.db.prepare('INSERT INTO pending_queues(root_id,paused) VALUES(?,?) ON CONFLICT(root_id) DO UPDATE SET paused=max(paused,excluded.paused)').run(root, paused);
      const pending: PendingMessage = { ...(input.instructions ? { instructions: input.instructions } : {}), id: randomUUID(), conversationId: root, status: 'queued', parts: input.parts, ...(launch ? { launch } : {}), createdAt: new Date().toISOString(), taskId: null };
-     this.db.prepare('INSERT INTO pending_messages(id,root_id,key,fingerprint,dispatch_key,payload) VALUES(?,?,?,?,?,?)').run(pending.id, root, input.idempotencyKey, fingerprint, randomUUID(), JSON.stringify(pending));
+     this.db.prepare('INSERT INTO pending_messages(id,root_id,key,fingerprint,dispatch_key,payload,approvals) VALUES(?,?,?,?,?,?,?)').run(pending.id, root, input.idempotencyKey, fingerprint, randomUUID(), JSON.stringify(pending), approvals ? 1 : 0);
      for (const ref of refs) this.db.prepare('INSERT INTO pending_attachments VALUES(?,?)').run(pending.id, ref);
      this.dependencies.requireCapacity();
      return { pending: this.record({ payload: JSON.stringify(pending) }), created: true };
@@ -124,12 +124,12 @@ export class PendingDatabase {
        if ((latest.status !== 'succeeded' && queue['allow_terminal'] !== 1) || !this.dependencies.resumeState(latest.id).available) {
          this.pauseTask(latest.id); continue;
        }
-       const row = this.db.prepare("SELECT payload,dispatch_key FROM pending_messages WHERE root_id=? AND json_extract(payload,'$.status')='queued' AND id NOT IN (SELECT pending_id FROM steering_messages WHERE pending_id IS NOT NULL) ORDER BY sequence LIMIT 1").get(root)!;
+       const row = this.db.prepare("SELECT payload,dispatch_key,approvals FROM pending_messages WHERE root_id=? AND json_extract(payload,'$.status')='queued' AND id NOT IN (SELECT pending_id FROM steering_messages WHERE pending_id IS NOT NULL) ORDER BY sequence LIMIT 1").get(root)!;
        const pending = this.record(row);
        this.db.exec('SAVEPOINT pending_promotion');
        let result: { task: Task; created: boolean };
        try {
-         result = this.dependencies.continueTask(latest.id, { idempotencyKey: row['dispatch_key'] as string, parts: pending.parts, ...(pending.instructions ? { instructions: pending.instructions } : {}), ...(pending.launch ? { launch: pending.launch } : {}) });
+         result = this.dependencies.continueTask(latest.id, { idempotencyKey: row['dispatch_key'] as string, parts: pending.parts, ...(pending.instructions ? { instructions: pending.instructions } : {}), ...(pending.launch ? { launch: pending.launch } : {}) }, row['approvals'] === 1);
          this.db.exec('RELEASE pending_promotion');
        } catch (error) {
          this.db.exec('ROLLBACK TO pending_promotion; RELEASE pending_promotion');

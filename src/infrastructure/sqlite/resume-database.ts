@@ -82,11 +82,11 @@ export class ResumeDatabase {
     const parts = input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId });
     return JSON.stringify({ ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
   }
-  continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } {
-    return this.dependencies.transaction(() => this.admitContinuation(id, input));
+  continueTask(id: string, input: ContinueTask, approvals = false): { task: Task; created: boolean } {
+    return this.dependencies.transaction(() => this.admitContinuation(id, input, approvals));
   }
   /** Caller owns the SQLite transaction; used for atomic pending-message promotion. */
-  admitContinuation(id: string, input: ContinueTask): { task: Task; created: boolean } {
+  admitContinuation(id: string, input: ContinueTask, approvals = false): { task: Task; created: boolean } {
     const fingerprint = this.continuationFingerprint(id, input);
       const parent = this.dependencies.getTask(id);
       const launch = input.launch === undefined ? parent.launch : parseLaunchOptions(input.launch, parent.provider);
@@ -100,7 +100,7 @@ export class ResumeDatabase {
       const task: Task = { ...(parent.isolation === undefined ? {} : { isolation: parent.isolation }), ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), id: randomUUID(), sequence: 0, runnerId: parent.runnerId, provider: parent.provider, projectId: parent.projectId!, conversationId: root, parentTaskId: id, status: 'queued', ...(launch ? { launch } : {}), parts: input.parts, createdAt: new Date().toISOString() };
       const result = this.db.prepare('INSERT INTO tasks(id,key,fingerprint,payload) VALUES(?,?,?,?)').run(task.id, input.idempotencyKey, fingerprint, JSON.stringify(task));
       for (const ref of refs) this.db.prepare('INSERT INTO task_attachments VALUES(?,?)').run(task.id, ref);
-      this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(task.id);
+      this.db.prepare('INSERT INTO task_execution(task_id,approvals) VALUES(?,?)').run(task.id, approvals ? 1 : 0);
       this.db.prepare('UPDATE conversations SET latest_id=? WHERE root_id=? AND latest_id=?').run(task.id, root, id);
       this.dependencies.event(task.id, 'task.created');
       this.dependencies.event(task.id, 'task.queued');

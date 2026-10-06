@@ -2,6 +2,7 @@ import { ThreadMetadataDatabase, THREAD_METADATA_SCHEMA } from './thread-metadat
 import { parseAgentSubagentLifecycle, readAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import { SteeringDatabase } from './steering-database.js';
 import { QuestionDatabase, QUESTION_SCHEMA } from './question-database.js';
+import { ApprovalDatabase, APPROVAL_SCHEMA } from './approval-database.js';
 import { outputRetentionMetadata, SQLITE_EXECUTION_STORAGE } from './output-retention.js';
 export { SQLITE_EXECUTION_STORAGE } from './output-retention.js';
 import { parseInstructionSnapshot } from '../../domain/instructions.js';
@@ -29,6 +30,7 @@ export class RepositoryDatabase {
   private readonly lease!: DatabaseSync;
   readonly threadMetadata: ThreadMetadataDatabase;
   readonly questions: QuestionDatabase;
+  readonly approvals: ApprovalDatabase;
   readonly artifacts: ArtifactDatabase;
   readonly clones: CloneDatabase;
   readonly resumes: ResumeDatabase;
@@ -44,9 +46,10 @@ export class RepositoryDatabase {
       this.migrate();
       this.threadMetadata = new ThreadMetadataDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.questions = new QuestionDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
+      this.approvals = new ApprovalDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.artifacts = new ArtifactDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.resumes = new ResumeDatabase(this.db, { wakeThread: id => this.threadMetadata.wake(id), transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), event: (id, type) => this.event(id, type) });
-      this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input) => this.resumes.admitContinuation(id, input) });
+      this.pending = new PendingDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id), resumeState: id => this.resumes.getResumeState(id), continueTask: (id, input, approvals) => this.resumes.admitContinuation(id, input, approvals) });
       this.steering = new SteeringDatabase(this.db, { transaction: action => this.transaction(action), getTask: id => this.getTask(id), requireCapacity: () => this.requireBulkCapacity(), getAttachment: id => this.getAttachment(id) });
       this.clones = new CloneDatabase(this.db, action => this.transaction(action), () => this.requireBulkCapacity());
     } catch (error) {
@@ -78,10 +81,17 @@ export class RepositoryDatabase {
       this.db.exec(PENDING_SCHEMA);
       this.db.exec(ARTIFACT_SCHEMA);
       this.db.exec(QUESTION_SCHEMA);
+      this.db.exec(APPROVAL_SCHEMA);
+      this.addApprovalsColumn('task_execution');
+      this.addApprovalsColumn('pending_messages');
       this.db.exec(THREAD_METADATA_SCHEMA);
       this.db.exec("CREATE INDEX IF NOT EXISTS tasks_status_sequence ON tasks(json_extract(payload,'$.status'),sequence)");
       this.db.exec('CREATE TABLE IF NOT EXISTS task_subagents (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)');
     });
+  }
+  private addApprovalsColumn(table: 'task_execution' | 'pending_messages'): void {
+    if (this.db.prepare(`PRAGMA table_info(${table})`).all().some(column => column['name'] === 'approvals')) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN approvals INTEGER NOT NULL DEFAULT 0`);
   }
   private transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -109,10 +119,25 @@ export class RepositoryDatabase {
     if (!row) throw new RunnerError('not_found');
     return this.task(row);
   }
+  readTask(id: string): Task {
+    const task = this.getTask(id);
+    if (!this.approvals.hasPending(id)) return task;
+    return { ...task, awaiting: 'approval' };
+  }
+  readTasks(after: number): Page<Task> {
+    const page = this.listTasks(after);
+    const pending = this.approvals.pendingTaskIds();
+    if (pending.size === 0) return page;
+    return { ...page, items: page.items.map(task => pending.has(task.id) ? { ...task, awaiting: 'approval' as const } : task) };
+  }
+  getTaskApprovals(id: string): boolean {
+    this.getTask(id);
+    return this.db.prepare('SELECT approvals FROM task_execution WHERE task_id=?').get(id)?.['approvals'] === 1;
+  }
   getTaskSession(id: string): { sessionId: string | null; workspaceTaskId: string } { return this.resumes.getTaskSession(id); }
   getResumeState(id: string): ResumeState { return this.resumes.getResumeState(id); }
   findContinuation(id: string, input: ContinueTask): { task: Task; created: false } | null { return this.resumes.findContinuation(id, input); }
-  continueTask(id: string, input: ContinueTask): { task: Task; created: boolean } { return this.resumes.continueTask(id, input); }
+  continueTask(id: string, input: ContinueTask, approvals = false): { task: Task; created: boolean } { return this.resumes.continueTask(id, input, approvals); }
   setTaskSession(id: string, sessionId: string): void { this.resumes.setTaskSession(id, sessionId); }
   createTask(input: CreateTask): { task: Task; created: boolean } {
     if (input.isolation !== undefined && input.isolation !== 'in-place' && input.isolation !== 'worktree') throw new RunnerError('invalid_input');
@@ -151,11 +176,12 @@ export class RepositoryDatabase {
       const task = this.getTask(id);
       this.pending.pauseTask(id);
       this.questions.settlePending(id, 'cancelled');
+      this.approvals.settlePending(id, 'cancelled');
       if (!['draft', 'queued', 'running'].includes(task.status)) return task;
       return this.save({ ...task, status: 'cancelled' }, 'task.cancelled');
     });
   }
-  queueTask(id: string, projectId: string, base?: StartBase): Task {
+  queueTask(id: string, projectId: string, base?: StartBase, approvals = false): Task {
     const gitBase = serializeStartBase(base === undefined ? undefined : parseStartBase(base));
     return this.transaction(() => {
       const task = this.getTask(id);
@@ -166,7 +192,7 @@ export class RepositoryDatabase {
       }
       if (task.status !== 'draft') throw new RunnerError('conflict');
       if (!projectId || projectId.length > 128) throw new RunnerError('invalid_input');
-      this.db.prepare('INSERT INTO task_execution(task_id) VALUES(?)').run(id);
+      this.db.prepare('INSERT INTO task_execution(task_id,approvals) VALUES(?,?)').run(id, approvals ? 1 : 0);
       this.db.prepare('UPDATE tasks SET git_base=? WHERE id=?').run(gitBase, id);
       return this.save({ ...task, projectId, status: 'queued' }, 'task.queued');
     });
@@ -215,6 +241,7 @@ export class RepositoryDatabase {
         && this.db.prepare("SELECT 1 FROM events WHERE task_id=? AND type='task.running' LIMIT 1").get(id);
       if (task.status !== 'running' && !cleanupFailed) return task;
       this.questions.settlePending(id, 'expired');
+      this.approvals.settlePending(id, 'expired');
       const status = result.exitCode === 0 && !result.error ? 'succeeded' : 'failed';
       if (status === 'failed') this.pending.pauseTask(id);
       const data = { exitCode: result.exitCode, ...(result.error ? { error: boundedText(result.error, SQLITE_EXECUTION_STORAGE.errorBytes) } : {}) };
@@ -225,6 +252,7 @@ export class RepositoryDatabase {
     this.transaction(() => {
       this.pending.pauseAll();
       this.questions.settlePending(undefined, 'expired');
+      this.approvals.settlePending(undefined, 'expired');
       for (;;) {
         const rows = this.db.prepare("SELECT sequence,payload FROM tasks WHERE json_extract(payload,'$.status')='running' ORDER BY sequence LIMIT ?").all(LIMITS.pageSize);
         if (rows.length === 0) break;

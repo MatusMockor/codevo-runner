@@ -5,6 +5,8 @@ import type { AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js'
 import type { SteerInput, SteerClaim, SteerReceipt } from '../../domain/steering.js';
 import type { QuestionRepository } from '../../application/question-ports.js';
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../domain/questions.js';
+import type { ApprovalRepository } from '../../application/approval-ports.js';
+import type { AgentApprovalDecision, AgentApprovalRequest } from '../../domain/approvals.js';
 import type { Artifact } from '../../domain/artifact.js';
 import type { ArtifactRepository } from '../../application/artifact-ports.js';
 import type { PendingMessage, PendingMessages } from '../../domain/pending-message.js';
@@ -23,7 +25,7 @@ import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository {
+class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository, ApprovalRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -79,12 +81,19 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   listQuestions(taskId: string): Promise<readonly AgentQuestionRequest[]> { return this.call({ method: 'listQuestions', args: [taskId] }); }
   answerQuestion(taskId: string, id: string, response: AgentQuestionResponse): Promise<AgentQuestionRequest> { return this.call({ method: 'answerQuestion', args: [taskId, id, response] }); }
   expireQuestions(taskId?: string): Promise<void> { return this.call({ method: 'expireQuestions', args: taskId === undefined ? [] : [taskId] }); }
+  createApproval(request: AgentApprovalRequest): Promise<AgentApprovalRequest> { return this.call({ method: 'createApproval', args: [request] }); }
+  listApprovals(taskId: string): Promise<readonly AgentApprovalRequest[]> { return this.call({ method: 'listApprovals', args: [taskId] }); }
+  answerApproval(taskId: string, id: string, decision: AgentApprovalDecision): Promise<AgentApprovalRequest> { return this.call({ method: 'answerApproval', args: [taskId, id, decision] }); }
+  timeoutApproval(taskId: string, id: string): Promise<boolean> { return this.call({ method: 'timeoutApproval', args: [taskId, id] }); }
+  settleApproval(taskId: string, id: string, status: 'cancelled'): Promise<void> { return this.call({ method: 'settleApproval', args: [taskId, id, status] }); }
+  expireApprovals(taskId?: string): Promise<void> { return this.call({ method: 'expireApprovals', args: taskId === undefined ? [] : [taskId] }); }
+  getTaskApprovals(taskId: string): Promise<boolean> { return this.call({ method: 'getTaskApprovals', args: [taskId] }); }
   listArtifactIds(): Promise<readonly string[]> { return this.call({ method: 'listArtifactIds', args: [] }); }
   putArtifact(artifact: Artifact, path: string): Promise<{ artifact: Artifact; created: boolean }> { return this.call({ method: 'putArtifact', args: [artifact, path] }); }
   findArtifact(taskId: string, path: string): Promise<Artifact | null> { return this.call({ method: 'findArtifact', args: [taskId, path] }); }
   getArtifact(taskId: string, id: string): Promise<Artifact> { return this.call({ method: 'getArtifact', args: [taskId, id] }); }
   listArtifacts(taskId: string): Promise<readonly Artifact[]> { return this.call({ method: 'listArtifacts', args: [taskId] }); }
-  enqueuePending(id: string, input: ContinueTask): Promise<{ pending: PendingMessage; created: boolean }> { return this.call({ method: 'enqueuePending', args: [id, input] }); }
+  enqueuePending(id: string, input: ContinueTask, approvals = false): Promise<{ pending: PendingMessage; created: boolean }> { return this.call({ method: 'enqueuePending', args: [id, input, approvals] }); }
   listPending(id: string): Promise<PendingMessages> { return this.call({ method: 'listPending', args: [id] }); }
   removePending(id: string, pendingId: string): Promise<PendingMessage> { return this.call({ method: 'removePending', args: [id, pendingId] }); }
   resumePending(id: string): Promise<PendingMessages> { return this.call({ method: 'resumePending', args: [id] }); }
@@ -93,7 +102,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   getTaskSession(id: string): Promise<{ sessionId: string | null; workspaceTaskId: string }> { return this.call({ method: 'getTaskSession', args: [id] }); }
   getResumeState(id: string): Promise<ResumeState> { return this.call({ method: 'getResumeState', args: [id] }); }
   findContinuation(id: string, input: ContinueTask): Promise<{ task: Task; created: false } | null> { return this.call({ method: 'findContinuation', args: [id, input] }); }
-  continueTask(id: string, input: ContinueTask): Promise<{ task: Task; created: boolean }> { return this.call({ method: 'continueTask', args: [id, input] }); }
+  continueTask(id: string, input: ContinueTask, approvals = false): Promise<{ task: Task; created: boolean }> { return this.call({ method: 'continueTask', args: [id, input, approvals] }); }
   setTaskSession(id: string, sessionId: string): Promise<void> { return this.call({ method: 'setTaskSession', args: [id, sessionId] }); }
   createTask(input: CreateTask): Promise<{ task: Task; created: boolean }> { return this.call({ method: 'createTask', args: [input] }); }
   getTask(id: string): Promise<Task> { return this.call({ method: 'getTask', args: [id] }); }
@@ -102,7 +111,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   listEvents(taskId: string, after: number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
   putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
-  queueTask(id: string, projectId: string, base?: StartBase): Promise<Task> { return this.call({ method: 'queueTask', args: base === undefined ? [id, projectId] : [id, projectId, base] }); }
+  queueTask(id: string, projectId: string, base?: StartBase, approvals = false): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId, base, approvals] }); }
   getTaskGitBase(id: string): Promise<StartBase | undefined> { return this.call({ method: 'getTaskGitBase', args: [id] }); }
   conversationActive(workspaceTaskId: string): Promise<boolean> { return this.call({ method: 'conversationActive', args: [workspaceTaskId] }); }
   inPlaceActive(projectId: string): Promise<boolean> { return this.call({ method: 'inPlaceActive', args: [projectId] }); }
@@ -125,7 +134,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository & ApprovalRepository & Required<Pick<ExecutionRepository, 'getTaskApprovals'>>> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -139,15 +148,18 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'setTaskSubagents':
     case 'releaseSteer': case 'claimSteer': case 'claimPendingSteer': case 'acceptSteer':
     case 'createQuestion': case 'answerQuestion': case 'expireQuestions':
+    case 'createApproval': case 'answerApproval': case 'settleApproval': case 'expireApprovals':
     case 'putArtifact': case 'promotePending': case 'enqueuePending': case 'removePending': case 'resumePending':
     case 'createClone': case 'cancelClone': case 'finishClone': case 'interruptClones':
     case 'continueTask': case 'setTaskSession': case 'createTask': case 'cancelTask':
     case 'queueTask': case 'appendTaskOutput': case 'finishTask': case 'interruptRunningTasks':
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
+    case 'timeoutApproval': return value === true;
     case 'getThreadMetadata': case 'listThreadMetadata':
     case 'findSteer': case 'findPendingSteer':
     case 'listQuestions':
+    case 'listApprovals': case 'getTaskApprovals':
     case 'listArtifactIds': case 'findArtifact': case 'getArtifact': case 'listArtifacts':
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
