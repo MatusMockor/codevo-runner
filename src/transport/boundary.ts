@@ -36,12 +36,14 @@ const portRoute = new RegExp(`^/v1/(?:tasks/${uuid}|projects/${projectSegment})/
 const accountUsageRoute = /^\/v1\/account-usage\/(claude|codex)$/;
 const speechRoute = new RegExp(`^/v1/speech/transcriptions\\?language=(?:${SPEECH_LANGUAGES.join('|')})$`);
 const commandCatalogRoute = new RegExp(`^/v1/projects/${projectSegment}/command-catalog/(claude|codex)$`);
-const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+const mcpServersRoute = new RegExp(`^/v1/projects/${projectSegment}/mcp-servers/(claude|codex)$`);
+const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
   { pattern: speechRoute, methods: ['POST'] },
   { pattern: accountUsageRoute, methods: ['GET'] },
   { pattern: commandCatalogRoute, methods: ['GET'] },
+  { pattern: mcpServersRoute, methods: ['GET'] },
   { pattern: projectGitReadRoute, methods: ['GET'] },
   { pattern: projectGitBodyRoute, methods: ['POST'] },
   { pattern: taskGitReadRoute, methods: ['GET'] },

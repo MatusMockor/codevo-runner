@@ -1,0 +1,764 @@
+{
+  "schemaVersion": 1,
+  "ipcCommand": "get_agent_mcp_servers",
+  "remoteIpcCommand": "remote_runner_get_mcp_servers",
+  "remoteRunnerCapability": "mcpServers",
+  "remoteRunnerRoute": "/v1/projects/{projectId}/mcp-servers/{claude|codex}",
+  "remoteRunnerProviders": {
+    "claudeCode": "claude",
+    "codex": "codex"
+  },
+  "limits": {
+    "maxServers": 128,
+    "maxNameBytes": 128,
+    "maxEndpointOriginBytes": 256,
+    "maxDetailBytes": 256,
+    "maxToolCount": 4096,
+    "maxRepositoryRootBytes": 4096,
+    "endpointOriginPattern": "^https?://[^/?#@\\s]+$"
+  },
+  "statuses": ["connected", "connecting", "needsAuth", "failed", "disabled", "unknown"],
+  "scopes": ["user", "project", "local", "account", "plugin", "managed", "unknown"],
+  "transports": ["stdio", "http", "sse", "unknown"],
+  "errors": {
+    "unknownWorkspace": "Agent MCP server status workspace is not registered or its identity changed.",
+    "untrustedWorkspace": "Agent MCP server status requires a trusted repository.",
+    "providerDisabled": "Agent MCP server status provider is disabled.",
+    "busy": "Agent MCP server status check is already running.",
+    "timedOut": "Agent MCP server status check timed out.",
+    "unavailable": "Agent MCP server status is unavailable.",
+    "unsupportedRunner": "The server runner does not support MCP server status. Update the runner on the server.",
+    "serverUnavailable": "Server MCP server status could not be loaded. Check the connection and try again."
+  },
+  "requests": [
+    {
+      "name": "claudeWorkspace",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "claudeCode"
+      }
+    },
+    {
+      "name": "codexWorkspace",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "codex"
+      }
+    }
+  ],
+  "rejectedRequests": [
+    {
+      "name": "unknownField",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "codex",
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "name": "unknownProvider",
+      "value": {
+        "repositoryRoot": "/Users/dev/project",
+        "provider": "gemini"
+      }
+    },
+    {
+      "name": "emptyRoot",
+      "value": {
+        "repositoryRoot": "",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "relativeRoot",
+      "value": {
+        "repositoryRoot": "project",
+        "provider": "claudeCode"
+      }
+    },
+    {
+      "name": "missingProvider",
+      "value": {
+        "repositoryRoot": "/Users/dev/project"
+      }
+    }
+  ],
+  "remoteRequests": [
+    {
+      "name": "claudeProject",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "claude"
+      }
+    },
+    {
+      "name": "codexProject",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    }
+  ],
+  "rejectedRemoteRequests": [
+    {
+      "name": "unknownField",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "codex",
+        "repositoryRoot": "/srv/project"
+      }
+    },
+    {
+      "name": "localProviderName",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "codevo-editor",
+        "provider": "claudeCode"
+      }
+    },
+    {
+      "name": "emptyProjectId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "projectIdWithSlash",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "a/b",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "projectIdTooLong",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "runner-home",
+        "projectId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "missingRunnerId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    },
+    {
+      "name": "emptyRunnerId",
+      "value": {
+        "serverId": "3f2b8c1e-5a47-4d09-9c3e-7b1a2d4e6f80",
+        "runnerId": "",
+        "projectId": "codevo-editor",
+        "provider": "codex"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "name": "claudeMixedStatuses",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "claude.ai Gmail",
+            "status": "needsAuth",
+            "scope": "account",
+            "transport": "http",
+            "endpointOrigin": "https://gmailmcp.googleapis.com",
+            "toolCount": null,
+            "detail": null
+          },
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "project",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 14,
+            "detail": null
+          },
+          {
+            "name": "sentry",
+            "status": "failed",
+            "scope": "user",
+            "transport": "http",
+            "endpointOrigin": "https://mcp.sentry.dev",
+            "toolCount": null,
+            "detail": "Connection closed"
+          },
+          {
+            "name": "slow-indexer",
+            "status": "connecting",
+            "scope": "local",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          },
+          {
+            "name": "legacy-events",
+            "status": "disabled",
+            "scope": "user",
+            "transport": "sse",
+            "endpointOrigin": "http://127.0.0.1:8931",
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "codexPluginAndConfigured",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "codex_apps",
+            "status": "connected",
+            "scope": "plugin",
+            "transport": "http",
+            "endpointOrigin": "https://chatgpt.com",
+            "toolCount": 37,
+            "detail": null
+          },
+          {
+            "name": "docs",
+            "status": "unknown",
+            "scope": "unknown",
+            "transport": "unknown",
+            "endpointOrigin": null,
+            "toolCount": 0,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "noServers",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": []
+      }
+    },
+    {
+      "name": "truncatedList",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": true,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "managed",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 4096,
+            "detail": null
+          }
+        ]
+      }
+    }
+  ],
+  "rejectedResponses": [
+    {
+      "name": "unknownEnvelopeField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [],
+        "cwd": "/Users/dev/project"
+      }
+    },
+    {
+      "name": "unknownServerField",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "user",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 1,
+            "detail": null,
+            "command": "npx"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupportedVersion",
+      "value": {
+        "version": 2,
+        "provider": "codex",
+        "truncated": false,
+        "servers": []
+      }
+    },
+    {
+      "name": "unknownProvider",
+      "value": {
+        "version": 1,
+        "provider": "gemini",
+        "truncated": false,
+        "servers": []
+      }
+    },
+    {
+      "name": "unknownStatus",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "needs-auth",
+            "scope": "user",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknownScope",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "claudeai",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknownTransport",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "user",
+            "transport": "claudeai-proxy",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "emptyName",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "nameWithControlCharacter",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs\nrm -rf",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "nameWithSurroundingWhitespace",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": " docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicateName",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          },
+          {
+            "name": "docs",
+            "status": "failed",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpointOriginWithPath",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "sentry",
+            "status": "connected",
+            "scope": "user",
+            "transport": "http",
+            "endpointOrigin": "https://mcp.sentry.dev/mcp?token=secret",
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpointOriginWithCredentials",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "sentry",
+            "status": "connected",
+            "scope": "user",
+            "transport": "http",
+            "endpointOrigin": "https://user:secret@mcp.sentry.dev",
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpointOriginOnStdio",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "user",
+            "transport": "stdio",
+            "endpointOrigin": "https://mcp.sentry.dev",
+            "toolCount": null,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "negativeToolCount",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": -1,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "toolCountAboveLimit",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 4097,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "fractionalToolCount",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 1.5,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "detailOnConnectedServer",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": "Connection closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "emptyDetail",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "failed",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "multilineDetail",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "failed",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null,
+            "detail": "spawn failed\nENOENT"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missingServerField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": null
+          }
+        ]
+      }
+    }
+  ],
+  "remoteRunnerResponses": [
+    {
+      "name": "claudeFromRunner",
+      "value": {
+        "version": 1,
+        "provider": "claude",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "claude.ai Gmail",
+            "status": "needsAuth",
+            "scope": "account",
+            "transport": "http",
+            "endpointOrigin": "https://gmailmcp.googleapis.com",
+            "toolCount": null,
+            "detail": null
+          },
+          {
+            "name": "filesystem",
+            "status": "connected",
+            "scope": "project",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 14,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "codexFromRunner",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": true,
+        "servers": [
+          {
+            "name": "codex_apps",
+            "status": "connected",
+            "scope": "plugin",
+            "transport": "http",
+            "endpointOrigin": "https://chatgpt.com",
+            "toolCount": 37,
+            "detail": null
+          },
+          {
+            "name": "docs",
+            "status": "failed",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 0,
+            "detail": "Connection closed"
+          }
+        ]
+      }
+    }
+  ],
+  "rejectedRemoteRunnerResponses": [
+    {
+      "name": "localProviderName",
+      "value": {
+        "version": 1,
+        "provider": "claudeCode",
+        "truncated": false,
+        "servers": []
+      }
+    },
+    {
+      "name": "unknownEnvelopeField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [],
+        "cwd": "/srv/project"
+      }
+    },
+    {
+      "name": "unknownServerField",
+      "value": {
+        "version": 1,
+        "provider": "codex",
+        "truncated": false,
+        "servers": [
+          {
+            "name": "docs",
+            "status": "connected",
+            "scope": "unknown",
+            "transport": "stdio",
+            "endpointOrigin": null,
+            "toolCount": 1,
+            "detail": null,
+            "command": "npx"
+          }
+        ]
+      }
+    }
+  ]
+}
