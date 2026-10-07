@@ -717,6 +717,21 @@ terminal for a server that should keep running. Process trees are observed every
 100 ms for turns and every second for terminals; a server that detaches from its tree
 faster than that (for example a double-forking daemon) is neither tracked nor listed.
 
+A failed observation does not end a turn at once. A process whose `/proc` entries
+cannot be read is skipped for that pass, together with any of its descendants that
+are not yet known, while every other known process is still walked; the pass counts
+as failed. The turn continues until 50 observations in a row fail (about 5 seconds)
+or 600 observations have failed in total, whichever comes first. A permission or
+path error (`EACCES`, `EPERM`, `ENOTDIR`, `ELOOP`, `ENAMETOOLONG`), an error without
+an errno and the process tree size bound end it immediately. Discovery is degraded
+while observations fail: a descendant that starts in its own session and loses its
+parent during that time is neither tracked nor killed. The final sweep kills every
+process known by then whose kernel start time it can still verify. A turn that ends
+with `process_cleanup_failed` could not be confirmed as fully inspected and killed,
+so a descendant may have survived. Lines starting with `[Codevo] Process tree` in a
+turn's stderr output name only the phase (`attach`, `observe` or `kill`), the errno
+or error name, and failure counts; none are stored after the turn is cancelled.
+
 ## HTTP boundary and capability negotiation
 
 The current JSON reader accepts at most 4 MiB (4,194,304 bytes), including for task

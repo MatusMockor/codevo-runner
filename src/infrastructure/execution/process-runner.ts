@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { LinuxProcessTree } from './linux-process-tree.js';
 import { StringDecoder } from 'node:string_decoder';
 import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
+import { OBSERVATION_INTERVAL_MS, cleanupDiagnostic, processDiagnosticNotes, trackObservation } from '../../domain/process-observation.js';
 import type { ProcessOwnershipSink } from '../../domain/process-ownership.js';
 
 /** Internal launch plan: never construct arguments/environment from HTTP fields. */
@@ -26,20 +27,26 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
     let failure: string | undefined;
     let bytes = 0;
     let delivery = Promise.resolve();
+    let closed = false;
     const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+    const diagnose = processDiagnosticNotes(note => {
+      delivery = delivery.then(() => plan.onOutput('stderr', note)).catch(() => {});
+    }, () => !closed);
     let tree: LinuxProcessTree | undefined;
     try { if (process.platform === 'linux' && child.pid) tree = new LinuxProcessTree(child.pid); }
-    catch { failure = 'process_cleanup_failed'; }
+    catch (error) { failure = 'process_cleanup_failed'; diagnose(cleanupDiagnostic('attach', error)); }
     const detach = tree ? plan.processes?.attach(tree) : undefined;
-    const tracking = tree ? setInterval(() => {
-      try { tree.observe(); } catch { stop('process_cleanup_failed'); }
-    }, 100) : undefined;
+    const tracking = tree
+      ? setInterval(trackObservation(() => tree.observe(), diagnose, () => stop('process_cleanup_failed')), OBSERVATION_INTERVAL_MS)
+      : undefined;
     const killGroup = () => {
-      try { tree?.kill(); } catch { failure = 'process_cleanup_failed'; }
+      try { tree?.kill(); } catch (error) { failure = 'process_cleanup_failed'; diagnose(cleanupDiagnostic('kill', error)); }
       if (!child.pid) return;
       try { process.kill(-child.pid, 'SIGKILL'); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failure = 'process_cleanup_failed';
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+        failure = 'process_cleanup_failed';
+        diagnose(cleanupDiagnostic('kill', error));
       }
     };
     const stop = (reason: string) => { failure ??= reason; killGroup(); };
@@ -79,6 +86,7 @@ export async function runProcess(plan: ProcessPlan): Promise<ExecutionResult> {
       clearInterval(tracking);
       plan.signal.removeEventListener('abort', abort);
       killGroup();
+      closed = true;
       detach?.();
       void delivery.then(async () => {
         if (!failure) {

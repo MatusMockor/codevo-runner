@@ -1,26 +1,30 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { PROCESS_TREE_LIMIT, outranksProcessFailure } from '../../domain/process-observation.js';
 import type { OwnedProcess, OwnedProcessTree } from '../../domain/process-ownership.js';
 
 interface Identity { readonly pid: number; readonly start: string; readonly parent: number }
+export type ProcReader = Readonly<{ read(path: string): string; list(path: string): string[] }>;
 const LIMIT = 4096;
+const PROC: ProcReader = { read: path => readFileSync(path, 'utf8'), list: path => readdirSync(path) };
+const gone = (error: unknown) => ['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '');
 
 /** Linux ownership uses kernel start times, never a recycled PID alone. */
 export class LinuxProcessTree implements OwnedProcessTree {
   private readonly owned = new Map<number, Identity>();
-  constructor(root: number) {
+  constructor(root: number, private readonly proc: ProcReader = PROC) {
     const identity = this.identity(root);
     if (identity) this.owned.set(root, identity);
   }
 
   private identity(pid: number): Identity | undefined {
     try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const stat = this.proc.read(`/proc/${pid}/stat`);
       // comm can contain spaces and parentheses; fields following its final ')' are fixed.
       const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       const start = fields[19];
       return start && /^\d+$/.test(start) ? { pid, start, parent: Number(fields[1]) } : undefined;
     } catch (error) {
-      if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+      if (gone(error)) return undefined;
       throw error;
     }
   }
@@ -38,41 +42,48 @@ export class LinuxProcessTree implements OwnedProcessTree {
   /** Request parent suspension before discovery to narrow concurrent-fork races.
    * Kernel cgroups are required to contain arbitrary daemonization between observations. */
   private collect(freeze: boolean): void {
+    let deferred = undefined as { readonly error: unknown } | undefined;
+    const defer = (error: unknown) => { if (!deferred || outranksProcessFailure(error, deferred.error)) deferred = { error }; };
+    const current = (identity: Identity): boolean | undefined => {
+      try { return this.current(identity); } catch (error) { defer(error); return undefined; }
+    };
     for (const [pid, identity] of this.owned) {
-      if (!this.current(identity)) this.owned.delete(pid);
+      if (current(identity) === false) this.owned.delete(pid);
     }
     const queue = [...this.owned.values()];
     const visited = new Set<number>();
     for (let index = 0; index < queue.length; index++) {
       const parent = queue[index]!;
-      if (visited.has(parent.pid) || !this.current(parent)) continue;
+      if (visited.has(parent.pid) || !current(parent)) continue;
       visited.add(parent.pid);
-      if (freeze) this.signal(parent, 'SIGSTOP');
+      try { if (freeze) this.signal(parent, 'SIGSTOP'); } catch (error) { defer(error); }
       let threads: string[];
-      try { threads = readdirSync(`/proc/${parent.pid}/task`); }
+      try { threads = this.proc.list(`/proc/${parent.pid}/task`); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw error;
+        if (!gone(error)) defer(error);
+        continue;
       }
-      if (threads.length > LIMIT) throw new Error('process_tree_limit');
+      if (threads.length > LIMIT) throw new Error(PROCESS_TREE_LIMIT);
       for (const thread of threads) {
         let children: string;
-        try { children = readFileSync(`/proc/${parent.pid}/task/${thread}/children`, 'utf8'); }
+        try { children = this.proc.read(`/proc/${parent.pid}/task/${thread}/children`); }
         catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw error;
+          if (!gone(error)) defer(error);
+          continue;
         }
-        if (children.length > LIMIT * 16) throw new Error('process_tree_limit');
+        if (children.length > LIMIT * 16) throw new Error(PROCESS_TREE_LIMIT);
         for (const raw of children.trim().split(/\s+/)) {
           if (!/^\d+$/.test(raw)) continue;
-          const child = this.identity(Number(raw));
-          if (!child || child.parent !== parent.pid || !this.current(parent) || this.owned.get(child.pid)?.start === child.start) continue;
-          if (this.owned.size >= LIMIT) throw new Error('process_tree_limit');
+          let child: Identity | undefined;
+          try { child = this.identity(Number(raw)); } catch (error) { defer(error); continue; }
+          if (!child || child.parent !== parent.pid || !current(parent) || this.owned.get(child.pid)?.start === child.start) continue;
+          if (this.owned.size >= LIMIT) throw new Error(PROCESS_TREE_LIMIT);
           this.owned.set(child.pid, child);
           queue.push(child);
         }
       }
     }
+    if (deferred) throw deferred.error;
   }
 
   observe(): void { this.collect(false); }
