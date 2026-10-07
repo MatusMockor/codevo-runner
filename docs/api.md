@@ -717,6 +717,21 @@ terminal for a server that should keep running. Process trees are observed every
 100 ms for turns and every second for terminals; a server that detaches from its tree
 faster than that (for example a double-forking daemon) is neither tracked nor listed.
 
+A failed observation does not end a turn at once. A process whose `/proc` entries
+cannot be read is skipped for that pass, together with any of its descendants that
+are not yet known, while every other known process is still walked; the pass counts
+as failed. The turn continues until 50 observations in a row fail (about 5 seconds)
+or 600 observations have failed in total, whichever comes first. A permission or
+path error (`EACCES`, `EPERM`, `ENOTDIR`, `ELOOP`, `ENAMETOOLONG`), an error without
+an errno and the process tree size bound end it immediately. Discovery is degraded
+while observations fail: a descendant that starts in its own session and loses its
+parent during that time is neither tracked nor killed. The final sweep kills every
+process known by then whose kernel start time it can still verify. A turn that ends
+with `process_cleanup_failed` could not be confirmed as fully inspected and killed,
+so a descendant may have survived. Lines starting with `[Codevo] Process tree` in a
+turn's stderr output name only the phase (`attach`, `observe` or `kill`), the errno
+or error name, and failure counts; none are stored after the turn is cancelled.
+
 ## HTTP boundary and capability negotiation
 
 The current JSON reader accepts at most 4 MiB (4,194,304 bytes), including for task
@@ -1239,6 +1254,80 @@ it is 10 minutes old; a failure is never cached. At most 32 keys are cached (the
 oldest fetch is evicted first) and at most two probes run runner-wide: a further key
 is answered from its last good catalog or refused immediately with 503 `busy`.
 Shutdown aborts running probes.
+
+## MCP servers
+
+Clients announcing `mcpServers` in `X-Codevo-Client-Capabilities` discover the
+optional `mcpServers` capability. It is true under the same condition as
+`commandCatalog`: execution is enabled and tasks launch the provider CLIs; otherwise
+it is false and the route returns 404. Authentication, runner identity, exact paths
+and query-string rules match the command catalog; only GET is allowed and a body is
+refused.
+
+| Route | Response |
+| --- | --- |
+| `GET /v1/projects/:projectId/mcp-servers/:provider` | `{version:1,provider,truncated,servers:[{name,status,scope,transport,endpointOrigin,toolCount,detail}]}` |
+
+`:provider` is `claude` or `codex` and is echoed as `provider`. An unknown project or
+provider is 404 `not_found`. The object is closed: no other fields are returned and
+every server field is always present.
+
+| Field | Values |
+| --- | --- |
+| `status` | `connected`, `connecting`, `needsAuth`, `failed`, `disabled`, `unknown` |
+| `scope` | `user`, `project`, `local`, `account`, `plugin`, `managed`, `unknown` |
+| `transport` | `stdio`, `http`, `sse`, `unknown` |
+| `endpointOrigin` | `scheme://host[:port]` of an HTTP(S) endpoint, at most 256 bytes, or `null`; always `null` for `stdio` |
+| `toolCount` | number of tools when the provider reported them and there are at most 4096, otherwise `null` |
+| `detail` | redacted single-line failure text of at most 256 bytes, only for `failed`, otherwise `null` |
+
+Every request runs one fresh check; nothing is cached and nothing polls in the
+background. The runner starts the same provider executable with the same environment
+allowlist as a task launch, in the registered checkout, pinned by directory identity
+before exec. This starts the MCP servers the provider would start for a task of that
+project, including servers configured by the project itself, so the route is offered
+only where tasks may execute. No prompt or user message is ever sent.
+
+Claude Code is started in print mode with hooks and session persistence disabled and
+receives only two constant control requests: `initialize` once, then `mcp_status`
+every 500 ms. The first answers can be empty or incomplete, so polling continues
+until the list has been unchanged for 2 seconds, a later poll confirmed it and no
+server is still pending; 20 seconds after `initialize` was answered, after 48 polls
+or 25 seconds after the process started the latest list is returned with pending
+servers reported as `connecting`.
+
+Codex is asked through `codex app-server`: `initialize`, then `initialized` and one
+`mcpServerStatus/list`, which answers when every server finished starting. A Codex
+reply with a further page sets `truncated`. Only after that list arrived the runner
+sends one `config/read` for the checkout and waits at most 5 seconds for its answer.
+From the configuration only `mcp_servers.<name>.enabled` is read: a listed server
+that is disabled there becomes `disabled` with `detail` `null`, unless the list
+reports it as `connected` or `connecting`. The configuration read can only refine the
+list: when it times out, is answered with an error or an unusable result, exceeds the
+line bound, or the process exits or stops reading first, the status list is returned
+unchanged.
+
+Names are at most 128 bytes without control characters, surrounding whitespace or
+bidirectional controls and are unique; other entries are omitted and set
+`truncated`, as do more than 128 servers. Servers are sorted by name in byte order.
+Commands, arguments, environment, headers, URL credentials, paths, queries and
+fragments, tool names and schemas, server info, identifiers and process ids are never
+returned or logged. `detail` keeps ordinary words; option-like words and the word
+after them, words containing `/`, `\`, `=` or `@`, and long token-like runs become
+`[redacted]`, and URLs are reduced to their HTTP(S) origin or redacted.
+
+A check is bounded to 5 seconds of checkout validation and 25 seconds of provider
+run time. At 25 seconds Claude Code's latest list is returned if one arrived and
+its process is killed no later than 26 seconds after start; the Codex process is
+killed at 25 seconds and its status list is returned if it had already arrived.
+Claude Code output is bounded to 2 MiB per line and 16 MiB in total, Codex output to
+8 MiB per line and 16 MiB in total. Without a list, exceeding an output bound, a
+non-zero exit, an error or invalid reply, a timeout or a checkout that fails
+validation is 503 `storage_unavailable`; the runner has no separate timeout code.
+For Claude Code an output bound, error reply or exit is 503 even after a list
+arrived. At most two checks run runner-wide and a further request is refused
+immediately with 503 `busy`. The whole provider process tree is killed when the
+check completes, fails, times out, the client disconnects or the runner shuts down.
 
 ## Speech transcription
 

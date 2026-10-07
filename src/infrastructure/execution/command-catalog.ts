@@ -22,7 +22,7 @@ const CLAUDE_ENV = { ENABLE_CLAUDEAI_MCP_SERVERS: 'false', CLAUDE_CODE_AUTO_CONN
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
-function executable(configured: string | undefined, fallback: string): string {
+export function executable(configured: string | undefined, fallback: string): string {
   const value = configured ?? fallback;
   if (!value || value.includes('\0') || (value !== fallback && !isAbsolute(value))) throw new Error('invalid_provider_executable');
   return value;

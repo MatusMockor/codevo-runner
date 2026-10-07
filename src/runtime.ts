@@ -5,6 +5,8 @@ import { CliAccountUsageReader } from './infrastructure/execution/account-usage.
 import type { UsageProcessOptions } from './infrastructure/execution/account-usage-process.js';
 import { CommandCatalogService } from './application/command-catalog-service.js';
 import { CliCommandCatalogReader, type CommandCatalogCliOptions } from './infrastructure/execution/command-catalog.js';
+import { McpServersService } from './application/mcp-servers-service.js';
+import { CliMcpServersReader, type McpServersCliOptions } from './infrastructure/execution/mcp-servers.js';
 import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
@@ -49,6 +51,7 @@ export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
   accountUsageCli?: UsageProcessOptions;
   commandCatalogCli?: CommandCatalogCliOptions;
+  mcpServersCli?: McpServersCliOptions;
   projectsRoot?: string;
   executionTimeoutMs?: number;
   executionConcurrency?: number;
@@ -85,6 +88,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let gitSync: GitSyncService | undefined;
     let ports: PortPreviewService | undefined;
     let commandCatalog: CommandCatalogService | undefined;
+    let mcpServers: McpServersService | undefined;
     try {
       if (options) {
         const configured = new ConfiguredProjectRegistry(options.projects);
@@ -116,6 +120,10 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           commandCatalog = new CommandCatalogService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
             new CliCommandCatalogReader(options.commandCatalogCli));
         }
+        if (options.providers === undefined || options.mcpServersCli) {
+          mcpServers = new McpServersService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
+            new CliMcpServersReader(options.mcpServersCli));
+        }
         if (process.platform === 'linux') {
           ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,
             new ProcListeningPortScanner(), { excludedPorts: options.listenPort === undefined ? [] : [options.listenPort] });
@@ -137,7 +145,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     }
     let closing: Promise<void> | undefined;
     return {
-      speech, accountUsage, commandCatalog, surfaces, terminals,
+      speech, accountUsage, commandCatalog, mcpServers, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
@@ -151,13 +159,14 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           const executionClosing = execution?.close();
           const usageClosing = accountUsage.close();
           const catalogClosing = commandCatalog?.close();
+          const mcpServersClosing = mcpServers?.close();
           const speechClosing = speech?.close();
           try {
             try { await executionClosing; }
             finally {
               try { await speechClosing; await usageClosing; }
               finally {
-                try { await catalogClosing; }
+                try { await catalogClosing; await mcpServersClosing; }
                 finally {
                   try { await terminals?.close(); }
                   finally {

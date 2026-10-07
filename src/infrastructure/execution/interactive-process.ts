@@ -5,6 +5,7 @@ import type { ExecutionResult, OutputChannel } from '../../domain/execution.js';
 import { LIMITS } from '../../domain/contracts.js';
 import { INSTRUCTION_LIMITS } from '../../domain/instructions.js';
 import { LinuxProcessTree } from './linux-process-tree.js';
+import { OBSERVATION_INTERVAL_MS, cleanupDiagnostic, processDiagnosticNotes, trackObservation } from '../../domain/process-observation.js';
 import type { ProcessOwnershipSink } from '../../domain/process-ownership.js';
 
 export type InteractiveSend = (value: unknown) => Promise<void>;
@@ -46,12 +47,22 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
     let pendingBytes = 0;
     let stderrDelivery = Promise.resolve();
     let stdoutDelivery = Promise.resolve();
+    let diagnosticDelivery = Promise.resolve();
+    let draining = false;
     let tree: LinuxProcessTree | undefined;
     const decoder = new StringDecoder('utf8');
+    const diagnose = processDiagnosticNotes(note => {
+      diagnosticDelivery = diagnosticDelivery.then(() => plan.onOutput('stderr', note)).catch(() => {});
+    }, () => !draining);
     const kill = () => {
-      try { tree?.kill(); } catch { result = { exitCode: null, error: 'process_cleanup_failed' }; }
-      if (child.pid) try { process.kill(-child.pid, 'SIGKILL'); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') result = { exitCode: null, error: 'process_cleanup_failed' }; }
+      try { tree?.kill(); } catch (error) { result = { exitCode: null, error: 'process_cleanup_failed' }; diagnose(cleanupDiagnostic('kill', error)); }
+      if (!child.pid) return;
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+        result = { exitCode: null, error: 'process_cleanup_failed' };
+        diagnose(cleanupDiagnostic('kill', error));
+      }
     };
     const finish = (value: ExecutionResult) => { if (!result && !closed) {
       result = value; protocol.dispose?.(); kill();
@@ -61,9 +72,11 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
     } };
     const fail = (error: string) => finish({ exitCode: null, error });
     try { if (process.platform === 'linux' && child.pid) tree = new LinuxProcessTree(child.pid); }
-    catch { fail('process_cleanup_failed'); }
+    catch (error) { diagnose(cleanupDiagnostic('attach', error)); fail('process_cleanup_failed'); }
     const detach = tree ? plan.processes?.attach(tree) : undefined;
-    const tracking = tree ? setInterval(() => { try { tree?.observe(); } catch { fail('process_cleanup_failed'); } }, 100) : undefined;
+    const tracking = tree
+      ? setInterval(trackObservation(() => tree?.observe(), diagnose, () => fail('process_cleanup_failed')), OBSERVATION_INTERVAL_MS)
+      : undefined;
     const timer = plan.timeoutMs > 0 ? setTimeout(() => fail('execution_timeout'), plan.timeoutMs) : undefined;
     const abort = () => fail('cancelled');
     plan.signal.addEventListener('abort', abort, { once: true });
@@ -113,13 +126,13 @@ export async function runInteractiveProcess(plan: InteractiveProcessPlan, protoc
     });
     child.once('exit', kill);
     child.once('close', exitCode => {
-      clearTimeout(timer); clearInterval(tracking); kill(); detach?.();
+      clearTimeout(timer); clearInterval(tracking); kill(); draining = true; detach?.();
       // Drain already accepted persistence before task completion; a broken adapter cannot retain ownership forever.
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       const boundedDrain = new Promise<void>(accept => { drainTimer = setTimeout(() => {
         result ??= { exitCode: null, error: 'output_persistence_failed' }; accept();
       }, 1000); });
-      void Promise.race([Promise.all([stdoutDelivery, stderrDelivery]), boundedDrain]).finally(() => {
+      void Promise.race([Promise.all([stdoutDelivery, stderrDelivery, diagnosticDelivery]), boundedDrain]).finally(() => {
         clearTimeout(drainTimer); closed = true; protocol.dispose?.(); pending = '';
         plan.signal.removeEventListener('abort', abort);
         resolve(result ?? (providerResult
