@@ -4,7 +4,7 @@ export const SPEECH_LIMITS = Object.freeze({
   minimumAudioBytes: 640, maximumAudioBytes: 960_000, transcriptCharacters: 4000,
   upstreamResponseBytes: 32_768, waitingRequests: 4, timeoutMs: 30_000, refusalDrainMs: 5_000,
 });
-export const SPEECH_LANGUAGES = Object.freeze(['sk', 'en', 'cs'] as const);
+export const SPEECH_LANGUAGES = Object.freeze(['auto', 'sk', 'en', 'cs'] as const);
 export type SpeechLanguage = typeof SPEECH_LANGUAGES[number];
 export type SpeechTranscript = Readonly<{ text: string }>;
 

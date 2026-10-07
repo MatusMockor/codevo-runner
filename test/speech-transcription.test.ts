@@ -239,15 +239,15 @@ test('speech route enforces authentication, runner identity, the exact query and
   assert.deepEqual(await post(url, { ...runner.headers, 'x-codevo-runner-id': randomUUID() }), { status: 409, body: { error: 'runner_identity_mismatch' } });
   assert.equal((await post(url, { ...runner.headers, origin: 'https://foreign.invalid' })).status, 403);
   const queries = ['', '?', '?language=', '?language=de', '?language=SK', '?language=sk,en', '?lang=sk', '?language=sk&language=en',
-    '?language=sk&model=large', '?model=large&language=sk', '?language=sk&', '?language=%73k', '/?language=sk'];
+    '?language=auto&extra=true', '?language=AUTO', '?language=auto&language=sk', '?language=sk&model=large', '?model=large&language=sk', '?language=sk&', '?language=%73k', '/?language=sk'];
   for (const query of queries)
     assert.deepEqual(await post(runner.route + query, runner.headers), { status: 404, body: { error: 'not_found' } }, query);
   for (const method of ['GET', 'DELETE', 'PATCH'])
     assert.deepEqual(await read(await fetch(url, { method, headers: runner.headers })), { status: 405, body: { error: 'method_not_allowed' } });
   assert.equal((await fetch(url, { method: 'PUT', body, headers: { ...runner.headers, 'content-type': 'application/octet-stream' } })).status, 405);
   assert.equal(sidecar.calls.length, 0);
-  for (const language of ['sk', 'en', 'cs']) assert.equal((await post(`${runner.route}?language=${language}`, runner.headers)).status, 200);
-  assert.deepEqual(sidecar.calls.map(call => call.url), ['/transcribe?language=sk', '/transcribe?language=en', '/transcribe?language=cs']);
+  for (const language of ['auto', 'sk', 'en', 'cs']) assert.equal((await post(`${runner.route}?language=${language}`, runner.headers)).status, 200);
+  assert.deepEqual(sidecar.calls.map(call => call.url), ['/transcribe?language=auto', '/transcribe?language=sk', '/transcribe?language=en', '/transcribe?language=cs']);
 });
 
 test('speech route rejects unsupported media, undersized, odd and oversized audio before the sidecar', async t => {
@@ -283,7 +283,7 @@ test('speech route forwards the exact audio and language and returns the trimmed
   const sidecar = await startSidecar(t);
   const runner = await startRunner(t, { url: sidecar.url });
   const spoken = `prepis-${randomUUID()}`;
-  for (const language of ['sk', 'en', 'cs']) {
+  for (const language of ['auto', 'sk', 'en', 'cs']) {
     const audio = randomBytes(1280);
     sidecar.state.reply = transcript(`  ${spoken} dobrý deň \n`);
     assert.deepEqual(await transcribe(runner, audio, { language }), { status: 200, body: { text: `${spoken} dobrý deň` } });

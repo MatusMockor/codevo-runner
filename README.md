@@ -605,7 +605,7 @@ included only when its token is announced.
 
 When `CODEVO_SPEECH_URL` names a speech-to-text sidecar on the runner's own loopback
 interface, the editor can send a clip of at most 30 seconds (raw PCM16, mono,
-16 kHz) to `POST /v1/speech/transcriptions?language=<sk|en|cs>` and receive its
+16 kHz) to `POST /v1/speech/transcriptions?language=<auto|sk|en|cs>` and receive its
 text. The runner forwards the clip to the sidecar's `POST /transcribe` and keeps one
 request in flight with at most four waiting. Audio and transcripts are never stored
 or logged. Without the variable the route returns 404 and the capability is false.

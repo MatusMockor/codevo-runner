@@ -1254,7 +1254,7 @@ Clients announcing `speechTranscription` in `X-Codevo-Client-Capabilities` disco
 the `speechTranscription` capability: true when the sidecar URL is configured, false
 otherwise. Other clients receive the unchanged older descriptor without that field.
 
-`POST /v1/speech/transcriptions?language=<sk|en|cs>` requires bearer authentication
+`POST /v1/speech/transcriptions?language=<auto|sk|en|cs>` requires bearer authentication
 and the exact `X-Codevo-Runner-Id`. The `language` query is required and exact: a
 missing, repeated, percent-encoded or additional parameter is 404, and any other
 method is 405.
@@ -1278,6 +1278,12 @@ method is 405.
 Checks run in that order, except that admission is decided after the declared
 `Content-Length` is checked and before the body is buffered, so a full runner never
 holds a refused clip in memory.
+
+`auto` requests automatic spoken-language detection and transcription in the
+original language. Explicit `sk`, `en` and `cs` remain language overrides. The
+sidecar must support `auto`; it must pass no forced language to its recognition
+engine and must use transcription rather than translation. Older sidecars reject
+this new value, so update the sidecar together with the runner.
 
 The runner sends `POST {CODEVO_SPEECH_URL}/transcribe?language=<language>` with
 `Content-Type: application/octet-stream` and the identical bytes. The only accepted
