@@ -2,7 +2,7 @@ import { STEERING_SCHEMA } from './steering-database.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { RunnerError, type Task } from '../../domain/contracts.js';
-import { parseLaunchOptions } from '../../domain/launch.js';
+import { launchIdentity, parseLaunchOptions } from '../../domain/launch.js';
 import { parseContinueTask, type ContinueTask, type ResumeState } from '../../domain/task-resume.js';
 import { PENDING_LIMITS, type PendingMessage, type PendingMessages } from '../../domain/pending-message.js';
 
@@ -63,7 +63,7 @@ export class PendingDatabase {
      const root = this.root(id);
      const latest = this.latest(root);
      const launch = input.launch === undefined ? latest.launch : parseLaunchOptions(input.launch, latest.provider);
-     const fingerprint = JSON.stringify({ ...(input.instructions ? { instructions: input.instructions } : {}), root, parts: input.parts, ...(input.launch ? { launch: input.launch } : {}) });
+     const fingerprint = JSON.stringify({ ...(input.instructions ? { instructions: input.instructions } : {}), root, parts: input.parts, ...(input.launch ? { launch: launchIdentity(input.launch) } : {}) });
      const previous = this.db.prepare('SELECT payload,fingerprint FROM pending_messages WHERE key=?').get(input.idempotencyKey);
      if (previous) {
        if (previous['fingerprint'] !== fingerprint) throw new RunnerError('conflict');

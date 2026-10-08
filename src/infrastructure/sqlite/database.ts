@@ -10,7 +10,7 @@ import { ArtifactDatabase, ARTIFACT_SCHEMA } from './artifact-database.js';
 import { PendingDatabase, PENDING_SCHEMA } from './pending-database.js';
 import { searchHistory } from './history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
-import { parseLaunchOptions } from '../../domain/launch.js';
+import { launchIdentity, parseLaunchOptions } from '../../domain/launch.js';
 import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import { CloneDatabase, CLONE_SCHEMA } from './clone-database.js';
@@ -144,7 +144,7 @@ export class RepositoryDatabase {
     const isolation = input.isolation === undefined ? {} : { isolation: input.isolation };
     const instructions = input.instructions === undefined ? undefined : parseInstructionSnapshot(input.instructions);
     const launch = input.launch === undefined ? undefined : parseLaunchOptions(input.launch, input.provider);
-    const normalized = { ...isolation, ...(instructions ? { instructions } : {}), ...(launch ? { launch } : {}), provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
+    const normalized = { ...isolation, ...(instructions ? { instructions } : {}), ...(launch ? { launch: launchIdentity(launch) } : {}), provider: input.provider, parts: input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId }) };
     const fingerprint = JSON.stringify(normalized);
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT sequence,payload,fingerprint FROM tasks WHERE key=?').get(input.idempotencyKey);

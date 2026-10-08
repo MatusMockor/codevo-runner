@@ -829,7 +829,7 @@ validate model availability against a provider catalog.
 | Launch provider | Fields and accepted values |
 | --- | --- |
 | `codex` | Required `provider: "codex"`, `model: string`, `mode: "default" | "readOnly" | "workspaceWrite" | "auto" | "dangerFullAccess"`; optional `effort: "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"`. Omitted/default effort is normalized away. |
-| `claudeCode` | Required `provider: "claudeCode"`, `model: string`, `mode: "default" | "plan" | "supervised" | "acceptEdits" | "auto" | "bypassPermissions"`, `effort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink"`; optional `context: "200k" | "1m"` (default `200k`), `fastMode: boolean` and `thinkingMode: boolean` (both default false). |
+| `claudeCode` | Required `provider: "claudeCode"`, `model: string`, `mode: "default" | "plan" | "supervised" | "acceptEdits" | "auto" | "bypassPermissions"`, `effort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink"`; optional `context: "200k" | "1m"`, `fastMode: boolean` and `thinkingMode: boolean` (both default false). A newly admitted launch is stored and returned with `context` exactly as sent: the editor omits it for models whose context window is fixed, and the runner never invents a choice. For idempotent retries an omitted `context` and `200k` are the same request, and a retry returns the launch as originally stored, so a task an earlier runner stored with an invented `200k` keeps returning `200k`. |
 
 The shipped runtime runs Codex through `codex app-server`: a nondefault `model`
 is sent on thread start/resume and turn start, and a nondefault `effort` on
@@ -841,9 +841,11 @@ root is the workspace); `dangerFullAccess` sends `danger-full-access`, always wi
 arguments apply only to the non-interactive `codex exec` path.
 Claude `default` supplies no permission override, `supervised` supplies permission
 mode `default`, `bypassPermissions` emits `--dangerously-skip-permissions`, and the
-other modes pass through. Nondefault model emits `--model`; context `1m` appends
-`[1m]` except for `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-5` and
-`claude-haiku-4-5`. `ultracode` maps to CLI effort `xhigh` and the ultracode setting;
+other modes pass through. Nondefault model emits `--model`; only an explicit context
+`1m` appends `[1m]`, except for `claude-opus-4-8`, `claude-opus-4-7`,
+`claude-opus-4-5` and `claude-haiku-4-5`, which earlier editors could send with `1m`
+although their window is fixed. An omitted context or `200k` appends nothing.
+`ultracode` maps to CLI effort `xhigh` and the ultracode setting;
 `ultrathink` modifies the prompt with `Ultrathink:` unless already prefixed or a
 slash command, and emits no effort flag. Other nondefault efforts pass through.
 Fast/thinking flags set provider settings when true; Haiku instead always receives

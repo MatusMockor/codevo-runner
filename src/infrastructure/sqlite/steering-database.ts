@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { RunnerError, type Task } from '../../domain/contracts.js';
+import { launchIdentity } from '../../domain/launch.js';
 import { parseSteerInput } from '../../domain/steering.js';
 import type { PendingMessage } from '../../domain/pending-message.js';
 import type { SteerInput, SteerClaim, SteerReceipt } from '../../domain/steering.js';
@@ -83,7 +84,7 @@ export class SteeringDatabase {
      if (!row) { if (pendingId) throw new RunnerError('not_found'); return null; }
      const pending = JSON.parse(row['payload'] as string) as PendingMessage;
      if (pending.status !== 'queued') throw new RunnerError('conflict');
-     if (JSON.stringify(pending.launch) !== JSON.stringify(task.launch) || JSON.stringify(pending.instructions) !== JSON.stringify(task.instructions)) {
+     if (JSON.stringify(pending.launch && launchIdentity(pending.launch)) !== JSON.stringify(task.launch && launchIdentity(task.launch)) || JSON.stringify(pending.instructions) !== JSON.stringify(task.instructions)) {
        if (pendingId) throw new RunnerError('conflict');
        return null;
      }

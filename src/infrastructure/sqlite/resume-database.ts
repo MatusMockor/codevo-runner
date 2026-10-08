@@ -1,5 +1,5 @@
 import { parseInstructionSnapshot } from '../../domain/instructions.js';
-import { parseLaunchOptions } from '../../domain/launch.js';
+import { launchIdentity, parseLaunchOptions } from '../../domain/launch.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
@@ -80,7 +80,7 @@ export class ResumeDatabase {
   }
   private continuationFingerprint(id: string, input: ContinueTask): string {
     const parts = input.parts.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'attachment', attachmentId: part.attachmentId });
-    return JSON.stringify({ ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: parseLaunchOptions(input.launch) }) });
+    return JSON.stringify({ ...(input.instructions === undefined ? {} : { instructions: parseInstructionSnapshot(input.instructions) }), parentTaskId: id, parts, ...(input.launch === undefined ? {} : { launch: launchIdentity(parseLaunchOptions(input.launch)) }) });
   }
   continueTask(id: string, input: ContinueTask, approvals = false): { task: Task; created: boolean } {
     return this.dependencies.transaction(() => this.admitContinuation(id, input, approvals));

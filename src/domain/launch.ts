@@ -81,7 +81,7 @@ function flag(value: unknown): boolean {
   return value;
 }
 
-/** Closed editor launch contract; omitted fields follow native serde defaults. */
+/** Closed editor launch contract; an omitted Claude context stays omitted because the editor owns model capabilities. */
 export function parseLaunchOptions(value: unknown, provider?: 'claude' | 'codex'): AgentLaunchOptions {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) invalid();
   const input = value as Record<string, unknown>;
@@ -105,9 +105,16 @@ export function parseLaunchOptions(value: unknown, provider?: 'claude' | 'codex'
     model: modelId(input.model),
     mode: member(input.mode, CLAUDE_PERMISSION_MODES),
     effort: member(input.effort, CLAUDE_EFFORT_CHOICES),
-    context: member(input.context === undefined ? '200k' : input.context, CLAUDE_CONTEXT_CHOICES),
+    ...(input.context === undefined ? {} : { context: member(input.context, CLAUDE_CONTEXT_CHOICES) }),
     fastMode: flag(input.fastMode),
     thinkingMode: flag(input.thinkingMode),
   };
   return Object.freeze(options);
+}
+
+/** Idempotency identity: an omitted Claude context launches exactly like `200k`, which earlier runners stored for it. */
+export function launchIdentity(options: AgentLaunchOptions): AgentLaunchOptions {
+  if (options.provider !== 'claudeCode') return options;
+  const { provider, model, mode, effort, context = '200k', fastMode, thinkingMode } = options;
+  return { provider, model, mode, effort, context, fastMode, thinkingMode };
 }

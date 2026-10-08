@@ -97,3 +97,22 @@ test('HTTP create/start/continue preserve selected Codex reasoning effort and le
     assert.deepEqual((await response.json()).task.launch, legacy);
   }
 });
+
+test('HTTP create echoes an omitted Claude context as omitted and an explicit one unchanged', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  const omitted = { provider: 'claudeCode', model: 'claude-opus-5-5', mode: 'bypassPermissions', effort: 'high' };
+  const request = { idempotencyKey: randomUUID(), provider: 'claude', launch: omitted, parts: [{ type: 'text', text: 'Say hello' }] };
+  const created = await f.post('/v1/tasks', request);
+  assert.equal(created.status, 201);
+  const draft = (await created.json()).task as Task;
+  assert.deepEqual(draft.launch, { ...omitted, fastMode: false, thinkingMode: false });
+  const retried = await f.post('/v1/tasks', request);
+  assert.equal(retried.status, 200);
+  assert.deepEqual((await retried.json()).task.launch, draft.launch);
+  assert.deepEqual((await (await f.get(`/v1/tasks/${draft.id}`)).json()).launch, draft.launch);
+  for (const context of ['200k', '1m']) {
+    const explicit = await f.post('/v1/tasks', { ...request, idempotencyKey: randomUUID(), launch: { ...omitted, context } });
+    assert.equal(explicit.status, 201);
+    assert.equal((await explicit.json()).task.launch.context, context);
+  }
+});

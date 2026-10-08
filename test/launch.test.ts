@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { parseLaunchOptions } from '../src/domain/launch.js';
+import { launchIdentity, parseLaunchOptions } from '../src/domain/launch.js';
 import { RunnerError } from '../src/domain/contracts.js';
 import { launchArguments, launchPrompt } from '../src/domain/launch-arguments.js';
 
@@ -48,8 +48,32 @@ test('launch parser rejects unknown keys, invalid closed choices and provider mi
   ]) assert.throws(() => claude(overrides));
   assert.throws(() => parseLaunchOptions(claude(), 'codex'));
   assert.throws(() => parseLaunchOptions({ provider: 'codex', model: 'default', mode: 'default' }, 'claude'));
-  assert.deepEqual(claude(), { provider: 'claudeCode', model: 'default', mode: 'default', effort: 'default', context: '200k', fastMode: false, thinkingMode: false });
+  assert.deepEqual(claude(), { provider: 'claudeCode', model: 'default', mode: 'default', effort: 'default', fastMode: false, thinkingMode: false });
   assert.ok(Object.isFrozen(claude()));
+});
+
+test('an omitted Claude context stays omitted and only an explicit 1m selects the 1m model suffix', () => {
+  for (const model of [...CLAUDE_MODEL_CHOICES, 'claude-opus-5-5', 'claude-sonnet-5-5']) {
+    const omitted = claude({ model });
+    assert.equal(Object.hasOwn(omitted, 'context'), false);
+    assert.deepEqual(parseLaunchOptions(JSON.parse(JSON.stringify(omitted))), omitted);
+    for (const resumed of [false, true]) {
+      assert.equal(launchArguments(omitted, resumed).some(argument => argument.includes('[1m]')), false);
+      assert.deepEqual(launchArguments(omitted, resumed), launchArguments(claude({ model, context: '200k' }), resumed));
+    }
+  }
+  for (const context of ['200k', '1m']) assert.equal((claude({ model: 'claude-opus-5-5', context }) as { context?: string }).context, context);
+  assert.deepEqual(launchArguments(claude({ model: 'claude-opus-5-5' }), false), ['--model', 'claude-opus-5-5']);
+  assert.deepEqual(launchArguments(claude({ model: 'claude-opus-5-5', context: '1m' }), false), ['--model', 'claude-opus-5-5[1m]']);
+});
+
+test('launch identity equates an omitted Claude context with the 200k earlier runners stored', () => {
+  const stored = { provider: 'claudeCode', model: 'claude-opus-5-5', mode: 'plan', effort: 'high', context: '200k', fastMode: false, thinkingMode: false };
+  assert.equal(JSON.stringify(launchIdentity(claude({ model: 'claude-opus-5-5', mode: 'plan', effort: 'high' }))), JSON.stringify(stored));
+  assert.equal(JSON.stringify(launchIdentity(parseLaunchOptions(stored))), JSON.stringify(stored));
+  assert.notEqual(JSON.stringify(launchIdentity(parseLaunchOptions({ ...stored, context: '1m' }))), JSON.stringify(stored));
+  const codex = parseLaunchOptions({ provider: 'codex', model: 'default', mode: 'default' });
+  assert.equal(launchIdentity(codex), codex);
 });
 
 test('Claude model contexts match native model aliases and fixed windows', () => {
