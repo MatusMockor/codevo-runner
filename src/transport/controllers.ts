@@ -1,7 +1,7 @@
 import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
-import { clientCapabilities, cursor, handle, jsonBody, send } from './http.js';
+import { clientCapabilities, cursor, eventsCursor, handle, jsonBody, send } from './http.js';
 import { SUBAGENT_LIFECYCLE_RETENTION } from '../domain/subagent-lifecycle.js';
 import { INTERACTIVE_APPROVALS } from '../domain/approvals.js';
 import type { PendingMessage } from '../domain/pending-message.js';
@@ -162,7 +162,7 @@ export class TaskController {
   events(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const detail = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(SUBAGENT_LIFECYCLE_RETENTION) ? 'retained' : 'legacy';
-      send(response, 200, await this.services.tasks.events(id, cursor(request), detail));
+      send(response, 200, await this.services.tasks.events(id, eventsCursor(request), detail));
     });
   }
 }

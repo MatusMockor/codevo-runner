@@ -1,3 +1,4 @@
+import type { EventCursor } from '../../application/ports.js';
 import { EXECUTION_LIMITS } from '../../domain/execution.js';
 import type { ThreadMetadataRepository } from '../../application/thread-metadata.js';
 import type { ThreadMetadata, ThreadMetadataPage, ThreadMetadataPatch, ThreadOrder } from '../../domain/thread-metadata.js';
@@ -108,7 +109,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   getTask(id: string): Promise<Task> { return this.call({ method: 'getTask', args: [id] }); }
   listTasks(after: number): Promise<Page<Task>> { return this.call({ method: 'listTasks', args: [after] }); }
   cancelTask(id: string): Promise<Task> { return this.call({ method: 'cancelTask', args: [id] }); }
-  listEvents(taskId: string, after: number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, after] }); }
+  listEvents(taskId: string, cursor: EventCursor | number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, cursor] }); }
   putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
   queueTask(id: string, projectId: string, base?: StartBase, approvals = false): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId, base, approvals] }); }

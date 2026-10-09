@@ -1,5 +1,7 @@
 import type { Attachment, CreateTask, EventPage, Page, Task, TaskEvent } from '../domain/contracts.js';
 
+export type EventCursor = Readonly<{ direction: 'after'; sequence: number }> | Readonly<{ direction: 'before'; sequence: number }>;
+
 /** Retained detail is served only to clients that announce support for the newer fields. */
 export type SubagentLifecycleDetail = 'legacy' | 'retained';
 
@@ -9,7 +11,7 @@ export interface TaskRepository {
   getTask(id: string): Promise<Task>;
   listTasks(after: number): Promise<Page<Task>>;
   cancelTask(id: string): Promise<Task>;
-  listEvents(taskId: string, after: number): Promise<EventPage>;
+  listEvents(taskId: string, cursor: EventCursor | number): Promise<EventPage>;
 }
 export interface AttachmentRepository {
   putAttachment(value: Attachment): Promise<Readonly<{ attachment: Attachment; created: boolean }>>;
@@ -32,5 +34,5 @@ export interface TaskApplication {
   get(id: string): Promise<Task>;
   list(after: number): Promise<Page<Task>>;
   cancel(id: string): Promise<Task>;
-  events(id: string, after: number, detail?: SubagentLifecycleDetail): Promise<EventPage>;
+  events(id: string, cursor: EventCursor | number, detail?: SubagentLifecycleDetail): Promise<EventPage>;
 }

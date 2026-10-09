@@ -59,6 +59,7 @@ export type RunnerDescriptor = Readonly<{
     subagentLifecycleRetention?: boolean;
     taskFileDiffs?: boolean;
     taskLaunchOptions?: boolean;
+    eventBackwardPaging?: boolean;
     eventReplay: boolean;
     changeNotifications?: boolean;
     taskDrafts?: boolean;
@@ -83,9 +84,10 @@ class RunnerController {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
     const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
-    const { speechTranscription, accountUsage, commandCatalog, mcpServers, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, ...legacy } = this.descriptor.capabilities;
+    const { eventBackwardPaging, speechTranscription, accountUsage, commandCatalog, mcpServers, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, ...legacy } = this.descriptor.capabilities;
     send(response, 200, { ...this.descriptor, capabilities: {
       ...legacy,
+      ...(supported.has('eventBackwardPaging') && eventBackwardPaging !== undefined ? { eventBackwardPaging } : {}),
       ...(supported.has('speechTranscription') && speechTranscription !== undefined ? { speechTranscription } : {}),
       ...(supported.has('accountUsage') && accountUsage !== undefined ? { accountUsage } : {}),
       ...(supported.has('commandCatalog') && commandCatalog !== undefined ? { commandCatalog } : {}),
@@ -133,8 +135,8 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
-  } : { ...descriptor, capabilities: { ...descriptor.capabilities, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false } };
+    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventBackwardPaging: true, eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, eventBackwardPaging: true, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,

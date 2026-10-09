@@ -90,7 +90,7 @@ const routes = [
   { pattern: startRoute, methods: ['POST'] },
   { pattern: new RegExp(`^/v1/tasks/${uuid}/diff$`), methods: ['GET'] },
   { pattern: /^\/v1\/projects$/, methods: ['GET'] },
-  { pattern: new RegExp(`^/v1/tasks/${uuid}/events(?:\\?after=[^&?#]*)?$`), methods: ['GET'] },
+  { pattern: new RegExp(`^/v1/tasks/${uuid}/events(?:\\?(?:after|before)=[^&?#]*)?$`), methods: ['GET'] },
   { pattern: new RegExp(`^/v1/attachments/${uuid}$`), methods: ['GET', 'PUT'] },
   { pattern: new RegExp(`^/v1/attachments/${uuid}/content$`), methods: ['GET'] },
 ];
@@ -117,6 +117,8 @@ export class RequestBoundary implements NestMiddleware {
     const managementRoute = ownedRoutes.some(route => route.test(request.url)) || request.url.startsWith('/v1/thread-metadata') || request.url.startsWith('/v1/repositories/') || request.url === directoryRoute;
     if (managementRoute && request.headers['x-codevo-runner-id'] !== this.descriptor.runnerId)
       return send(response, 409, { error: 'runner_identity_mismatch' });
+    if (request.method === 'GET' && new RegExp(`^/v1/tasks/${uuid}/events\\?`).test(request.url) && /(?:[?&])before(?:=|&|$)/.test(request.url) && /(?:[?&])after(?:=|&|$)/.test(request.url))
+      return send(response, 400, { error: 'invalid_input' });
     const matching = routes.filter(candidate => candidate.pattern.test(request.url));
     const route = matching.find(candidate => candidate.methods.includes(request.method)) ?? matching[0];
     if (!route) return send(response, 404, { error: 'not_found' });

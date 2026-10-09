@@ -1,3 +1,4 @@
+import type { EventCursor } from '../../application/ports.js';
 import { ThreadMetadataDatabase, THREAD_METADATA_SCHEMA } from './thread-metadata-database.js';
 import { parseAgentSubagentLifecycle, readAgentSubagentLifecycle, type AgentSubagentLifecycle } from '../../domain/subagent-lifecycle.js';
 import { SteeringDatabase } from './steering-database.js';
@@ -282,9 +283,12 @@ export class RepositoryDatabase {
       this.db.prepare('INSERT INTO task_subagents(task_id,payload) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET payload=excluded.payload').run(taskId, JSON.stringify(parsed));
     });
   }
-  listEvents(taskId: string, after: number): EventPage {
+  listEvents(taskId: string, cursor: EventCursor | number): EventPage {
     this.getTask(taskId);
-    const rows = this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, after, LIMITS.pageSize + 1);
+    const paging = typeof cursor === 'number' ? { direction: 'after' as const, sequence: cursor } : cursor;
+    const rows = paging.direction === 'before'
+      ? this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence<? ORDER BY sequence DESC LIMIT ?').all(taskId, paging.sequence, LIMITS.pageSize + 1)
+      : this.db.prepare('SELECT sequence,task_id,type,created_at,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(taskId, paging.sequence, LIMITS.pageSize + 1);
     const items: TaskEvent[] = [];
     let bytes = 0;
     for (const row of rows) {
@@ -293,9 +297,11 @@ export class RepositoryDatabase {
       if (items.length >= LIMITS.pageSize || (items.length > 0 && bytes + size > 3 * 1024 * 1024)) break;
       items.push(event); bytes += size;
     }
+    const nextCursor = items.length < rows.length ? items.at(-1)!.sequence : null;
+    if (paging.direction === 'before') items.reverse();
     const saved = this.db.prepare('SELECT payload FROM task_subagents WHERE task_id=?').get(taskId);
     const subagentLifecycle = readStoredLifecycle(saved?.['payload']);
-    return { ...(subagentLifecycle ? { subagentLifecycle } : {}), ...outputRetentionMetadata(this.db, taskId), items, nextCursor: items.length < rows.length ? items.at(-1)!.sequence : null };
+    return { ...(subagentLifecycle ? { subagentLifecycle } : {}), ...outputRetentionMetadata(this.db, taskId), items, nextCursor };
   }
   getAttachment(id: string): Attachment {
     const row = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(id);

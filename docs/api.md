@@ -26,9 +26,23 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id/files` | Bounded changed-file list `{ files, truncated }` |
 | `POST /v1/tasks/:id/file-diff` | Original and current text for one changed relative path |
 | `GET /v1/tasks/:id/events?after=0` | `{ items, nextCursor }` containing task events |
+| `GET /v1/tasks/:id/events?before=n` | Same event envelope, paging toward older events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
 | `GET /v1/attachments/:id` | Attachment metadata |
 | `GET /v1/attachments/:id/content` | Original validated image or text bytes |
+
+Backward event paging accepts `GET /v1/tasks/:id/events?before=n`, where `n` is a
+decimal integer from 1 through Number.MAX_SAFE_INTEGER without signs or leading
+zeros. `after` and `before` are mutually exclusive; malformed cursors or both
+cursors return 400 `invalid_input`. No cursor retains `after=0` behavior. Extra
+query parameters are rejected by the HTTP boundary. Backward pages select the
+newest 50 task events below `n`, applying the 3 MiB byte budget from newest to
+oldest with at least one item, and return them in ascending sequence order.
+`nextCursor` is the first item sequence when older events remain, otherwise null
+(including empty pages). The existing event page envelope, lifecycle details and
+output retention metadata are preserved. Discovery announces
+`eventBackwardPaging: true` only when `X-Codevo-Client-Capabilities` includes the
+`eventBackwardPaging` token.
 
 Task status is `draft`, `queued`, `running`, `succeeded`, `failed`, `interrupted` or
 `cancelled`. Lifecycle events use `task.<status>` (draft creation is `task.created`).

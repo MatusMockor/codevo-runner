@@ -1,3 +1,4 @@
+import type { EventCursor } from '../application/ports.js';
 import type { ServerResponse } from 'node:http';
 import type { Request } from 'express';
 import { LIMITS, RunnerError, type ErrorCode } from '../domain/contracts.js';
@@ -69,4 +70,12 @@ export async function jsonBody(request: Request, maximumBytes: number = LIMITS.j
   try {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
   } catch { throw new RunnerError('invalid_input'); }
+}
+
+export function eventsCursor(request: Request): EventCursor {
+  const separator = request.url.indexOf('?');
+  if (separator === -1) return { direction: 'after', sequence: 0 };
+  const match = /^(after|before)=(0|[1-9][0-9]*)$/.exec(request.url.slice(separator + 1));
+  if (!match || !Number.isSafeInteger(Number(match[2])) || (match[1] === 'before' && Number(match[2]) === 0)) throw new RunnerError('invalid_input');
+  return { direction: match[1] as 'after' | 'before', sequence: Number(match[2]) };
 }
