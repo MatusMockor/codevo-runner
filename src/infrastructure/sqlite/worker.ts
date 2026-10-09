@@ -47,6 +47,7 @@ try {
         case 'resumePending': value = db.pending.resumePending(...request.args); break;
         case 'promotePending': value = db.pending.promotePending(); break;
         case 'searchHistory': value = db.searchHistory(...request.args); break;
+        case 'runnerActivity': value = db.runnerActivity(); break;
         case 'createClone': value = db.clones.createClone(...request.args); break;
         case 'getClone': value = db.clones.getClone(...request.args); break;
         case 'cancelClone': value = db.clones.cancelClone(...request.args); break;

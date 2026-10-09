@@ -3,10 +3,12 @@ import type { Request, Response } from 'express';
 import { RunnerError } from './domain/contracts.js';
 import { SERVICES, type RunnerServices } from './transport/services.js';
 import { handle, send } from './transport/http.js';
+import { LeaseExempt } from './transport/lease-exempt.js';
 @Controller('v1/history')
 export class HistorySearchController {
   constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
   @Get('search')
+  @LeaseExempt('storage-read')
   search(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.historySearch) throw new RunnerError('not_found');

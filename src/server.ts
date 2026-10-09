@@ -17,13 +17,16 @@ import { INTERACTIVE_APPROVALS } from './domain/approvals.js';
 import { ArtifactController } from './transport/artifact-controller.js';
 import { HistorySearchController } from './history-search-controller.js';
 import { RunnerChangeTransport } from './transport/changes.js';
+import { MaintenanceController } from './transport/maintenance-controller.js';
+import { MaintenanceFence } from './transport/maintenance-fence.js';
+import { LeaseExempt } from './transport/lease-exempt.js';
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import {
   Controller, Get, Inject, Module, Req, Res,
   type BeforeApplicationShutdown, type INestApplication, type OnApplicationShutdown,
 } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { APP_INTERCEPTOR, NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { RequestBoundary } from './transport/boundary.js';
@@ -75,11 +78,13 @@ class RunnerController {
   constructor(@Inject(DESCRIPTOR) private readonly descriptor: RunnerDescriptor) {}
 
   @Get('healthz')
+  @LeaseExempt('discovery')
   health(@Res() response: Response) {
     send(response, 200, { status: 'ok' });
   }
 
   @Get('v1/runner')
+  @LeaseExempt('discovery')
   runner(@Req() request: Request, @Res() response: Response) {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
@@ -140,14 +145,14 @@ export async function createRunnerApplication(
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [SpeechController, AccountUsageController, CommandCatalogController, McpServersController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ApprovalController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController] : [])],
+    controllers: [RunnerController, ...(services ? [SpeechController, AccountUsageController, CommandCatalogController, McpServersController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ApprovalController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController, MaintenanceController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),
       { provide: DESCRIPTOR, useValue: effectiveDescriptor },
       { provide: AUTHORIZE, useValue: authorized },
       { provide: EXTENDED, useValue: Boolean(services) },
-      ...(services ? [{ provide: SERVICES, useValue: services }, ServiceLifecycle] : []),
+      ...(services ? [{ provide: SERVICES, useValue: services }, ServiceLifecycle, { provide: APP_INTERCEPTOR, useClass: MaintenanceFence }] : []),
     ],
   }, adapter, { bodyParser: false, logger: false, abortOnError: false });
   const boundary = app.get(RequestBoundary);

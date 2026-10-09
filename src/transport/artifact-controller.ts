@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { RunnerError } from '../domain/contracts.js';
 import { handle, jsonBody, send } from './http.js';
+import { LeaseExempt } from './lease-exempt.js';
 import { SERVICES, type RunnerServices } from './services.js';
 @Controller('v1/tasks/:taskId/artifacts')
 export class ArtifactController {
@@ -16,6 +17,7 @@ export class ArtifactController {
     });
   }
   @Get()
+  @LeaseExempt('storage-read')
   list(@Param('taskId') taskId: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.artifacts) throw new RunnerError('not_found');
@@ -23,6 +25,7 @@ export class ArtifactController {
     });
   }
   @Get(':id/content')
+  @LeaseExempt('storage-read')
   content(@Param('taskId') taskId: string, @Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.artifacts) throw new RunnerError('not_found');

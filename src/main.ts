@@ -12,7 +12,8 @@ async function main() {
   const executionOptions = config.executionEnabled
     ? { projects: config.projectsFile ? await readProjectsFile(config.projectsFile) : [], isolation: config.executionIsolation, projectsRoot: config.projectsRoot, listenPort: config.port, executionTimeoutMs: config.executionTimeoutMs, executionConcurrency: config.executionConcurrency, ...(config.gitAuthor ? { gitAuthor: config.gitAuthor } : {}) } : undefined;
   const services = await openRunnerServices(config.dataDir, runnerId, executionOptions,
-    config.speechUrl === undefined ? undefined : { url: config.speechUrl });
+    config.speechUrl === undefined ? undefined : { url: config.speechUrl },
+    config.startMaintenanceLease === undefined ? undefined : { startLease: config.startMaintenanceLease });
   const app = await createRunnerApplication({ protocolVersion: 1, runnerId, name: config.name,
     ...(config.executionEnabled ? { executionTimeoutMs: config.executionTimeoutMs } : {}),
     capabilities: { taskExecution: false, eventReplay: false } }, authorized, services).catch(async error => {

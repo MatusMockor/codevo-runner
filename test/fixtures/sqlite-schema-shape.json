@@ -1,0 +1,173 @@
+{
+  "version": 9,
+  "rows": [
+    [
+      "index",
+      "active_clone_name",
+      "project_clones",
+      "CREATE UNIQUE INDEX active_clone_name ON project_clones(name)\n  WHERE status IN ('queued','running')"
+    ],
+    [
+      "index",
+      "approvals_pending",
+      "approvals",
+      "CREATE INDEX approvals_pending ON approvals(task_id) WHERE status='pending'"
+    ],
+    [
+      "index",
+      "approvals_task",
+      "approvals",
+      "CREATE INDEX approvals_task ON approvals(task_id)"
+    ],
+    [
+      "index",
+      "events_task_sequence",
+      "events",
+      "CREATE INDEX events_task_sequence ON events(task_id, sequence)"
+    ],
+    [
+      "index",
+      "pending_messages_root",
+      "pending_messages",
+      "CREATE INDEX pending_messages_root ON pending_messages(root_id, sequence)"
+    ],
+    [
+      "index",
+      "questions_one_pending",
+      "questions",
+      "CREATE UNIQUE INDEX questions_one_pending ON questions(task_id) WHERE status='pending'"
+    ],
+    [
+      "index",
+      "questions_task",
+      "questions",
+      "CREATE INDEX questions_task ON questions(task_id)"
+    ],
+    [
+      "index",
+      "steering_messages_task",
+      "steering_messages",
+      "CREATE INDEX steering_messages_task ON steering_messages(task_id)"
+    ],
+    [
+      "index",
+      "tasks_status_sequence",
+      "tasks",
+      "CREATE INDEX tasks_status_sequence ON tasks(json_extract(payload,'$.status'),sequence)"
+    ],
+    [
+      "index",
+      "tasks_thread_roots_project",
+      "tasks",
+      "CREATE INDEX tasks_thread_roots_project ON tasks(json_extract(payload,'$.projectId')) WHERE json_extract(payload,'$.conversationId') IS NULL"
+    ],
+    [
+      "table",
+      "approvals",
+      "approvals",
+      "CREATE TABLE approvals (\n  id TEXT PRIMARY KEY,\n  task_id TEXT NOT NULL REFERENCES tasks(id),\n  status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','cancelled','expired','timedOut')),\n  payload TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "artifacts",
+      "artifacts",
+      "CREATE TABLE artifacts (\n  id TEXT NOT NULL UNIQUE,\n  task_id TEXT NOT NULL REFERENCES tasks(id),\n  source_path TEXT NOT NULL,\n  payload TEXT NOT NULL,\n  bytes INTEGER NOT NULL CHECK(bytes > 0),\n  PRIMARY KEY(task_id, source_path)\n)"
+    ],
+    [
+      "table",
+      "attachments",
+      "attachments",
+      "CREATE TABLE attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL)"
+    ],
+    [
+      "table",
+      "conversations",
+      "conversations",
+      "CREATE TABLE conversations (\n  root_id TEXT PRIMARY KEY REFERENCES tasks(id), latest_id TEXT NOT NULL REFERENCES tasks(id), session_id TEXT\n)"
+    ],
+    [
+      "table",
+      "events",
+      "events",
+      "CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), type TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT)"
+    ],
+    [
+      "table",
+      "managed_projects",
+      "managed_projects",
+      "CREATE TABLE managed_projects (\n  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, payload TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "metadata",
+      "metadata",
+      "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    ],
+    [
+      "table",
+      "pending_attachments",
+      "pending_attachments",
+      "CREATE TABLE pending_attachments (\n pending_id TEXT NOT NULL REFERENCES pending_messages(id),\n attachment_id TEXT NOT NULL REFERENCES attachments(id), PRIMARY KEY(pending_id, attachment_id)\n)"
+    ],
+    [
+      "table",
+      "pending_messages",
+      "pending_messages",
+      "CREATE TABLE pending_messages (\n sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,\n root_id TEXT NOT NULL REFERENCES pending_queues(root_id), key TEXT UNIQUE NOT NULL,\n fingerprint TEXT NOT NULL, dispatch_key TEXT UNIQUE NOT NULL,\n payload TEXT NOT NULL, approvals INTEGER NOT NULL DEFAULT 0\n)"
+    ],
+    [
+      "table",
+      "pending_queues",
+      "pending_queues",
+      "CREATE TABLE pending_queues (\n root_id TEXT PRIMARY KEY REFERENCES tasks(id), paused INTEGER NOT NULL DEFAULT 0,\n allow_terminal INTEGER NOT NULL DEFAULT 0\n)"
+    ],
+    [
+      "table",
+      "project_clones",
+      "project_clones",
+      "CREATE TABLE project_clones (\n  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,\n  key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, name TEXT NOT NULL,\n  status TEXT NOT NULL, input TEXT NOT NULL, payload TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "questions",
+      "questions",
+      "CREATE TABLE questions (\n  id TEXT PRIMARY KEY,\n  task_id TEXT NOT NULL REFERENCES tasks(id),\n  status TEXT NOT NULL CHECK(status IN ('pending','answered','cancelled','expired')),\n  payload TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "steering_messages",
+      "steering_messages",
+      "CREATE TABLE steering_messages (\n id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), key TEXT UNIQUE NOT NULL,\n fingerprint TEXT NOT NULL, parts TEXT NOT NULL, accepted INTEGER NOT NULL DEFAULT 0,\n pending_id TEXT UNIQUE REFERENCES pending_messages(id)\n)"
+    ],
+    [
+      "table",
+      "task_attachments",
+      "task_attachments",
+      "CREATE TABLE task_attachments (task_id TEXT NOT NULL REFERENCES tasks(id), attachment_id TEXT NOT NULL REFERENCES attachments(id), PRIMARY KEY(task_id, attachment_id))"
+    ],
+    [
+      "table",
+      "task_execution",
+      "task_execution",
+      "CREATE TABLE task_execution (task_id TEXT PRIMARY KEY REFERENCES tasks(id), output_bytes INTEGER NOT NULL DEFAULT 0, output_events INTEGER NOT NULL DEFAULT 0, output_truncated_before_sequence INTEGER NOT NULL DEFAULT 0, output_starts_at_line_boundary INTEGER NOT NULL DEFAULT 1, approvals INTEGER NOT NULL DEFAULT 0)"
+    ],
+    [
+      "table",
+      "task_subagents",
+      "task_subagents",
+      "CREATE TABLE task_subagents (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)"
+    ],
+    [
+      "table",
+      "tasks",
+      "tasks",
+      "CREATE TABLE tasks (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, key TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, git_base TEXT)"
+    ],
+    [
+      "table",
+      "thread_metadata",
+      "thread_metadata",
+      "CREATE TABLE thread_metadata (task_id TEXT PRIMARY KEY REFERENCES tasks(id), payload TEXT NOT NULL)"
+    ]
+  ]
+}

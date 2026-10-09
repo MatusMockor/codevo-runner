@@ -59,6 +59,13 @@ export interface ProviderExecutor {
   execute(request: ExecutionRequest): Promise<ExecutionResult>;
 }
 export type TurnOptions = Readonly<{ approvals?: boolean }>;
+export interface WorkAdmission {
+  readonly fenced: boolean;
+  onOpen(listener: () => void): () => void;
+}
+export interface WorkSource {
+  readonly working: boolean;
+}
 export interface ExecutionApplication {
   turnSummary?(taskId: string): Promise<TurnChangesSummary>;
   turnFileDiff?(taskId: string, input: unknown): Promise<TurnFileDiff>;

@@ -13,7 +13,7 @@ import type {
   GitActivity, GitRepository, GitSyncApplication, GitWorkdir, GitWorkspaces, ManagedInstructionPaths, OriginBaseResolver,
   RepositoryStatus, ThreadWorkspace,
 } from './git-sync-ports.js';
-import type { ProjectRegistry } from './execution-ports.js';
+import type { ProjectRegistry, WorkSource } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 
 export type GitSyncTasks = Pick<TaskRepository, 'getTask'> & Readonly<{
@@ -51,7 +51,7 @@ export class GitOriginBases implements OriginBaseResolver {
   }
 }
 
-export class GitSyncService implements GitSyncApplication {
+export class GitSyncService implements GitSyncApplication, WorkSource {
   private readonly operations = new Map<string, StoredOperation>();
   private readonly keys = new Map<string, string>();
   private readonly running = new Set<Promise<void>>();
@@ -80,6 +80,8 @@ export class GitSyncService implements GitSyncApplication {
     this.retentionMs = options.retentionMs ?? GIT_SYNC_LIMITS.operationRetentionMs;
     this.now = options.now ?? Date.now;
   }
+
+  get working(): boolean { return this.running.size > 0; }
 
   branches(projectId: string): Promise<BranchList> {
     return this.request(async signal => {

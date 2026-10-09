@@ -37,9 +37,14 @@ const accountUsageRoute = /^\/v1\/account-usage\/(claude|codex)$/;
 const speechRoute = new RegExp(`^/v1/speech/transcriptions\\?language=(?:${SPEECH_LANGUAGES.join('|')})$`);
 const commandCatalogRoute = new RegExp(`^/v1/projects/${projectSegment}/command-catalog/(claude|codex)$`);
 const mcpServersRoute = new RegExp(`^/v1/projects/${projectSegment}/mcp-servers/(claude|codex)$`);
+const maintenanceBase = '/v1/maintenance/';
+const maintenancePrepareRoute = /^\/v1\/maintenance\/prepare$/;
+const maintenanceLeaseRoute = new RegExp(`^/v1/maintenance/${uuid}$`);
 const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
+  { pattern: maintenancePrepareRoute, methods: ['POST'] },
+  { pattern: maintenanceLeaseRoute, methods: ['DELETE'] },
   { pattern: speechRoute, methods: ['POST'] },
   { pattern: accountUsageRoute, methods: ['GET'] },
   { pattern: commandCatalogRoute, methods: ['GET'] },
@@ -114,7 +119,7 @@ export class RequestBoundary implements NestMiddleware {
       return this.discovery(request, response, next);
     if (!this.authorized(request.headers.authorization)) return send(response, 401, { error: 'unauthorized' });
     if (!this.matchesIdentity(request, response)) return;
-    const managementRoute = ownedRoutes.some(route => route.test(request.url)) || request.url.startsWith('/v1/thread-metadata') || request.url.startsWith('/v1/repositories/') || request.url === directoryRoute;
+    const managementRoute = ownedRoutes.some(route => route.test(request.url)) || request.url.startsWith('/v1/thread-metadata') || request.url.startsWith('/v1/repositories/') || request.url.startsWith(maintenanceBase) || request.url === directoryRoute;
     if (managementRoute && request.headers['x-codevo-runner-id'] !== this.descriptor.runnerId)
       return send(response, 409, { error: 'runner_identity_mismatch' });
     if (request.method === 'GET' && new RegExp(`^/v1/tasks/${uuid}/events\\?`).test(request.url) && /(?:[?&])before(?:=|&|$)/.test(request.url) && /(?:[?&])after(?:=|&|$)/.test(request.url))
@@ -126,7 +131,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'PATCH' && managementMetadataRoute.test(request.url)) || (request.method === 'POST' &&
-      (speechRoute.test(request.url) || turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
+      (maintenancePrepareRoute.test(request.url) || speechRoute.test(request.url) || turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

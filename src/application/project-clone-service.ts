@@ -1,10 +1,10 @@
 import type { CloneApplication, CloneRepository, ProjectCloner, PreparedClone } from './clone-ports.js';
-import type { ProjectRegistry } from './execution-ports.js';
+import type { ProjectRegistry, WorkAdmission, WorkSource } from './execution-ports.js';
 import { isId, RunnerError } from '../domain/contracts.js';
 import { parseCloneInput } from '../domain/project-clone.js';
 
 /** A single owned worker survives HTTP/SSH disconnects; SQLite owns durable state. */
-export class ProjectCloneService implements CloneApplication {
+export class ProjectCloneService implements CloneApplication, WorkSource {
   private worker?: Promise<void>;
   private active?: { id: string; controller: AbortController };
   private closed = false;
@@ -12,7 +12,8 @@ export class ProjectCloneService implements CloneApplication {
   private timer?: NodeJS.Timeout;
   private drained?: () => void;
   constructor(private readonly repository: CloneRepository, private readonly cloner: ProjectCloner,
-    private readonly configured: ProjectRegistry) {}
+    private readonly configured: ProjectRegistry, private readonly admission?: WorkAdmission) {}
+  get working(): boolean { return this.active !== undefined || this.admissions > 0; }
   async initialize() {
     await this.repository.interruptClones();
     this.timer = setInterval(() => this.wake(), 500);
@@ -45,7 +46,7 @@ export class ProjectCloneService implements CloneApplication {
     return job;
   }
   private wake() {
-    if (this.worker || this.closed) return;
+    if (this.worker || this.closed || this.admission?.fenced) return;
     this.worker = this.run().catch(() => { /* Repository failure is surfaced by subsequent reads. */ }).finally(() => {
       this.worker = undefined;
     });

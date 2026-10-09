@@ -17,6 +17,7 @@ import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 import type { GitSyncApplication } from '../application/git-sync-ports.js';
 import type { PortPreviewApplication } from '../application/port-preview-ports.js';
+import type { MaintenanceApplication } from '../application/maintenance-service.js';
 
 export interface RunnerServices {
   readonly speech?: SpeechApplication;
@@ -39,6 +40,7 @@ export interface RunnerServices {
   readonly execution?: ExecutionApplication;
   readonly gitSync?: GitSyncApplication;
   readonly ports?: PortPreviewApplication;
+  readonly maintenance?: MaintenanceApplication;
   readonly close: () => Promise<void>;
 }
 export const SERVICES = Symbol('runner services');

@@ -10,12 +10,12 @@ import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
 import { isGitErrorCode, parseStartInput } from '../domain/git-sync.js';
-import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs, TurnOptions } from './execution-ports.js';
+import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs, TurnOptions, WorkAdmission, WorkSource } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 import type { AgentProcessOwnership, ProcessOwnershipLease } from './process-ownership.js';
 
 /** One serialized admission pump owns bounded, independently cancellable workers. */
-export class ExecutionService implements ExecutionApplication {
+export class ExecutionService implements ExecutionApplication, WorkSource {
   private readonly steering: SteeringService;
   private initialized = false;
   private closing = false;
@@ -24,6 +24,7 @@ export class ExecutionService implements ExecutionApplication {
   private closePromise: Promise<void> | undefined;
   private wakeRequested = false;
   private workerFailure: unknown;
+  private unsubscribeAdmission: (() => void) | undefined;
 
   constructor(
     private readonly tasks: TaskRepository,
@@ -39,10 +40,13 @@ export class ExecutionService implements ExecutionApplication {
     private readonly concurrency: number = EXECUTION_LIMITS.activeTasks,
     private readonly processOwnership?: AgentProcessOwnership,
     private readonly approvals?: ApprovalService,
+    private readonly admission?: WorkAdmission,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > EXECUTION_LIMITS.activeTasks) throw new RunnerError('invalid_input');
     this.steering = new SteeringService(executions, attachments);
   }
+
+  get working(): boolean { return this.active.size > 0 || this.worker !== undefined; }
 
   steer(taskId: string, input: unknown) { this.assertAvailable(); return this.steering.steer(taskId, input); }
   steerPending(taskId: string, pendingId: string) { this.assertAvailable(); return this.steering.pending(taskId, pendingId); }
@@ -51,6 +55,7 @@ export class ExecutionService implements ExecutionApplication {
     if (this.initialized) return;
     await this.executions.interruptRunningTasks();
     this.initialized = true;
+    this.unsubscribeAdmission = this.admission?.onOpen(() => this.wake());
     this.wake();
   }
 
@@ -192,6 +197,7 @@ export class ExecutionService implements ExecutionApplication {
 
   close(): Promise<void> {
     this.closing = true;
+    this.unsubscribeAdmission?.();
     for (const entry of this.active.values()) entry.abort.abort();
     this.closePromise ??= this.finishClose();
     return this.closePromise;
@@ -216,9 +222,11 @@ export class ExecutionService implements ExecutionApplication {
     return executor;
   }
 
+  private fenced(): boolean { return this.admission?.fenced === true; }
+
   private wake(): void {
     this.wakeRequested = true;
-    if (this.worker || this.closing || this.workerFailure) return;
+    if (this.worker || this.closing || this.workerFailure || this.fenced()) return;
     this.worker = this.drain().catch((error: unknown) => {
       // Persistence errors stop admission instead of acknowledging work we cannot own.
       this.workerFailure = error instanceof Error ? error : new RunnerError('storage_unavailable');
@@ -229,10 +237,10 @@ export class ExecutionService implements ExecutionApplication {
   }
 
   private async drain(): Promise<void> {
-    while (!this.closing && !this.workerFailure && this.active.size < this.concurrency) {
+    while (!this.closing && !this.workerFailure && !this.fenced() && this.active.size < this.concurrency) {
       this.wakeRequested = false;
       await this.executions.promotePending();
-      if (this.closing || this.workerFailure) return;
+      if (this.closing || this.workerFailure || this.fenced()) return;
       const task = await this.executions.claimNextTask();
       if (!task) return;
       this.launch(task);

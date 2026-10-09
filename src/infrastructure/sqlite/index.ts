@@ -13,6 +13,8 @@ import type { ArtifactRepository } from '../../application/artifact-ports.js';
 import type { PendingMessage, PendingMessages } from '../../domain/pending-message.js';
 import type { HistorySearchRepository } from '../../application/history-search.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
+import type { RunnerActivityRepository } from '../../application/maintenance-service.js';
+import type { RunnerActivity } from '../../domain/maintenance.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import type { CloneRepository } from '../../application/clone-ports.js';
 import type { CloneInput, CloneJob, StoredClone } from '../../domain/project-clone.js';
@@ -26,7 +28,7 @@ import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository, ApprovalRepository {
+class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository, ApprovalRepository, RunnerActivityRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -100,6 +102,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   resumePending(id: string): Promise<PendingMessages> { return this.call({ method: 'resumePending', args: [id] }); }
   promotePending(): Promise<Task | null> { return this.call({ method: 'promotePending', args: [] }); }
   searchHistory(query: HistorySearchQuery): Promise<HistorySearchPage> { return this.call({ method: 'searchHistory', args: [query] }); }
+  runnerActivity(): Promise<RunnerActivity> { return this.call({ method: 'runnerActivity', args: [] }); }
   getTaskSession(id: string): Promise<{ sessionId: string | null; workspaceTaskId: string }> { return this.call({ method: 'getTaskSession', args: [id] }); }
   getResumeState(id: string): Promise<ResumeState> { return this.call({ method: 'getResumeState', args: [id] }); }
   findContinuation(id: string, input: ContinueTask): Promise<{ task: Task; created: false } | null> { return this.call({ method: 'findContinuation', args: [id, input] }); }
@@ -135,7 +138,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository & ApprovalRepository & Required<Pick<ExecutionRepository, 'getTaskApprovals'>>> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository & ApprovalRepository & RunnerActivityRepository & Required<Pick<ExecutionRepository, 'getTaskApprovals'>>> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -165,6 +168,6 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'listPending': case 'listManagedProjects': case 'getClone': case 'getTaskSession': case 'getResumeState':
     case 'findContinuation': case 'getTask': case 'listTasks': case 'listEvents':
     case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory':
-    case 'getTaskGitBase': case 'conversationActive': case 'inPlaceActive': return false;
+    case 'getTaskGitBase': case 'conversationActive': case 'inPlaceActive': case 'runnerActivity': return false;
   }
 }

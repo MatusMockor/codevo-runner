@@ -2,6 +2,7 @@ import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@ne
 import type { Request, Response } from 'express';
 import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
 import { clientCapabilities, cursor, eventsCursor, handle, jsonBody, send } from './http.js';
+import { LeaseExempt } from './lease-exempt.js';
 import { SUBAGENT_LIFECYCLE_RETENTION } from '../domain/subagent-lifecycle.js';
 import { INTERACTIVE_APPROVALS } from '../domain/approvals.js';
 import type { PendingMessage } from '../domain/pending-message.js';
@@ -36,6 +37,7 @@ export class TaskController {
   }
 
   @Get()
+  @LeaseExempt('storage-read')
   list(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const page = await this.services.tasks.list(cursor(request));
@@ -45,6 +47,7 @@ export class TaskController {
   }
 
   @Get(':id')
+  @LeaseExempt('storage-read')
   get(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => send(response, 200, publicTask(await this.services.tasks.get(id), announcesApprovals(request))));
   }
@@ -100,6 +103,7 @@ export class TaskController {
   }
 
   @Get(':id/pending')
+  @LeaseExempt('storage-read')
   pending(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
@@ -159,6 +163,7 @@ export class TaskController {
   }
 
   @Get(':id/events')
+  @LeaseExempt('storage-read')
   events(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
       const detail = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(SUBAGENT_LIFECYCLE_RETENTION) ? 'retained' : 'legacy';
@@ -171,6 +176,7 @@ export class TaskController {
 export class ProjectCloneController {
   constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
   @Get(':id')
+  @LeaseExempt('storage-read')
   get(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.clones) throw new RunnerError('not_found');
@@ -214,6 +220,7 @@ export class ProjectController {
 
 
   @Get()
+  @LeaseExempt('storage-read')
   list(@Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.execution) throw new RunnerError('not_found');
@@ -268,11 +275,13 @@ export class AttachmentController {
   }
 
   @Get(':id')
+  @LeaseExempt('storage-read')
   metadata(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => send(response, 200, await this.services.attachments.metadata(id)));
   }
 
   @Get(':id/content')
+  @LeaseExempt('storage-read')
   content(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (this.downloads >= 2) throw new RunnerError('busy');

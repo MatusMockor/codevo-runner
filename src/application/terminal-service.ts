@@ -4,15 +4,17 @@ import { TERMINAL_LIMITS, terminalInput, terminalOpen, terminalSize, type Termin
 import type { SurfaceWorkspace, SurfaceWorkspaceResolver } from './surface-workspace.js';
 import type { TerminalProcess, TerminalProcessFactory } from './terminal-ports.js';
 import type { OwnedProcessTree } from '../domain/process-ownership.js';
+import type { WorkSource } from './execution-ports.js';
 export type TerminalProcessOwner = Readonly<{ taskId: string | null; tree: OwnedProcessTree }>;
 type Session = { snapshot: TerminalSnapshot; chunks: TerminalChunk[]; bytes: number; touched: number; inputWindow: number; inputBytes: number; workspace: SurfaceWorkspace; process?: TerminalProcess };
 /** A primary PTY per exact project/task survives transport reconnects, with bounded replay. */
-export class TerminalService {
+export class TerminalService implements WorkSource {
   private readonly sessions = new Map<string, Session>();
   private readonly opening = new Map<string, Promise<TerminalSnapshot>>();
   private closed = false;
   private readonly expiry = setInterval(() => this.expire(), 60_000).unref();
   constructor(private readonly resolver: SurfaceWorkspaceResolver, private readonly factory: TerminalProcessFactory) {}
+  get working(): boolean { return this.opening.size > 0 || [...this.sessions.values()].some(session => session.snapshot.status === 'running'); }
   open(projectId: string, value: unknown): Promise<TerminalSnapshot> {
     const input = terminalOpen(value);
     const key = JSON.stringify([projectId, input.taskId ?? null]);

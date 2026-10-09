@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { RunnerError } from '../domain/contracts.js';
 import { handle, jsonBody, send } from './http.js';
+import { LeaseExempt } from './lease-exempt.js';
 import { SERVICES, type RunnerServices } from './services.js';
 
 const ANSWER_BYTES = 4096;
@@ -11,6 +12,7 @@ export class ApprovalController {
   constructor(@Inject(SERVICES) private readonly services: RunnerServices) {}
 
   @Get(':id/approvals')
+  @LeaseExempt('storage-read')
   list(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => {
       if (!this.services.approvals) throw new RunnerError('not_found');

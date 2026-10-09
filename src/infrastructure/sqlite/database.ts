@@ -10,6 +10,8 @@ import { parseInstructionSnapshot } from '../../domain/instructions.js';
 import { ArtifactDatabase, ARTIFACT_SCHEMA } from './artifact-database.js';
 import { PendingDatabase, PENDING_SCHEMA } from './pending-database.js';
 import { searchHistory } from './history-search.js';
+import { readRunnerActivity } from './runner-activity.js';
+import type { RunnerActivity } from '../../domain/maintenance.js';
 import type { HistorySearchQuery, HistorySearchPage } from '../../domain/history-search.js';
 import { launchIdentity, parseLaunchOptions } from '../../domain/launch.js';
 import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
@@ -115,6 +117,7 @@ export class RepositoryDatabase {
     return { ...JSON.parse(row['payload'] as string) as Task, sequence: Number(row['sequence']) };
   }
   searchHistory(query: HistorySearchQuery): HistorySearchPage { return searchHistory(this.db, query); }
+  runnerActivity(): RunnerActivity { return readRunnerActivity(this.db); }
   getTask(id: string): Task {
     const row = this.db.prepare('SELECT sequence,payload FROM tasks WHERE id=?').get(id);
     if (!row) throw new RunnerError('not_found');

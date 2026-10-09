@@ -7,6 +7,7 @@ import { constants } from 'node:fs';
 import type { RegisteredProject } from './domain/execution.js';
 import { validGitAuthorPart } from './domain/git-sync.js';
 import { parseSpeechOrigin } from './domain/speech.js';
+import { isId } from './domain/contracts.js';
 
 export function readConfig(env: NodeJS.ProcessEnv) {
   const host = env.CODEVO_HOST ?? '127.0.0.1';
@@ -32,7 +33,10 @@ export function readConfig(env: NodeJS.ProcessEnv) {
       (authorName !== undefined && (!validGitAuthorPart(authorName) || !validGitAuthorPart(authorEmail))))
     throw new Error('CODEVO_GIT_AUTHOR_NAME and CODEVO_GIT_AUTHOR_EMAIL must both be set to 1–256 printable bytes');
   const speechUrl = env.CODEVO_SPEECH_URL === undefined ? undefined : parseSpeechOrigin(env.CODEVO_SPEECH_URL);
-  return Object.freeze({ host, port: Number(portText), name, speechUrl,
+  const startMaintenanceLease = env.CODEVO_START_MAINTENANCE_LEASE;
+  if (startMaintenanceLease !== undefined && !isId(startMaintenanceLease))
+    throw new Error('CODEVO_START_MAINTENANCE_LEASE must be a lowercase UUID v4');
+  return Object.freeze({ host, port: Number(portText), name, speechUrl, startMaintenanceLease,
     gitAuthor: authorName === undefined || authorEmail === undefined ? undefined : Object.freeze({ name: authorName, email: authorEmail }),
     executionEnabled: executionText === 'true',
     executionTimeoutMs: parseExecutionTimeoutMs(env.CODEVO_EXECUTION_TIMEOUT_MS),

@@ -46,6 +46,9 @@ import type { GitAuthor } from './domain/git-sync.js';
 import { ProcessOwnershipRegistry } from './application/process-ownership.js';
 import { PortPreviewService } from './application/port-preview-service.js';
 import { ProcListeningPortScanner } from './infrastructure/execution/listening-ports.js';
+import type { WorkSource } from './application/execution-ports.js';
+import { MaintenanceLease, type MaintenanceClock } from './application/maintenance-lease.js';
+import { MaintenanceService, RunnerIdleProbe } from './application/maintenance-service.js';
 
 export type RunnerExecutionOptions = Readonly<{
   projects: readonly RegisteredProject[];
@@ -63,14 +66,19 @@ export type RunnerExecutionOptions = Readonly<{
 }>;
 
 export type RunnerSpeechOptions = Readonly<{ url: string; timeoutMs?: number }>;
+export type RunnerMaintenanceOptions = Readonly<{ startLease?: string; clock?: MaintenanceClock }>;
 
 /** Composition root: concrete infrastructure is wired only at the outside edge. */
-export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions, speechOptions?: RunnerSpeechOptions) {
+export async function openRunnerServices(dataDir: string, runnerId: string, options?: RunnerExecutionOptions, speechOptions?: RunnerSpeechOptions, maintenanceOptions?: RunnerMaintenanceOptions) {
+  const lease = new MaintenanceLease(maintenanceOptions?.clock, maintenanceOptions?.startLease);
   const speech = speechOptions
     ? new SpeechTranscriptionService(new HttpSpeechTranscriber(speechOptions.url), { timeoutMs: speechOptions.timeoutMs }) : undefined;
   const timeoutMs = executionTimeoutMs(options?.executionTimeoutMs);
   const changes = new RunnerChanges();
-  const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish());
+  const repository = await openSqliteRepository(dataDir, runnerId, () => changes.publish()).catch((error: unknown) => {
+    lease.close();
+    throw error;
+  });
   try {
     const accountUsage = new AccountUsageService(new CliAccountUsageReader(options?.accountUsageCli));
     const questions = new QuestionService(repository);
@@ -92,7 +100,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     try {
       if (options) {
         const configured = new ConfiguredProjectRegistry(options.projects);
-        clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured);
+        clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured, lease);
         await clones.initialize();
         const surfaceResolver = new RegisteredSurfaceWorkspaceResolver(
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), repository, repository);
@@ -113,7 +121,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), executionWorkspace,
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership, approvals);
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership, approvals, lease);
         await execution.initialize();
         // Catalogs describe the provider CLIs tasks launch; injected executors need an explicit probe configuration.
         if (options.providers === undefined || options.commandCatalogCli) {
@@ -143,8 +151,11 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       } finally { await attachments.close(); }
       throw error;
     }
+    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync].filter(source => source !== undefined);
+    const maintenance = new MaintenanceService(runnerId, lease, new RunnerIdleProbe(repository, sources));
     let closing: Promise<void> | undefined;
     return {
+      maintenance,
       speech, accountUsage, commandCatalog, mcpServers, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
@@ -178,13 +189,17 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
             }
           } finally {
             try { await attachments.close(); }
-            finally { await repository.close(); }
+            finally {
+              try { await repository.close(); }
+              finally { lease.close(); }
+            }
           }
         })();
         return closing;
       },
     };
   } catch (error) {
+    lease.close();
     await repository.close();
     throw error;
   }

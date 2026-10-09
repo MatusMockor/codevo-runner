@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { GitSyncApplication } from '../application/git-sync-ports.js';
 import { RunnerError } from '../domain/contracts.js';
 import { handle, jsonBody, send } from './http.js';
+import { LeaseExempt } from './lease-exempt.js';
 import { SERVICES, type RunnerServices } from './services.js';
 
 const SMALL_BODY_BYTES = 1024;
@@ -60,6 +61,7 @@ export class GitSyncController {
   }
 
   @Get('git-operations/:id')
+  @LeaseExempt('storage-read')
   operation(@Param('id') id: string, @Res() response: Response) {
     return handle(response, async () => send(response, 200, await this.sync().operation(id)));
   }

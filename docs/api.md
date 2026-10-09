@@ -775,8 +775,8 @@ history-search, steering, surface and terminal routes. When supplied on any `/v1
 HTTP route it must equal the runner identity, otherwise 409
 `runner_identity_mismatch`; duplicate identity headers are 400
 `duplicate_runner_identity`. It is required on account usage, Git sync, port
-preview, turn changes, repository lookup/hosts/search, project directories and
-thread metadata/order routes (including the metadata list); missing identity there
+preview, turn changes, repository lookup/hosts/search, project directories,
+maintenance and thread metadata/order routes (including the metadata list); missing identity there
 is 409 `runner_identity_mismatch`. Repository identity also requires it, but its
 controller returns 409 `conflict` when it is missing. Discovery accepts an optional
 matching identity. Disabled services return 404 `not_found` on their routes.
@@ -1412,3 +1412,73 @@ is answered at once and may be cut off. A discarded body holds no admission slot
 
 Audio and transcript text exist only in memory for the duration of the request.
 They are never written to the data directory and never logged.
+
+## Maintenance lease
+
+Protocol version 1 (`MAINTENANCE_UPDATE_PROTOCOL_VERSION` in
+`src/application/maintenance-service.ts`). A server-local updater takes a lease so
+that an idle runner stays idle until it is stopped, and so that the replacement
+process stays fenced until it has been verified. The lease is in memory only; it adds
+no capability, changes neither `GET /healthz` nor `GET /v1/runner`, and never touches
+the SQLite schema. Both routes require bearer authentication and the exact
+`X-Codevo-Runner-Id`.
+
+| Request | Response |
+| --- | --- |
+| `POST /v1/maintenance/prepare` | `200 { leaseId, runnerId, expiresInMs }`; body `{ "leaseId": "<uuid v4>" }` and nothing else, at most 256 bytes |
+| `DELETE /v1/maintenance/:leaseId` | `200 { leaseId, released }`; no request body |
+
+`prepare` grants a lease only while the runner is idle: no fenced request (see
+below) is being handled, no task is `queued` or `running`, no project clone is
+`queued` or `running`, no pending message is `queued` (a paused queue still holds
+queued messages), no execution or clone worker is active, no terminal process is
+running and no Git operation is in flight. The fence is taken before storage is read and dropped again
+when the runner turns out to be busy. `expiresInMs` is the integer 30000; the lease
+expires on its own 30 seconds after the last successful `prepare`. Calling `prepare`
+again with the lease id that is currently held renews it for another 30 seconds
+without repeating the idle check. A different lease id while one is held or being
+granted, or a runner that is not idle, is 409 `conflict`. `DELETE` releases the named
+lease and answers `released: false` for an unknown, expired or already released id.
+
+| Status and error | Cause |
+| --- | --- |
+| 409 `runner_identity_mismatch` | Missing or foreign `X-Codevo-Runner-Id` |
+| 415 `unsupported_media` | `prepare` body that is not `application/json`, or any `Content-Encoding` |
+| 413 `too_large` | `prepare` body above 256 bytes |
+| 400 `invalid_input` | Invalid JSON, a missing, non-UUID or uppercase `leaseId`, or any other field |
+| 400 `body_not_allowed` | A body on `DELETE` |
+| 409 `conflict` | Another lease is held or being granted, or the runner is not idle |
+| 503 `storage_unavailable` | The idle check could not read storage; no lease is held |
+
+The fence fails closed. While a lease is held or being granted, every request is
+refused with 503 `busy` unless its handler is explicitly marked exempt with
+`@LeaseExempt(...)` (`src/transport/lease-exempt.ts`); a route added without that
+marker is fenced. The refusal comes after the authentication and identity checks and
+before any body is read. The same admission counts every fenced request until its
+handler settles, whether or not the client is still connected, so `prepare` answers
+409 while one is in flight. Exempt handlers are never counted.
+
+| Exempt | Routes |
+| --- | --- |
+| Discovery | `GET /healthz`, `GET /v1/runner` |
+| Maintenance | `POST /v1/maintenance/prepare`, `DELETE /v1/maintenance/:leaseId` |
+| Storage or memory reads | `GET /v1/tasks`, `GET /v1/tasks/:id`, `GET /v1/tasks/:id/events`, `GET /v1/tasks/:id/pending`, `GET /v1/tasks/:id/questions`, `GET /v1/tasks/:id/approvals`, `GET /v1/tasks/:id/artifacts`, `GET /v1/tasks/:id/artifacts/:id/content`, `GET /v1/tasks/:id/thread-metadata`, `GET /v1/thread-metadata`, `GET /v1/attachments/:id`, `GET /v1/attachments/:id/content`, `GET /v1/project-clones/:id`, `GET /v1/projects`, `GET /v1/history/search`, `GET /v1/git-operations/:id` |
+
+Everything else is fenced, including every other `GET`: reads that start a Git,
+provider or helper process (task resume state, diff, files, turn changes, Git status
+and branches, repository identity, command catalog, MCP servers, account usage,
+repository hosts), reads that can write or close a session (resume state and task
+ports backfill a legacy conversation row; terminal output and project ports
+revalidate and may close a terminal), and surface capabilities. Read-style `POST`
+routes such as file diffs, surface reads and repository lookups are fenced as well.
+The `/v1/changes` stream stays open: it only sends an in-memory revision and closes
+on any client message. The execution and clone workers claim no queued work until
+the lease is released or expires.
+
+Setting `CODEVO_START_MAINTENANCE_LEASE` to a lowercase UUID v4 starts the process
+already holding that lease, before storage is opened and before the listener
+accepts connections, with the same 30-second expiry. Any other value, including an
+empty one, fails startup; an unset variable starts the runner unfenced. Startup
+recovery still runs under the lease: tasks and clones left `running` (and clones
+left `queued`) by an unclean stop are marked `interrupted`, which leaves an idle
+database unchanged.
