@@ -1,12 +1,14 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { ArtifactApplication, ArtifactBlobStore, ArtifactRepository, ArtifactWorkspace } from './artifact-ports.js';
 import type { TaskRepository } from './ports.js';
+import type { WorkSource } from './execution-ports.js';
 import { artifactMediaType, parseArtifactPath } from '../domain/artifact.js';
 import { isId, RunnerError } from '../domain/contracts.js';
 
 /** Immutable snapshots are shared by both CLI providers and survive workspace changes. */
-export class ArtifactService implements ArtifactApplication {
+export class ArtifactService implements ArtifactApplication, WorkSource {
   private active = false;
+  get working(): boolean { return this.active; }
   private readonly waiting: Array<{ grant: () => void; expire: () => void }> = [];
   private acquire(deadline: number, wait: boolean): Promise<() => void> {
     if (Date.now() >= deadline || (this.active && (!wait || this.waiting.length >= 63)))

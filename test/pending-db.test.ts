@@ -266,3 +266,94 @@ test('promotion savepoint rolls back partial task writes before pausing an admis
     assert.equal(pending.listPending(root.id).items[0]?.status, 'paused');
   } finally { db.close(); }
 });
+
+async function restart(state: Awaited<ReturnType<typeof fixture>>) {
+  await state.repository.interruptRunningTasks();
+  const repository = await state.reopen();
+  await repository.interruptRunningTasks();
+  await repository.interruptRunningTasks();
+  return repository;
+}
+async function succeeded(repository: Awaited<ReturnType<typeof openSqliteRepository>>) {
+  const root = await active(repository);
+  await repository.setTaskSession(root.id, randomUUID());
+  await repository.finishTask(root.id, { exitCode: 0 });
+  return root;
+}
+async function drained(repository: Awaited<ReturnType<typeof openSqliteRepository>>, exitCode = 0) {
+  const root = await succeeded(repository);
+  await repository.enqueuePending(root.id, input('First'));
+  const child = await repository.promotePending();
+  assert.ok(child);
+  await repository.claimNextTask();
+  await repository.finishTask(child.id, { exitCode });
+  assert.deepEqual((await repository.listPending(root.id)).items, []);
+  return { root, child };
+}
+
+test('a drained queue stays eligible across a restart and promotes a later message normally', async t => {
+  const state = await fixture(t);
+  const { root, child } = await drained(state.repository);
+  const repository = await restart(state);
+  const later = await repository.enqueuePending(root.id, input('Later'));
+  assert.equal(later.pending.status, 'queued');
+  const next = await repository.promotePending();
+  assert.ok(next);
+  assert.equal(next.parentTaskId, child.id);
+  assert.deepEqual(next.parts, later.pending.parts);
+  assert.deepEqual((await repository.listPending(root.id)).items, []);
+});
+
+test('a message still queued at a restart stays paused until an explicit resume', async t => {
+  const state = await fixture(t);
+  const root = await succeeded(state.repository);
+  const waiting = (await state.repository.enqueuePending(root.id, input('Waiting'))).pending;
+  assert.equal(waiting.status, 'queued');
+  const repository = await restart(state);
+  assert.equal(await repository.promotePending(), null);
+  assert.deepEqual((await repository.listPending(root.id)).items.map(item => item.status), ['paused']);
+  assert.equal((await repository.enqueuePending(root.id, input('Behind'))).pending.status, 'paused');
+  assert.equal(await repository.promotePending(), null);
+  assert.deepEqual((await repository.resumePending(root.id)).items.map(item => item.status), ['queued', 'queued']);
+  const next = await repository.promotePending();
+  assert.ok(next);
+  assert.deepEqual(next.parts, waiting.parts);
+});
+
+test('a turn in flight at the crash keeps its conversation paused, with or without a message behind it', async t => {
+  for (const behind of [true, false]) {
+    const state = await fixture(t);
+    const root = await succeeded(state.repository);
+    await state.repository.enqueuePending(root.id, input('Dispatched'));
+    const child = await state.repository.promotePending();
+    assert.ok(child);
+    await state.repository.claimNextTask();
+    if (behind) await state.repository.enqueuePending(root.id, input('Behind'));
+    const repository = await state.reopen();
+    await repository.interruptRunningTasks();
+    await repository.interruptRunningTasks();
+    assert.equal((await repository.getTask(child.id)).status, 'interrupted');
+    if (!behind) assert.equal((await repository.enqueuePending(root.id, input('After the crash'))).pending.status, 'paused');
+    assert.deepEqual((await repository.listPending(root.id)).items.map(item => item.status), ['paused']);
+    assert.equal(await repository.promotePending(), null);
+    await repository.resumePending(root.id);
+    const next = await repository.promotePending();
+    assert.ok(next);
+    assert.equal(next.parentTaskId, child.id);
+  }
+});
+
+test('an empty queue paused by an earlier failure or restart is eligible again after a restart', async t => {
+  const state = await fixture(t);
+  const { root, child } = await drained(state.repository, 1);
+  const manual = await state.repository.continueTask(child.id, input('Manual retry'));
+  assert.equal(manual.created, true);
+  await state.repository.claimNextTask();
+  await state.repository.finishTask(manual.task.id, { exitCode: 0 });
+  const repository = await restart(state);
+  const later = await repository.enqueuePending(root.id, input('Later'));
+  assert.equal(later.pending.status, 'queued');
+  const next = await repository.promotePending();
+  assert.ok(next);
+  assert.equal(next.parentTaskId, manual.task.id);
+});

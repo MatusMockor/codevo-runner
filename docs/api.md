@@ -469,6 +469,11 @@ restart pause undispatched messages. Restart does not replay the interrupted tur
 Explicit queue resume is required after a pause; sending an unrelated continuation
 or adding another pending message does not silently release a paused queue. Admission
 failures such as task quota pause the affected queue without stopping unrelated tasks.
+A restart pauses only queues that still hold an undispatched message; a queue that
+holds none is left unpaused, also when an earlier failure, stop or restart had
+paused it, so a message added later to a conversation whose latest turn succeeded
+is promoted normally. A message added after a failed, cancelled or interrupted
+latest turn is paused on admission as before.
 
 ## Output artifacts
 
@@ -1432,8 +1437,9 @@ the SQLite schema. Both routes require bearer authentication and the exact
 below) is being handled, no task is `queued` or `running`, no project clone is
 `queued` or `running`, no pending message is `queued` (a paused queue still holds
 queued messages), no execution or clone worker is active, no terminal process is
-running and no Git operation is in flight. The fence is taken before storage is read and dropped again
-when the runner turns out to be busy. `expiresInMs` is the integer 30000; the lease
+running, no Git operation is in flight, and no port scan or artifact capture is
+still resolving after its request or turn ended. The fence is taken before storage
+is read and dropped again when the runner turns out to be busy. `expiresInMs` is the integer 30000; the lease
 expires on its own 30 seconds after the last successful `prepare`. Calling `prepare`
 again with the lease id that is currently held renews it for another 30 seconds
 without repeating the idle check. A different lease id while one is held or being

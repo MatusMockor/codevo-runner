@@ -151,7 +151,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       } finally { await attachments.close(); }
       throw error;
     }
-    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync].filter(source => source !== undefined);
+    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync, ports, artifacts].filter(source => source !== undefined);
     const maintenance = new MaintenanceService(runnerId, lease, new RunnerIdleProbe(repository, sources));
     let closing: Promise<void> | undefined;
     return {

@@ -160,6 +160,11 @@ test('a runner started with a lease is fenced from its first request and leaves 
   assert.equal((await held.call('POST', '/v1/tasks', draft('admitted after release'))).status, 201);
   assert.equal((await held.call('GET', '/v1/account-usage/claude')).status, 200);
   assert.equal(await state.usage.launched(), 3);
+  const followUp = await held.call('POST', `/v1/tasks/${finished}/pending`, { idempotencyKey: randomUUID(), parts: [{ type: 'text', text: 'after the restart' }] });
+  assert.equal(followUp.status, 202, followUp.body);
+  assert.equal(JSON.parse(followUp.body).pending.status, 'queued');
+  await eventually(() => state.calls.length, count => count === calls + 1, 'promotion after the restart');
+  await eventually(async () => JSON.parse((await held.call('GET', `/v1/tasks/${finished}/pending`)).body).items.length, count => count === 0, 'drained queue');
 });
 
 for (const ending of ['release', 'expiry'] as const) {

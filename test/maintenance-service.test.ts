@@ -9,10 +9,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { MAINTENANCE_LEASE_MS, MaintenanceLease } from '../src/application/maintenance-lease.js';
 import { MAINTENANCE_UPDATE_PROTOCOL_VERSION, MaintenanceService, RunnerIdleProbe } from '../src/application/maintenance-service.js';
+import { ArtifactService } from '../src/application/artifact-service.js';
+import { PortPreviewService } from '../src/application/port-preview-service.js';
+import { ProcessOwnershipRegistry } from '../src/application/process-ownership.js';
 import { ProjectCloneService } from '../src/application/project-clone-service.js';
 import type { WorkSource } from '../src/application/execution-ports.js';
 import { TerminalService } from '../src/application/terminal-service.js';
 import type { TerminalProcessFactory } from '../src/application/terminal-ports.js';
+import { FileArtifactBlobs } from '../src/infrastructure/artifacts/blobs.js';
 import { ConfiguredProjectRegistry } from '../src/infrastructure/projects/index.js';
 import { openSqliteRepository } from '../src/infrastructure/sqlite/index.js';
 import { gitSyncFixture } from './git-sync-fixture.js';
@@ -330,4 +334,68 @@ test('a Git operation running after its request returned blocks the grant until 
   await eventually(() => state.sync.working, working => !working, 'Git operation settlement');
   assert.equal((await maintenance.prepare({ leaseId })).leaseId, leaseId);
   assert.equal(maintenance.admit().kind, 'refused');
+});
+
+test('a port scan that outlives its response deadline blocks the grant until its source resolution settles', { timeout: 20_000 }, async t => {
+  const state = await fixture(t);
+  const leaseId = randomUUID();
+  let exit = (_code: number | null) => {};
+  let revalidations = 0;
+  let unblock = () => {};
+  let blocked: Promise<void> = Promise.resolve();
+  const resolver = { async resolve() { return { cwd: '/tmp', identity: { dev: 1, ino: 1 }, async revalidate() { revalidations++; await blocked; } }; } };
+  const factory: TerminalProcessFactory = { async open(_workspace, _size, _onData, onExit) {
+    exit = onExit;
+    return { write() {}, resize() {}, close() {}, ownedProcesses() { return []; } };
+  } };
+  const terminals = new TerminalService(resolver, factory);
+  const ports = new PortPreviewService(state.repository, new ConfiguredProjectRegistry([{ id: 'sample', name: 'Sample', path: '/tmp' }]),
+    new ProcessOwnershipRegistry(), terminals, { scan: async () => ({ ports: [], truncated: false }) }, { limits: { deadlineMs: 50 } });
+  const service = new MaintenanceService(state.runnerId, state.lease, new RunnerIdleProbe(state.repository, [terminals, ports]));
+  try {
+    await terminals.open('sample', { cols: 80, rows: 24 });
+    assert.equal(ports.working, false);
+    blocked = new Promise<void>(resolve => { unblock = resolve; });
+    const started = revalidations;
+    await assert.rejects(ports.projectPorts('sample'), { code: 'busy' });
+    assert.equal(revalidations, started + 1);
+    exit(0);
+    assert.equal(terminals.working, false);
+    assert.equal(ports.working, true);
+    await assert.rejects(service.prepare({ leaseId }), { code: 'conflict' });
+    assert.equal(state.lease.fenced, false);
+    unblock();
+    await eventually(() => ports.working, working => !working, 'port source resolution');
+    assert.equal((await service.prepare({ leaseId })).leaseId, leaseId);
+  } finally {
+    unblock();
+    await terminals.close();
+  }
+});
+
+test('an artifact capture counts as work until the capture itself settles', { timeout: 20_000 }, async t => {
+  const state = await fixture(t);
+  const leaseId = randomUUID();
+  const task = await state.queueTask();
+  await state.repository.claimNextTask();
+  await state.repository.finishTask(task.id, { exitCode: 0 });
+  let release = () => {};
+  const reading = new Promise<void>(resolve => { release = resolve; });
+  let captures = 0;
+  const artifacts = new ArtifactService(state.repository, state.repository, {
+    normalize: async (_taskId, path) => path,
+    capture: async (_taskId, path) => { captures++; await reading; return { path, bytes: Buffer.from('<p>report</p>') }; },
+  }, await FileArtifactBlobs.open(state.root, []));
+  const service = new MaintenanceService(state.runnerId, state.lease, new RunnerIdleProbe(state.repository, [artifacts]));
+  try {
+    assert.equal(artifacts.working, false);
+    const registering = artifacts.register(task.id, { path: 'report.html' });
+    await eventually(() => captures, count => count === 1, 'artifact capture');
+    assert.equal(artifacts.working, true);
+    await assert.rejects(service.prepare({ leaseId }), { code: 'conflict' });
+    release();
+    assert.equal((await registering).created, true);
+    assert.equal(artifacts.working, false);
+    assert.equal((await service.prepare({ leaseId })).leaseId, leaseId);
+  } finally { release(); }
 });

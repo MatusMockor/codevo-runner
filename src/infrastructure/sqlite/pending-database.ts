@@ -111,7 +111,10 @@ export class PendingDatabase {
    const task = this.dependencies.getTask(id);
    this.db.prepare('UPDATE pending_queues SET paused=1,allow_terminal=0 WHERE root_id=?').run(task.conversationId ?? task.id);
  }
- pauseAll(): void { this.db.prepare('UPDATE pending_queues SET paused=1,allow_terminal=0').run(); }
+ pauseOutstanding(): void {
+   this.db.prepare(`UPDATE pending_queues SET allow_terminal=0,paused=EXISTS(SELECT 1 FROM pending_messages m
+     WHERE m.root_id=pending_queues.root_id AND json_extract(m.payload,'$.status')='queued')`).run();
+ }
  promotePending(): Task | null {
    return this.dependencies.transaction(() => {
      const queues = this.db.prepare(`SELECT q.root_id,q.allow_terminal FROM pending_queues q

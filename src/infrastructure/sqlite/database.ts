@@ -254,7 +254,7 @@ export class RepositoryDatabase {
   }
   interruptRunningTasks(): void {
     this.transaction(() => {
-      this.pending.pauseAll();
+      this.pending.pauseOutstanding();
       this.questions.settlePending(undefined, 'expired');
       this.approvals.settlePending(undefined, 'expired');
       for (;;) {

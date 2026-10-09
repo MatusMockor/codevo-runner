@@ -4,7 +4,7 @@ import { portList, type PortList, type PortSource } from '../domain/port-preview
 import type { OwnedProcessTree } from '../domain/process-ownership.js';
 import { validateId } from '../domain/task-input.js';
 import type { Task } from '../domain/contracts.js';
-import type { ProjectRegistry } from './execution-ports.js';
+import type { ProjectRegistry, WorkSource } from './execution-ports.js';
 import type { ListeningPortScanner, PortOwner, PortPreviewApplication } from './port-preview-ports.js';
 import type { OwnedTrees } from './process-ownership.js';
 import type { TerminalProcessOwner } from './terminal-service.js';
@@ -33,8 +33,9 @@ const SETTLE_GRACE_MS = 500;
 type OwnerSource = Readonly<{ source: PortSource; trees: readonly OwnedProcessTree[]; complete: boolean }>;
 type CacheEntry = { at: number; settled: boolean; readonly result: Promise<PortList> };
 
-export class PortPreviewService implements PortPreviewApplication {
+export class PortPreviewService implements PortPreviewApplication, WorkSource {
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly collecting = new Set<Promise<void>>();
   private readonly excludedPorts: ReadonlySet<number>;
   private readonly clock: () => number;
   private readonly limits: PortScanLimits;
@@ -52,6 +53,8 @@ export class PortPreviewService implements PortPreviewApplication {
     this.clock = options.clock ?? Date.now;
     this.limits = { ...PORT_SCAN_LIMITS, ...options.limits };
   }
+
+  get working(): boolean { return this.collecting.size > 0; }
 
   async taskPorts(taskId: string): Promise<PortList> {
     const task = await this.tasks.getTask(validateId(taskId));
@@ -102,10 +105,13 @@ export class PortPreviewService implements PortPreviewApplication {
 
   private scan(sources: () => Promise<readonly OwnerSource[]>): Promise<PortList> {
     const deadline = AbortSignal.timeout(this.limits.deadlineMs);
+    const collection = this.collect(sources, deadline);
+    const settlement = collection.then(() => undefined, () => undefined).finally(() => { this.collecting.delete(settlement); });
+    this.collecting.add(settlement);
     return new Promise<PortList>((resolve, reject) => {
       const timer = setTimeout(() => reject(new RunnerError('busy')), this.limits.deadlineMs + SETTLE_GRACE_MS);
       timer.unref();
-      this.collect(sources, deadline).then(resolve, reject).finally(() => clearTimeout(timer));
+      collection.then(resolve, reject).finally(() => clearTimeout(timer));
     });
   }
 
