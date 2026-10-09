@@ -11,7 +11,8 @@ import { loadWorkspaceGit, saveWorkspaceGit } from './workspace-git.js';
 
 import { ProjectRepositoryIdentity } from './repository-identity.js';
 import { git } from './git-command.js';
-import { captureWorkspace, loadMetadata, saveMetadata, validateWorkspace } from './workspace-metadata.js';
+import { captureWorkspace, loadMetadata, saveMetadata, validatePersistedWorkspace, validateWorkspace } from './workspace-metadata.js';
+import { liveIdentity } from './live-identity.js';
 import { listWorkspaceFiles, readWorkspaceFileDiff } from './workspace-files.js';
 import { validateWorkspacePath } from '../../domain/workspace-files.js';
 
@@ -96,7 +97,7 @@ export class GitProjectWorkspace implements ProjectWorkspace, GitWorkspaces {
     let cwd = this.taskPath(workspaceTaskId);
     const metadata = await loadMetadata(this.metadata, workspaceTaskId);
     if (metadata) {
-      await validateWorkspace(metadata, project, signal);
+      await validatePersistedWorkspace(metadata, project, signal);
       if (metadata.mode === 'in-place') cwd = metadata.source;
     }
     signal?.throwIfAborted();
@@ -115,7 +116,7 @@ export class GitProjectWorkspace implements ProjectWorkspace, GitWorkspaces {
     const base = await readBaseline(basePath);
     if (!/^[0-9a-f]{40,64}$/.test(base)) throw new RunnerError('conflict');
     await git(cwd, ['cat-file', '-e', `${base}^{commit}`], signal);
-    if (metadata) await validateWorkspace(metadata, project, signal);
+    if (metadata) await validatePersistedWorkspace(metadata, project, signal);
     signal?.throwIfAborted();
     return cwd;
   }
@@ -137,7 +138,7 @@ export class GitProjectWorkspace implements ProjectWorkspace, GitWorkspaces {
     const metadata = await loadMetadata(this.metadata, workspaceTaskId);
     const cwd = await this.resume(project, workspaceTaskId, signal);
     const info = await lstat(cwd);
-    const identity = metadata?.mode === 'in-place' ? metadata.sourceIdentity : { dev: info.dev, ino: info.ino };
+    const identity = metadata?.mode === 'in-place' ? liveIdentity(metadata.sourceIdentity, info) : { dev: info.dev, ino: info.ino };
     if (!info.isDirectory() || info.isSymbolicLink() || info.dev !== identity.dev || info.ino !== identity.ino) throw new RunnerError('conflict');
     const mode = metadata?.mode ?? 'worktree';
     const record = mode === 'worktree' ? await loadWorkspaceGit(this.gitRecords, workspaceTaskId) : null;
@@ -160,7 +161,7 @@ export class GitProjectWorkspace implements ProjectWorkspace, GitWorkspaces {
     const before = await lstat(cwd);
     await this.resume(project, taskId, signal);
     const after = await lstat(cwd);
-    const expected = metadata?.mode === 'in-place' ? metadata.sourceIdentity : before;
+    const expected = metadata?.mode === 'in-place' ? liveIdentity(metadata.sourceIdentity, before) : before;
     if (!before.isDirectory() || before.isSymbolicLink() || !after.isDirectory() || after.isSymbolicLink() ||
         before.dev !== expected.dev || before.ino !== expected.ino || after.dev !== expected.dev || after.ino !== expected.ino)
       throw new RunnerError('conflict');

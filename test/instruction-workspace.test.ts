@@ -8,7 +8,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, symlink, link } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { FileInstructionWorkspace } from '../src/infrastructure/files/instruction-workspace.js';
+import { FileInstructionWorkspace, instructionManifestNames } from '../src/infrastructure/files/instruction-workspace.js';
 import type { InstructionSnapshot } from '../src/domain/instructions.js';
 
 const fsTest = (name: string, fn: (t: import('node:test').TestContext) => Promise<void>) => test(name, { skip: process.platform !== 'linux' }, fn);
@@ -192,6 +192,106 @@ fsTest('in-place root replacement does not inherit old managed file ownership', 
   await apply({});
   assert.equal(await readFile(join(f.cwd, 'CLAUDE.md'), 'utf8'), 'original');
   await assert.rejects(apply({ 'CLAUDE.md': 'replacement' }), { code: 'conflict' });
+});
+
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+const deviceKeyedManifest = (root: string, identity: { dev: number; ino: number }) => `checkout-${sha256(JSON.stringify([root, String(identity.dev), String(identity.ino)]))}.json`;
+const checkoutManifest = (root: string, ino: number) => `checkout-inode-${sha256(JSON.stringify([root, String(ino)]))}.json`;
+
+test('in-place manifest name survives device renumbering and cannot collide with device-keyed names', () => {
+  const id = randomUUID();
+  const before = instructionManifestNames('in-place', null, '/srv/project', { dev: 66312, ino: 42 });
+  const after = instructionManifestNames('in-place', id, '/srv/project', { dev: 66311, ino: 42 });
+  assert.equal(before.current, checkoutManifest('/srv/project', 42));
+  assert.equal(after.current, before.current);
+  assert.equal(before.legacy, deviceKeyedManifest('/srv/project', { dev: 66312, ino: 42 }));
+  assert.equal(after.legacy, deviceKeyedManifest('/srv/project', { dev: 66311, ino: 42 }));
+  assert.doesNotMatch(before.current, /^checkout-[a-f0-9]{64}\.json$/);
+  assert.notEqual(instructionManifestNames('in-place', null, '/srv/project', { dev: 66312, ino: 43 }).current, before.current);
+  assert.notEqual(instructionManifestNames('in-place', null, '/srv/other', { dev: 66312, ino: 42 }).current, before.current);
+  assert.deepEqual(instructionManifestNames('worktree', id, '/srv/project', { dev: 66312, ino: 42 }), { current: `${id}.json` });
+});
+
+fsTest('in-place adopts a device-keyed manifest once and a stale one never overrides the device-independent manifest', async t => {
+  const f = await fixture(t);
+  const apply = (files: Record<string, string>) =>
+    new FileInstructionWorkspace(f.data).apply(randomUUID(), f.cwd, snapshot(files), new AbortController().signal, 'in-place');
+  const identity = await fs.lstat(f.cwd);
+  const manifests = join(f.data, 'instruction-manifests');
+  const legacy = join(manifests, deviceKeyedManifest(f.cwd, identity));
+  const current = join(manifests, checkoutManifest(f.cwd, identity.ino));
+  await mkdir(manifests);
+  await writeFile(join(f.cwd, 'CLAUDE.local.md'), 'first');
+  await writeFile(legacy, JSON.stringify({ version: 1, root: f.cwd, files: { 'CLAUDE.local.md': sha256('first') } }));
+  assert.deepEqual(await f.service.managedPaths(null, f.cwd, 'in-place'), ['CLAUDE.local.md']);
+  await apply({ 'CLAUDE.local.md': 'second' });
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'second');
+  assert.deepEqual(JSON.parse(await readFile(current, 'utf8')), { version: 1, root: f.cwd, files: { 'CLAUDE.local.md': sha256('second') } });
+  await assert.rejects(readFile(legacy), { code: 'ENOENT' });
+  assert.deepEqual(await f.service.managedPaths(null, f.cwd, 'in-place'), ['CLAUDE.local.md']);
+  await apply({ 'CLAUDE.local.md': 'third' });
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'third');
+  await writeFile(join(f.cwd, 'user.md'), 'user rules');
+  await writeFile(legacy, JSON.stringify({ version: 1, root: f.cwd, files: { 'CLAUDE.local.md': sha256('first'), 'user.md': sha256('user rules') } }));
+  assert.deepEqual(await f.service.managedPaths(null, f.cwd, 'in-place'), ['CLAUDE.local.md']);
+  await apply({ 'CLAUDE.local.md': 'fourth' });
+  assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), 'fourth');
+  assert.equal(await readFile(join(f.cwd, 'user.md'), 'utf8'), 'user rules');
+  assert.deepEqual(JSON.parse(await readFile(current, 'utf8')), { version: 1, root: f.cwd, files: { 'CLAUDE.local.md': sha256('fourth') } });
+  await assert.rejects(readFile(legacy), { code: 'ENOENT' });
+  await apply({});
+  await assert.rejects(readFile(join(f.cwd, 'CLAUDE.local.md')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(f.cwd, 'user.md'), 'utf8'), 'user rules');
+});
+
+fsTest('an invalid or vanishing device-keyed manifest never blocks the device-independent manifest and fails closed without one', async t => {
+  const f = await fixture(t);
+  const apply = (files: Record<string, string>) => f.service.apply(randomUUID(), f.cwd, snapshot(files), new AbortController().signal, 'in-place');
+  const identity = await fs.lstat(f.cwd);
+  const manifests = join(f.data, 'instruction-manifests');
+  const legacy = join(manifests, deviceKeyedManifest(f.cwd, identity));
+  const current = join(manifests, checkoutManifest(f.cwd, identity.ino));
+  const foreign = join(f.base, 'foreign.json');
+  await writeFile(join(f.cwd, 'user.md'), 'user rules');
+  await writeFile(foreign, JSON.stringify({ version: 1, root: f.cwd, files: { 'user.md': sha256('user rules') } }));
+  await mkdir(manifests);
+  for (const invalid of [symlink, link]) {
+    await invalid(foreign, legacy);
+    await assert.rejects(f.service.managedPaths(null, f.cwd, 'in-place'), { code: 'conflict' });
+    await assert.rejects(apply({ 'CLAUDE.local.md': 'first' }), { code: 'conflict' });
+    await assert.rejects(readFile(join(f.cwd, 'CLAUDE.local.md')), { code: 'ENOENT' });
+    await assert.rejects(readFile(current), { code: 'ENOENT' });
+    await rm(legacy);
+  }
+  await apply({ 'CLAUDE.local.md': 'first' });
+  for (const [invalid, content] of [[symlink, 'second'], [link, 'third']] as const) {
+    await invalid(foreign, legacy);
+    assert.deepEqual(await f.service.managedPaths(null, f.cwd, 'in-place'), ['CLAUDE.local.md']);
+    await apply({ 'CLAUDE.local.md': content });
+    assert.equal(await readFile(join(f.cwd, 'CLAUDE.local.md'), 'utf8'), content);
+    assert.deepEqual(JSON.parse(await readFile(current, 'utf8')), { version: 1, root: f.cwd, files: { 'CLAUDE.local.md': sha256(content) } });
+    await assert.rejects(fs.lstat(legacy), { code: 'ENOENT' });
+  }
+  assert.equal(await readFile(join(f.cwd, 'user.md'), 'utf8'), 'user rules');
+  const committed = await readFile(current, 'utf8');
+  await rm(current);
+  await writeFile(legacy, JSON.stringify({ version: 1, root: f.cwd, files: { 'user.md': sha256('user rules') } }));
+  const originalOpen = fs.open;
+  let migrated = false;
+  t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+    const handle = await originalOpen(...args);
+    if (!migrated && String(args[0]).endsWith(`/${deviceKeyedManifest(f.cwd, identity)}`)) {
+      migrated = true;
+      await writeFile(current, committed);
+      await rm(legacy);
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.deepEqual(await f.service.managedPaths(null, f.cwd, 'in-place'), ['CLAUDE.local.md']);
+    assert.equal(migrated, true);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });
 
 test('non-Linux in-place checkout allows only empty instruction reconciliation', { skip: process.platform === 'linux' }, async t => {

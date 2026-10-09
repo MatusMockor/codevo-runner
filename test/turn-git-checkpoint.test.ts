@@ -87,6 +87,28 @@ test('refs, Git-directory and workspace identity replacement fail closed after d
   assert.equal((await f.store.summary(id)).state, 'unavailable');
 });
 
+type StoredIdentity = { dev: number; ino: number };
+type StoredCheckpoint = { identity: StoredIdentity; gitIdentity: StoredIdentity; commonIdentity: StoredIdentity };
+test('retained checkpoints stay readable after a device renumbering and still reject a different inode', async t => {
+  const f = await fixture(); const id = randomUUID();
+  t.after(() => rm(f.root, { recursive: true, force: true }));
+  await f.store.captureStart(id, f.cwd, f.identity, f.signal);
+  await writeFile(join(f.cwd, 'file'), 'agent\n');
+  await f.store.captureEnd(id, f.cwd, f.identity, f.signal);
+  const record = join(f.root, 'state', 'turn-changes', `${id}.end`);
+  const stored = JSON.parse(await readFile(record, 'utf8')) as StoredCheckpoint;
+  const renumbered = (identity: StoredIdentity) => ({ dev: identity.dev + 1, ino: identity.ino });
+  await writeFile(record, JSON.stringify({ ...stored, identity: renumbered(stored.identity), gitIdentity: renumbered(stored.gitIdentity), commonIdentity: renumbered(stored.commonIdentity) }));
+  const reopened = new FileTurnChangesStore(join(f.root, 'state'));
+  assert.equal((await reopened.summary(id)).state, 'ready');
+  assert.equal((await reopened.diff(id, 'file')).modified.text, 'agent\n');
+  for (const replaced of ['identity', 'gitIdentity', 'commonIdentity'] as const) {
+    await writeFile(record, JSON.stringify({ ...stored, [replaced]: { dev: stored[replaced].dev, ino: stored[replaced].ino + 1 } }));
+    assert.equal((await reopened.summary(id)).state, 'unavailable');
+    await assert.rejects(reopened.diff(id, 'file'), { code: 'storage_unavailable' });
+  }
+});
+
 test('linked-worktree checkpoints use its pinned common repository without changing its index', async t => {
   const f = await fixture(); const id = randomUUID();
   t.after(() => rm(f.root, { recursive: true, force: true }));

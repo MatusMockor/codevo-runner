@@ -11,6 +11,8 @@ export type WorkspaceMetadata = Readonly<{
   source: string; sourceIdentity: Identity; common: string; commonIdentity: Identity;
 }>;
 const LIMIT = 16 * 1024;
+const durable = (metadata: WorkspaceMetadata) => JSON.stringify([metadata.version, metadata.mode, metadata.projectId,
+  metadata.source, metadata.sourceIdentity.ino, metadata.common, metadata.commonIdentity.ino]);
 
 export async function captureWorkspace(project: RegisteredProject, mode: WorkspaceMetadata['mode'], signal?: AbortSignal): Promise<WorkspaceMetadata> {
   const source = await realpath(project.path);
@@ -27,6 +29,12 @@ export async function captureWorkspace(project: RegisteredProject, mode: Workspa
 export async function validateWorkspace(metadata: WorkspaceMetadata, project: RegisteredProject, signal?: AbortSignal) {
   const current = await captureWorkspace(project, metadata.mode, signal);
   if (JSON.stringify(current) !== JSON.stringify(metadata)) throw new RunnerError('conflict');
+  signal?.throwIfAborted();
+}
+
+export async function validatePersistedWorkspace(metadata: WorkspaceMetadata, project: RegisteredProject, signal?: AbortSignal) {
+  const current = await captureWorkspace(project, metadata.mode, signal);
+  if (durable(current) !== durable(metadata)) throw new RunnerError('conflict');
   signal?.throwIfAborted();
 }
 

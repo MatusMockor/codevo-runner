@@ -10,6 +10,7 @@ import type { TurnChanges } from '../../application/turn-changes.js';
 import { validStoredTurn, validGitCheckpoint, validTurnSummary, validTurnDiff } from './turn-changes-codec.js';
 import { runTurnGit, checkpointFailureReason, type GitCheckpoint } from './turn-git-helper.js';
 import { runTurnHelper, type CapturedFile, type TurnSnapshot } from './turn-capture-helper.js';
+import { liveIdentity } from './live-identity.js';
 
 type Identity = Readonly<{ dev: number; ino: number }>;
 type Start = Readonly<{ cwd: string; identity: Identity; snapshot: TurnSnapshot }>;
@@ -161,7 +162,8 @@ export class FileTurnChangesStore implements TurnChanges {
       const value = await this.read<Complete | GitCheckpoint>(`${taskId}.end`);
       if (value && 'kind' in value) {
         try {
-          const summary = await runTurnGit({ mode: 'summary', taskId, cwd: value.cwd, identity: value.identity, checkpoint: value }, AbortSignal.timeout(60_000));
+          const checkpoint = await liveCheckpoint(value);
+          const summary = await runTurnGit({ mode: 'summary', taskId, cwd: checkpoint.cwd, identity: checkpoint.identity, checkpoint }, AbortSignal.timeout(60_000));
           if (!validTurnSummary(summary, taskId)) throw new Error('Invalid checkpoint summary.');
           return summary as TurnChangesSummary;
         } catch (error) {
@@ -178,7 +180,8 @@ export class FileTurnChangesStore implements TurnChanges {
       const value = await this.read<Complete | GitCheckpoint>(`${taskId}.end`);
       if (value && 'kind' in value) {
         try {
-          const diff = await runTurnGit({ mode: 'diff', taskId, cwd: value.cwd, identity: value.identity, checkpoint: value, path: relativePath }, AbortSignal.timeout(60_000));
+          const checkpoint = await liveCheckpoint(value);
+          const diff = await runTurnGit({ mode: 'diff', taskId, cwd: checkpoint.cwd, identity: checkpoint.identity, checkpoint, path: relativePath }, AbortSignal.timeout(60_000));
           if (!validTurnDiff(diff, relativePath)) throw new RunnerError('storage_unavailable');
           return diff as TurnFileDiff;
         } catch (error) {
@@ -191,6 +194,12 @@ export class FileTurnChangesStore implements TurnChanges {
       return found;
     });
   }
+}
+
+async function liveCheckpoint(checkpoint: GitCheckpoint): Promise<GitCheckpoint> {
+  return { ...checkpoint, identity: liveIdentity(checkpoint.identity, await lstat(checkpoint.cwd)),
+    gitIdentity: liveIdentity(checkpoint.gitIdentity, await lstat(checkpoint.gitDir)),
+    commonIdentity: liveIdentity(checkpoint.commonIdentity, await lstat(checkpoint.commonDir)) };
 }
 
 async function compare(taskId: string, before: TurnSnapshot, after: TurnSnapshot, signal: AbortSignal): Promise<Complete> {

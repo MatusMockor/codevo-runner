@@ -11,6 +11,7 @@ import { InstructionSyncQueue } from './instruction-sync-queue.js';
 
 type Hashes = Record<string, string>;
 type Manifest = { version: 1; root: string; files: Hashes; pending?: Hashes };
+type ManifestNames = Readonly<{ current: string; legacy?: string }>;
 const synchronization = new InstructionSyncQueue();
 const runFile = promisify(execFile);
 const digest = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
@@ -127,6 +128,19 @@ function parseManifest(value: unknown, root: string): Manifest {
   }
   return data;
 }
+export function instructionManifestNames(isolation: 'in-place' | 'worktree', workspaceTaskId: string | null, root: string, identity: Readonly<{ dev: number; ino: number }>): ManifestNames {
+  if (isolation === 'worktree') return { current: `${workspaceTaskId}.json` };
+  return {
+    current: `checkout-inode-${digest(JSON.stringify([root, String(identity.ino)]))}.json`,
+    legacy: `checkout-${digest(JSON.stringify([root, String(identity.dev), String(identity.ino)]))}.json`,
+  };
+}
+async function readManifest(manifests: FileHandle, names: ManifestNames): Promise<Buffer | undefined> {
+  const current = await readRegular(manifests, names.current, 256 * 1024);
+  if (current !== undefined || names.legacy === undefined) return current;
+  const legacy = await readRegular(manifests, names.legacy, 256 * 1024).then(bytes => () => bytes, (error: unknown) => (): never => { throw error; });
+  return await readRegular(manifests, names.current, 256 * 1024) ?? legacy();
+}
 
 /** Reconciles only Codevo-owned instruction files; edits on the server fail closed. */
 export class FileInstructionWorkspace {
@@ -136,17 +150,14 @@ export class FileInstructionWorkspace {
     if (process.platform !== 'linux') return [];
     if (isolation === 'worktree' && !isId(workspaceTaskId)) throw new RunnerError('invalid_input');
     const root = await realpath(cwd);
-    const rootIdentity = await lstat(root);
-    const manifestPath = isolation === 'in-place'
-      ? `checkout-${digest(JSON.stringify([root, String(rootIdentity.dev), String(rootIdentity.ino)]))}.json`
-      : `${workspaceTaskId}.json`;
+    const names = instructionManifestNames(isolation, workspaceTaskId, root, await lstat(root));
     let storage: FileHandle | undefined;
     let manifests: FileHandle | undefined;
     try {
       storage = await openDirectory(await realpath(this.dataDir));
       try { manifests = await parentHandle(storage, 'instruction-manifests/entry', false); }
       catch (error) { if (missing(error)) return []; throw error; }
-      const bytes = await readRegular(manifests, manifestPath, 256 * 1024);
+      const bytes = await readManifest(manifests, names);
       if (bytes === undefined) return [];
       const manifest = parseManifest(JSON.parse(bytes.toString('utf8')), root);
       return [...new Set([...Object.keys(manifest.files), ...Object.keys(manifest.pending ?? {})])];
@@ -192,11 +203,10 @@ export class FileInstructionWorkspace {
       storage = await openDirectory(dataRoot);
       manifests = await parentHandle(storage, 'instruction-manifests/entry', true);
       // Shared checkouts share ownership across conversations, but never across root replacement.
-      const manifestPath = isolation === 'in-place'
-        ? `checkout-${digest(JSON.stringify([root, String(openedRoot.dev), String(openedRoot.ino)]))}.json`
-        : `${workspaceTaskId}.json`;
+      const names = instructionManifestNames(isolation, workspaceTaskId, root, openedRoot);
+      const manifestPath = names.current;
       let previous: Manifest = { version: 1, root, files: {} };
-      const manifestBytes = await readRegular(manifests, manifestPath, 256 * 1024);
+      const manifestBytes = await readManifest(manifests, names);
       if (manifestBytes !== undefined) previous = parseManifest(JSON.parse(manifestBytes.toString('utf8')), root);
       const all = new Set([...Object.keys(previous.files), ...Object.keys(previous.pending ?? {}), ...contents.keys()]);
       const observed = new Map<string, string | undefined>();
@@ -241,6 +251,7 @@ export class FileInstructionWorkspace {
       if (finalIdentity.dev !== rootIdentity.dev || finalIdentity.ino !== rootIdentity.ino ||
           await realpath(cwd) !== root) conflict();
       await durableWrite(manifests, manifestPath, JSON.stringify({ version: 1, root, files: managedNext }));
+      if (names.legacy !== undefined) await unlink(`${descriptorPath(manifests)}/${names.legacy}`).catch(() => undefined);
       const committedIdentity = await lstat(cwd);
       if (committedIdentity.dev !== rootIdentity.dev || committedIdentity.ino !== rootIdentity.ino ||
           await realpath(cwd) !== root) conflict();

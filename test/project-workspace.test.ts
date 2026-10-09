@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, rename, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, rename, realpath, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -167,3 +167,43 @@ test('workspace metadata rejects oversized and symlink records', async t => {
   await symlink(join(root, 'data', 'workspace-baselines', taskId), record);
   await assert.rejects(workspace.resume(project, taskId));
 });
+
+type StoredIdentity = { dev: number; ino: number };
+type StoredMetadata = { sourceIdentity: StoredIdentity; commonIdentity: StoredIdentity };
+async function rewriteMetadata(root: string, taskId: string, change: (record: StoredMetadata) => StoredMetadata) {
+  const path = join(root, 'data', 'workspace-metadata', taskId);
+  await writeFile(path, JSON.stringify(change(JSON.parse(await readFile(path, 'utf8')) as StoredMetadata)));
+}
+
+test('workspace records persisted before a device renumbering resume with the live identity', async t => {
+  const { workspace, project, source, root } = await fixture(t);
+  const inPlace = randomUUID();
+  const worktree = randomUUID();
+  const checkout = await workspace.prepare(project, inPlace, undefined, 'in-place');
+  const cwd = await workspace.prepare(project, worktree);
+  const renumbered = (identity: StoredIdentity) => ({ dev: identity.dev + 1, ino: identity.ino });
+  for (const taskId of [inPlace, worktree])
+    await rewriteMetadata(root, taskId, record => ({ ...record, sourceIdentity: renumbered(record.sourceIdentity), commonIdentity: renumbered(record.commonIdentity) }));
+  const restarted = new GitProjectWorkspace(join(root, 'data'));
+  const live = await lstat(await realpath(source));
+  assert.equal(await restarted.resume(project, inPlace), checkout);
+  assert.deepEqual(await restarted.identity(project, inPlace), { dev: live.dev, ino: live.ino });
+  assert.deepEqual(await restarted.thread(project, inPlace), { mode: 'in-place', workdir: { cwd: checkout, identity: { dev: live.dev, ino: live.ino } }, record: null });
+  await writeFile(join(source, 'tracked.txt'), 'after reboot\n');
+  assert.match((await restarted.diff(inPlace)).patch, /after reboot/);
+  assert.equal(await restarted.resume(project, worktree), cwd);
+  assert.equal((await restarted.thread(project, worktree)).mode, 'worktree');
+});
+
+for (const replaced of ['sourceIdentity', 'commonIdentity'] as const) {
+  test(`workspace record with a different ${replaced} inode still conflicts`, async t => {
+    const { workspace, project, root } = await fixture(t);
+    const taskId = randomUUID();
+    await workspace.prepare(project, taskId, undefined, 'in-place');
+    await rewriteMetadata(root, taskId, record => ({ ...record, [replaced]: { dev: record[replaced].dev, ino: record[replaced].ino + 1 } }));
+    await assert.rejects(workspace.resume(project, taskId), /conflict/);
+    await assert.rejects(workspace.identity(project, taskId), /conflict/);
+    await assert.rejects(workspace.thread(project, taskId), /conflict/);
+    await assert.rejects(workspace.diff(taskId), /conflict/);
+  });
+}
