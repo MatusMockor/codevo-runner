@@ -125,7 +125,8 @@ test('authorization URLs are https, or http only towards the loopback host', () 
   const longest = `https://auth.example.com/${'a'.repeat(4096 - 'https://auth.example.com/'.length)}`;
   for (const url of ['https://auth.example.com/authorize?state=1', 'http://localhost:4000/authorize', 'http://127.0.0.1/authorize', longest]) assert.equal(isValidMcpAuthorizationUrl(url), true, url);
   for (const url of [`${longest}a`, 'http://auth.example.com/authorize', 'http://127.0.0.2/authorize', 'http://localhost.example.com/authorize', 'http://[::1]/authorize',
-    'javascript:alert(1)', 'file:///etc/passwd', 'https://auth.example.com/a b', 'https://auth.example.com/\n', 'https:\\\\auth.example.com', 'auth.example.com', '', null, 7, {}])
+    'HTTPS://auth.example.com/authorize', 'Http://localhost:4000/authorize', 'https://user@auth.example.com/authorize', 'https://user:secret@auth.example.com/authorize',
+    'http://user@localhost:4000/authorize', 'javascript:alert(1)', 'file:///etc/passwd', 'https://auth.example.com/a b', 'https://auth.example.com/\n', 'https:\\\\auth.example.com', 'auth.example.com', '', null, 7, {}])
     assert.equal(isValidMcpAuthorizationUrl(url), false, String(url));
 });
 

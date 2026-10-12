@@ -47,6 +47,7 @@ const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
 const CONTROL = /[\p{Cc}\p{Cs}]/u;
 const SPACE_OR_CONTROL = /[\p{White_Space}\p{Cc}\p{Cs}]/u;
 const HTTP_PREFIX = /^https?:\/\//i;
+const AUTHORIZATION_PREFIX = /^https?:\/\//;
 const DEFAULT_HTTP_PORT = 80;
 const encoder = new TextEncoder();
 
@@ -92,7 +93,9 @@ export function isValidMcpArgs(value: unknown): value is readonly string[] {
 }
 export function isValidMcpAuthorizationUrl(value: unknown): value is string {
   const url = httpUrl(value, MCP_SERVER_MANAGEMENT_LIMITS.maxAuthorizationUrlBytes);
-  return url !== null && (url.protocol === 'https:' || isLoopbackHttp(url));
+  if (url === null || !AUTHORIZATION_PREFIX.test(String(value))) return false;
+  if (url.username !== '' || url.password !== '') return false;
+  return url.protocol === 'https:' || isLoopbackHttp(url);
 }
 export function isMcpServerLoginId(value: unknown): value is string {
   return typeof value === 'string' && MCP_SERVER_LOGIN_ID_PATTERN.test(value);
