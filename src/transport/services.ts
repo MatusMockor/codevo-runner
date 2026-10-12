@@ -2,6 +2,7 @@ import type { SpeechApplication } from '../application/speech-transcription-serv
 import type { AccountUsageApplication } from '../application/account-usage-service.js';
 import type { CommandCatalogApplication } from '../application/command-catalog-service.js';
 import type { McpServersApplication } from '../application/mcp-servers-service.js';
+import type { McpServerManagementApplication } from '../application/mcp-server-management-service.js';
 import type { RepositoryLookupService } from '../application/repository-lookup-service.js';
 import type { ThreadMetadataService } from '../application/thread-metadata.js';
 import type { ProjectDirectories } from '../application/project-directories.js';
@@ -24,6 +25,7 @@ export interface RunnerServices {
   readonly accountUsage?: AccountUsageApplication;
   readonly commandCatalog?: CommandCatalogApplication;
   readonly mcpServers?: McpServersApplication;
+  readonly mcpServerManagement?: McpServerManagementApplication;
   readonly repositories?: RepositoryLookupService;
   readonly threadMetadata?: ThreadMetadataService;
   readonly projectDirectories?: ProjectDirectories;

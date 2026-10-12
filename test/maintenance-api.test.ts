@@ -237,6 +237,7 @@ test('every registered route is fenced unless its handler is explicitly classifi
     'GET /v1/history/search storage-read',
     'GET /v1/project-clones/:id storage-read',
     'GET /v1/projects storage-read',
+    'GET /v1/projects/:projectId/mcp-servers/:provider/logins/:loginId storage-read',
     'GET /v1/runner discovery',
     'GET /v1/tasks storage-read',
     'GET /v1/tasks/:id storage-read',
@@ -298,6 +299,8 @@ test('a held lease refuses every unclassified route with busy while storage read
     ['POST', '/v1/projects/sample/surface/write', { path: 'README.md', text: 'changed\n' }], ['POST', '/v1/projects/sample/surface/read', { path: 'README.md' }],
     ['POST', '/v1/projects/sample/terminals', { cols: 80, rows: 24 }], ['POST', `/v1/projects/sample/terminals/${other}/input`, { data: 'ls\r' }],
     ['POST', `/v1/projects/sample/terminals/${other}/resize`, { cols: 80, rows: 24 }], ['DELETE', `/v1/projects/sample/terminals/${other}`],
+    ['POST', '/v1/projects/sample/mcp-servers/claude/changes', { change: { kind: 'signOut', name: 'docs' } }], ['POST', '/v1/projects/sample/mcp-servers/codex/logins', { name: 'docs', mode: 'signIn' }],
+    ['POST', `/v1/projects/sample/mcp-servers/claude/logins/${other}/callback`, { callbackUrl: 'http://localhost:1/callback?code=1' }], ['DELETE', `/v1/projects/sample/mcp-servers/claude/logins/${other}`],
     ['GET', `/v1/tasks/${id}/resume`], ['GET', `/v1/tasks/${id}/diff`], ['GET', `/v1/tasks/${id}/files`], ['GET', `/v1/tasks/${id}/turn-changes`],
     ['GET', `/v1/tasks/${id}/git/status`], ['GET', `/v1/tasks/${id}/ports`], ['GET', '/v1/projects/sample/git/status'], ['GET', '/v1/projects/sample/git/branches'],
     ['GET', '/v1/projects/sample/ports'], ['GET', '/v1/projects/sample/repository-identity'], ['GET', '/v1/projects/sample/command-catalog/claude'],
@@ -320,6 +323,7 @@ test('a held lease refuses every unclassified route with busy while storage read
     [`/v1/tasks/${id}/artifacts/${other}/content`, 404], ['/v1/thread-metadata', 200], [`/v1/tasks/${id}/thread-metadata`, 200],
     [`/v1/attachments/${attachment}`, 200], [`/v1/attachments/${attachment}/content`, 200], [`/v1/attachments/${other}`, 404],
     ['/v1/projects', 200], ['/v1/history/search?q=before', 200], [`/v1/project-clones/${other}`, 404], [`/v1/git-operations/${other}`, 404],
+    [`/v1/projects/sample/mcp-servers/claude/logins/${other}`, 404],
   ];
   for (const [path, status] of reads) assert.equal((await state.call('GET', path)).status, status, path);
   assert.equal(JSON.parse((await state.call('GET', `/v1/tasks/${id}/events?before=1000000`)).body).items.length > 0, true);

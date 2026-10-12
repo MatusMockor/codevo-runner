@@ -37,10 +37,16 @@ const accountUsageRoute = /^\/v1\/account-usage\/(claude|codex)$/;
 const speechRoute = new RegExp(`^/v1/speech/transcriptions\\?language=(?:${SPEECH_LANGUAGES.join('|')})$`);
 const commandCatalogRoute = new RegExp(`^/v1/projects/${projectSegment}/command-catalog/(claude|codex)$`);
 const mcpServersRoute = new RegExp(`^/v1/projects/${projectSegment}/mcp-servers/(claude|codex)$`);
+const mcpServersBase = `/v1/projects/${projectSegment}/mcp-servers/(?:claude|codex)`;
+const mcpServerLogin = `${mcpServersBase}/logins/[A-Za-z0-9-]{8,64}`;
+const mcpServerChangesRoute = new RegExp(`^${mcpServersBase}/changes$`);
+const mcpServerLoginsRoute = new RegExp(`^${mcpServersBase}/logins$`);
+const mcpServerLoginRoute = new RegExp(`^${mcpServerLogin}$`);
+const mcpServerLoginCallbackRoute = new RegExp(`^${mcpServerLogin}/callback$`);
 const maintenanceBase = '/v1/maintenance/';
 const maintenancePrepareRoute = /^\/v1\/maintenance\/prepare$/;
 const maintenanceLeaseRoute = new RegExp(`^/v1/maintenance/${uuid}$`);
-const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, mcpServerChangesRoute, mcpServerLoginsRoute, mcpServerLoginRoute, mcpServerLoginCallbackRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
   { pattern: maintenancePrepareRoute, methods: ['POST'] },
@@ -49,6 +55,10 @@ const routes = [
   { pattern: accountUsageRoute, methods: ['GET'] },
   { pattern: commandCatalogRoute, methods: ['GET'] },
   { pattern: mcpServersRoute, methods: ['GET'] },
+  { pattern: mcpServerChangesRoute, methods: ['POST'] },
+  { pattern: mcpServerLoginsRoute, methods: ['POST'] },
+  { pattern: mcpServerLoginRoute, methods: ['GET', 'DELETE'] },
+  { pattern: mcpServerLoginCallbackRoute, methods: ['POST'] },
   { pattern: projectGitReadRoute, methods: ['GET'] },
   { pattern: projectGitBodyRoute, methods: ['POST'] },
   { pattern: taskGitReadRoute, methods: ['GET'] },
@@ -131,7 +141,7 @@ export class RequestBoundary implements NestMiddleware {
     if (request.method === 'POST' && request.url.startsWith('/v1/tasks?'))
       return send(response, 404, { error: 'not_found' });
     const acceptsBody = request.method === 'PUT' || (request.method === 'PATCH' && managementMetadataRoute.test(request.url)) || (request.method === 'POST' &&
-      (maintenancePrepareRoute.test(request.url) || speechRoute.test(request.url) || turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
+      (maintenancePrepareRoute.test(request.url) || speechRoute.test(request.url) || mcpServerChangesRoute.test(request.url) || mcpServerLoginsRoute.test(request.url) || mcpServerLoginCallbackRoute.test(request.url) || turnFileDiffRoute.test(request.url) || projectGitBodyRoute.test(request.url) || taskGitBodyRoute.test(request.url) || managementOrderRoute.test(request.url) || repositoryBodyRoute.test(request.url) || request.url === directoryRoute || terminalOpenRoute.test(request.url) || terminalActionRoute.test(request.url) || surfaceRoute.test(request.url) || request.url === '/v1/tasks' || request.url === '/v1/projects/clone' || startRoute.test(request.url) || continueRoute.test(request.url) || steerRoute.test(request.url) || pendingRoute.test(request.url) || fileDiffRoute.test(request.url) || artifactRoute.test(request.url) || answerRoute.test(request.url) || approvalAnswerRoute.test(request.url)));
     if (!acceptsBody && hasBody(request)) return send(response, 400, { error: 'body_not_allowed' });
     return next();
   }

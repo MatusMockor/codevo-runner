@@ -21,6 +21,9 @@ const CLAUDE_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', '
   '--settings', '{"disableAllHooks":true}', '--no-session-persistence'] as const;
 const CLAUDE_ENV = { CLAUDE_CODE_AUTO_CONNECT_IDE: '0', CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1' } as const;
 const CODEX_ARGS = ['app-server', '--stdio'] as const;
+export const MCP_PROVIDER_SESSIONS = Object.freeze({
+  claude: Object.freeze({ args: CLAUDE_ARGS, env: CLAUDE_ENV }), codex: Object.freeze({ args: CODEX_ARGS, env: Object.freeze({}) }),
+});
 
 type Write = (value: unknown) => void;
 

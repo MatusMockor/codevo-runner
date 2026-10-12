@@ -21,6 +21,8 @@ const statusCodes: Record<ErrorCode, number> = {
   git_dirty: 409, git_diverged: 409, git_operation_in_progress: 409, git_rejected_non_fast_forward: 409,
   git_rejected: 409, git_nothing_to_commit: 409, git_identity_missing: 409,
   speech_unavailable: 503,
+  mcp_server_exists: 409, mcp_server_not_found: 409, mcp_change_unsupported: 409, mcp_login_unsupported: 409,
+  mcp_login_inactive: 409, mcp_callback_rejected: 409,
 };
 
 export async function handle(response: ServerResponse, action: () => Promise<void>) {

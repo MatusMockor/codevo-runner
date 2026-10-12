@@ -7,6 +7,8 @@ import { CommandCatalogService } from './application/command-catalog-service.js'
 import { CliCommandCatalogReader, type CommandCatalogCliOptions } from './infrastructure/execution/command-catalog.js';
 import { McpServersService } from './application/mcp-servers-service.js';
 import { CliMcpServersReader, type McpServersCliOptions } from './infrastructure/execution/mcp-servers.js';
+import { McpServerManagementService } from './application/mcp-server-management-service.js';
+import { CliMcpServerManager, type McpServerManagementCliOptions } from './infrastructure/execution/mcp-server-management.js';
 import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
@@ -55,6 +57,7 @@ export type RunnerExecutionOptions = Readonly<{
   accountUsageCli?: UsageProcessOptions;
   commandCatalogCli?: CommandCatalogCliOptions;
   mcpServersCli?: McpServersCliOptions;
+  mcpServerManagementCli?: McpServerManagementCliOptions;
   projectsRoot?: string;
   executionTimeoutMs?: number;
   executionConcurrency?: number;
@@ -97,6 +100,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let ports: PortPreviewService | undefined;
     let commandCatalog: CommandCatalogService | undefined;
     let mcpServers: McpServersService | undefined;
+    let mcpServerManagement: McpServerManagementService | undefined;
     try {
       if (options) {
         const configured = new ConfiguredProjectRegistry(options.projects);
@@ -132,6 +136,10 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           mcpServers = new McpServersService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
             new CliMcpServersReader(options.mcpServersCli));
         }
+        if (options.providers === undefined || options.mcpServerManagementCli) {
+          mcpServerManagement = new McpServerManagementService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
+            new CliMcpServerManager(options.mcpServerManagementCli));
+        }
         if (process.platform === 'linux') {
           ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,
             new ProcListeningPortScanner(), { excludedPorts: options.listenPort === undefined ? [] : [options.listenPort] });
@@ -151,12 +159,12 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       } finally { await attachments.close(); }
       throw error;
     }
-    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync, ports, artifacts].filter(source => source !== undefined);
+    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync, ports, artifacts, mcpServerManagement].filter(source => source !== undefined);
     const maintenance = new MaintenanceService(runnerId, lease, new RunnerIdleProbe(repository, sources));
     let closing: Promise<void> | undefined;
     return {
       maintenance,
-      speech, accountUsage, commandCatalog, mcpServers, surfaces, terminals,
+      speech, accountUsage, commandCatalog, mcpServers, mcpServerManagement, surfaces, terminals,
       repositories: options ? new RepositoryLookupService(new CliRepositoryLookup()) : undefined,
       projectDirectories: options ? new ProjectDirectoriesAdapter(options.projectsRoot ?? join(homedir(), 'Developer')) : undefined,
       threadMetadata: new ThreadMetadataService(repository),
@@ -171,13 +179,14 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           const usageClosing = accountUsage.close();
           const catalogClosing = commandCatalog?.close();
           const mcpServersClosing = mcpServers?.close();
+          const mcpServerManagementClosing = mcpServerManagement?.close();
           const speechClosing = speech?.close();
           try {
             try { await executionClosing; }
             finally {
               try { await speechClosing; await usageClosing; }
               finally {
-                try { await catalogClosing; await mcpServersClosing; }
+                try { await catalogClosing; await mcpServersClosing; await mcpServerManagementClosing; }
                 finally {
                   try { await terminals?.close(); }
                   finally {

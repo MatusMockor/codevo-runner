@@ -1350,6 +1350,104 @@ arrived. At most two checks run runner-wide and a further request is refused
 immediately with 503 `busy`. The whole provider process tree is killed when the
 check completes, fails, times out, the client disconnects or the runner shuts down.
 
+## MCP server management
+
+Clients announcing `mcpServerManagement` in `X-Codevo-Client-Capabilities` discover
+the optional `mcpServerManagement` capability, true under the same condition as
+`mcpServers`; otherwise it is false and every route below returns 404.
+Authentication, runner identity and exact-path rules match the MCP server status
+route. `:provider` is `claude` or `codex`; `:loginId` matches `[A-Za-z0-9-]{8,64}`.
+
+| Route | Body | 200 response |
+| --- | --- | --- |
+| `POST /v1/projects/:projectId/mcp-servers/:provider/changes` | `{change}`, at most 96 KiB | `{version:1}` |
+| `POST /v1/projects/:projectId/mcp-servers/:provider/logins` | `{name,mode}`, at most 1024 bytes | `{version:1,step}` |
+| `GET /v1/projects/:projectId/mcp-servers/:provider/logins/:loginId` | none | `{version:1,state}` |
+| `POST /v1/projects/:projectId/mcp-servers/:provider/logins/:loginId/callback` | `{callbackUrl}`, at most 16 KiB | `{version:1}` |
+| `DELETE /v1/projects/:projectId/mcp-servers/:provider/logins/:loginId` | none | `{version:1}` |
+
+Bodies are `application/json` objects with exactly the listed fields; every nested
+object is closed as well and every limit is checked before a checkout is validated
+or a provider starts.
+
+| Value | Shape |
+| --- | --- |
+| `change` | `{kind:"add",name,scope,launch}`, `{kind:"remove",name,scope}` or `{kind:"signOut",name}` |
+| `launch` | `{kind:"http",url}`, `{kind:"sse",url}` or `{kind:"stdio",command,args}` |
+| `scope` | `user`, `project` or `local` |
+| `mode` | `signIn` or `signInAgain` |
+| `step` | `{kind:"completed"}`, `{kind:"finishInBrowser",authorizationUrl}` or `{kind:"awaitingCallback",loginId,authorizationUrl,delivery:"paste"}` |
+| `state` | `pending`, `succeeded` or `failed` |
+
+An add or remove `name` matches `^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$`; a sign-out or
+login `name` follows the status name rule. `url` is an `http` or `https` URL of at
+most 2048 bytes without credentials, whitespace or control characters. `command` is
+1 to 1024 bytes and `args` holds at most 32 values of at most 1024 bytes each, all
+without control characters; they are passed as argv and never through a shell.
+`callbackUrl` is at most 8192 bytes, `http`, on host `localhost` or `127.0.0.1`,
+with a `code` or `error` query parameter. Codex accepts only scope `user` and no
+`sse`; Claude Code adds only to `user` or `local`. A valid change the provider
+cannot perform is 409 `mcp_change_unsupported`.
+
+Changes run in the registered checkout with the executable, environment allowlist
+and pinned directory of the status check, bounded to 5 seconds of checkout
+validation and 20 seconds of provider time; one change runs at a time and a further
+one is 503 `busy`. Claude Code adds and removes with `claude mcp add --scope <s>
+--transport <t> -- <name> <url | command args...>` and `claude mcp remove --scope
+<s> -- <name>`, and signs out with the control request `mcp_clear_auth` in a status
+session. Codex adds through `codex app-server` (`config/read`, then one
+`config/batchWrite` replace edit of `mcp_servers.<name>` when the name is absent
+from the effective configuration), removes with `codex mcp remove -- <name>` and
+signs out with `codex mcp logout -- <name>`.
+
+A login starts within 25 seconds. Claude Code receives `mcp_clear_auth` first for
+`signInAgain`, then `mcp_authenticate`; Codex runs `codex mcp logout -- <name>` first
+for `signInAgain` (its failure is tolerated), then `mcpServer/oauth/login` with a
+300 second timeout. `completed` and `finishInBrowser` keep no session and the
+provider is stopped before the response. `awaitingCallback` keeps the provider
+process alive: Claude Code is asked `mcp_status` every 1.5 seconds until the server
+is `connected` (`succeeded`) or, after an accepted callback, `failed`; Codex is
+awaited for `mcpServer/oauthLogin/completed` of that server and login. The browser
+runs on another machine, so `delivery` is always `paste`: the client posts the
+address the browser ended on. Claude Code receives it through
+`mcp_oauth_callback_url`. For Codex the runner issues exactly one `GET
+http://127.0.0.1:<port><path>?<pasted query>` where port and path come from the
+`redirect_uri` of the authorization URL of that session and must equal those of the
+pasted address; the request is bounded to 10 seconds, follows no redirect and its
+response body is discarded. Only a completely received 2xx answer of at most 65,536
+body bytes accepts the callback; a timeout, an oversized, stalled or cut-short
+answer rejects it. The request is closed at once when its login is cancelled,
+replaced, past its deadline or the runner shuts down, and that callback is answered
+409 `mcp_login_inactive` (503 `storage_unavailable` on shutdown).
+
+At most one login is active per runner: starting one cancels and reaps the previous
+one first, and a start replaced meanwhile is 409 `mcp_login_inactive`. A login has
+a hard deadline of 5 minutes. A finished login reports `succeeded` or `failed` for
+60 seconds and is then forgotten; at most 16 finished logins are remembered. `GET`
+and `callback` for an unknown, forgotten or cancelled login, any use of a login
+under another project or provider, and a callback for a finished login are 409
+`mcp_login_inactive`. `DELETE` reaps the provider, forgets the login at once and
+answers `{version:1}` for an unknown login as well. The whole provider process tree
+is killed on completion, failure, deadline, cancel, replacement, a client that
+disconnects while the login starts, and runner shutdown. Sessions exist in memory
+only. Authorization and callback addresses, codes, states and tokens are never
+logged or persisted and appear only in `authorizationUrl`.
+
+| Status and error | Cause |
+| --- | --- |
+| 400 `invalid_input` | Invalid JSON, an unknown or missing field, or a value outside its limit |
+| 415 `unsupported_media` | Body that is not `application/json`, or any `Content-Encoding` |
+| 413 `too_large` | Body above the route limit |
+| 404 `not_found` | Unknown project, provider or route, or management not enabled |
+| 409 `mcp_server_exists` | Add of a name that is already configured |
+| 409 `mcp_server_not_found` | Remove, sign-out or login of a name the provider does not know |
+| 409 `mcp_change_unsupported` | The provider cannot perform this change for this server |
+| 409 `mcp_login_unsupported` | The provider refused to start a sign-in for this server |
+| 409 `mcp_login_inactive` | The login is unknown, forgotten, finished, replaced or bound elsewhere |
+| 409 `mcp_callback_rejected` | The provider did not accept the pasted address |
+| 503 `busy` | A change or a callback delivery is already running, or a maintenance lease is held |
+| 503 `storage_unavailable` | Checkout validation, the provider, a timeout or an unusable reply failed, or the runner is closing |
+
 ## Speech transcription
 
 Optional. The runner forwards one short audio clip to a speech-to-text HTTP sidecar
@@ -1437,8 +1535,9 @@ the SQLite schema. Both routes require bearer authentication and the exact
 below) is being handled, no task is `queued` or `running`, no project clone is
 `queued` or `running`, no pending message is `queued` (a paused queue still holds
 queued messages), no execution or clone worker is active, no terminal process is
-running, no Git operation is in flight, and no port scan or artifact capture is
-still resolving after its request or turn ended. The fence is taken before storage
+running, no Git operation is in flight, no port scan or artifact capture is
+still resolving after its request or turn ended, and no MCP server change or login
+still owns a provider process. The fence is taken before storage
 is read and dropped again when the runner turns out to be busy. `expiresInMs` is the integer 30000; the lease
 expires on its own 30 seconds after the last successful `prepare`. Calling `prepare`
 again with the lease id that is currently held renews it for another 30 seconds
@@ -1468,7 +1567,7 @@ handler settles, whether or not the client is still connected, so `prepare` answ
 | --- | --- |
 | Discovery | `GET /healthz`, `GET /v1/runner` |
 | Maintenance | `POST /v1/maintenance/prepare`, `DELETE /v1/maintenance/:leaseId` |
-| Storage or memory reads | `GET /v1/tasks`, `GET /v1/tasks/:id`, `GET /v1/tasks/:id/events`, `GET /v1/tasks/:id/pending`, `GET /v1/tasks/:id/questions`, `GET /v1/tasks/:id/approvals`, `GET /v1/tasks/:id/artifacts`, `GET /v1/tasks/:id/artifacts/:id/content`, `GET /v1/tasks/:id/thread-metadata`, `GET /v1/thread-metadata`, `GET /v1/attachments/:id`, `GET /v1/attachments/:id/content`, `GET /v1/project-clones/:id`, `GET /v1/projects`, `GET /v1/history/search`, `GET /v1/git-operations/:id` |
+| Storage or memory reads | `GET /v1/tasks`, `GET /v1/tasks/:id`, `GET /v1/tasks/:id/events`, `GET /v1/tasks/:id/pending`, `GET /v1/tasks/:id/questions`, `GET /v1/tasks/:id/approvals`, `GET /v1/tasks/:id/artifacts`, `GET /v1/tasks/:id/artifacts/:id/content`, `GET /v1/tasks/:id/thread-metadata`, `GET /v1/thread-metadata`, `GET /v1/attachments/:id`, `GET /v1/attachments/:id/content`, `GET /v1/project-clones/:id`, `GET /v1/projects`, `GET /v1/history/search`, `GET /v1/git-operations/:id`, `GET /v1/projects/:projectId/mcp-servers/:provider/logins/:loginId` |
 
 Everything else is fenced, including every other `GET`: reads that start a Git,
 provider or helper process (task resume state, diff, files, turn changes, Git status

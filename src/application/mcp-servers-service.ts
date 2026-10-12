@@ -18,6 +18,32 @@ export type McpServersPolicy = Readonly<{ concurrentProbes: number; checkoutMs: 
 export const MCP_SERVERS_POLICY: McpServersPolicy = Object.freeze({ concurrentProbes: 2, checkoutMs: 5_000 });
 export type McpServersOptions = Readonly<{ policy?: Partial<McpServersPolicy> }>;
 
+export async function mcpServersProject(projects: Pick<ProjectRegistry, 'get'>, projectId: string): Promise<RegisteredProject> {
+  if (!validProjectId(projectId)) throw new RunnerError('not_found');
+  try { return await projects.get(projectId); }
+  catch (error) {
+    if (error instanceof RunnerError && error.code === 'not_found') throw error;
+    throw new RunnerError('storage_unavailable');
+  }
+}
+
+export async function mcpServersCheckout(workspaces: Pick<GitWorkspaces, 'checkout'>, project: RegisteredProject, signal: AbortSignal,
+  checkoutMs: number): Promise<McpServersWorkdir> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), checkoutMs);
+  const bounded = AbortSignal.any([signal, deadline.signal]);
+  try {
+    const workdir = await new Promise<McpServersWorkdir>((resolve, reject) => {
+      const abandon = () => reject(new RunnerError('storage_unavailable'));
+      if (bounded.aborted) return abandon();
+      bounded.addEventListener('abort', abandon, { once: true });
+      workspaces.checkout(project, bounded).then(resolve, reject);
+    });
+    bounded.throwIfAborted();
+    return workdir;
+  } finally { clearTimeout(timer); }
+}
+
 export class McpServersService implements McpServersApplication {
   private readonly probes = new Set<Promise<McpServers>>();
   private readonly cancellation = new AbortController();
@@ -34,7 +60,7 @@ export class McpServersService implements McpServersApplication {
 
   async read(projectId: string, provider: McpServersProvider, disconnected: AbortSignal): Promise<McpServers> {
     this.assertOpen(disconnected);
-    const project = await this.project(projectId);
+    const project = await mcpServersProject(this.projects, projectId);
     this.assertOpen(disconnected);
     if (this.probes.size >= this.policy.concurrentProbes) throw new RunnerError('busy');
     const probe = this.probe(project, provider, AbortSignal.any([this.cancellation.signal, disconnected]));
@@ -53,33 +79,8 @@ export class McpServersService implements McpServersApplication {
     if (this.cancellation.signal.aborted || disconnected.aborted) throw new RunnerError('storage_unavailable');
   }
 
-  private async project(projectId: string): Promise<RegisteredProject> {
-    if (!validProjectId(projectId)) throw new RunnerError('not_found');
-    try { return await this.projects.get(projectId); }
-    catch (error) {
-      if (error instanceof RunnerError && error.code === 'not_found') throw error;
-      throw new RunnerError('storage_unavailable');
-    }
-  }
-
-  private async checkout(project: RegisteredProject, signal: AbortSignal): Promise<McpServersWorkdir> {
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), this.policy.checkoutMs);
-    const bounded = AbortSignal.any([signal, deadline.signal]);
-    try {
-      const workdir = await new Promise<McpServersWorkdir>((resolve, reject) => {
-        const abandon = () => reject(new RunnerError('storage_unavailable'));
-        if (bounded.aborted) return abandon();
-        bounded.addEventListener('abort', abandon, { once: true });
-        this.workspaces.checkout(project, bounded).then(resolve, reject);
-      });
-      bounded.throwIfAborted();
-      return workdir;
-    } finally { clearTimeout(timer); }
-  }
-
   private async probe(project: RegisteredProject, provider: McpServersProvider, signal: AbortSignal): Promise<McpServers> {
-    const workdir = await this.checkout(project, signal);
+    const workdir = await mcpServersCheckout(this.workspaces, project, signal, this.policy.checkoutMs);
     signal.throwIfAborted();
     const snapshot = validateMcpServers(await this.reader.read(provider, workdir, signal));
     if (signal.aborted || snapshot.provider !== provider) throw new RunnerError('storage_unavailable');
