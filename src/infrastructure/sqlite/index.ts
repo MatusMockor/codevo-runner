@@ -18,7 +18,9 @@ import type { RunnerActivity } from '../../domain/maintenance.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import type { CloneRepository } from '../../application/clone-ports.js';
 import type { CloneInput, CloneJob, StoredClone } from '../../domain/project-clone.js';
-import type { RegisteredProject } from '../../domain/execution.js';
+import type { ProjectSummary, RegisteredProject } from '../../domain/execution.js';
+import type { ProjectRegistrationRepository } from '../../application/project-registration-ports.js';
+import type { ProjectRegistration } from '../../domain/project-registration.js';
 import type { ExecutionRepository } from '../../application/execution-ports.js';
 import type { GitActivity } from '../../application/git-sync-ports.js';
 import type { StartBase } from '../../domain/git-sync.js';
@@ -28,7 +30,7 @@ import type { RunnerRepository } from '../../application/ports.js';
 import { RunnerError, type Attachment, type CreateTask, type EventPage, type Page, type Task, type TaskEvent } from '../../domain/contracts.js';
 import type { Operation, Reply } from './protocol.js';
 type Pending = { resolve(value: unknown): void; reject(error: RunnerError): void; timer: NodeJS.Timeout; operation?: Operation };
-class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository, ApprovalRepository, RunnerActivityRepository {
+class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerRepository, ExecutionRepository, CloneRepository, ProjectRegistrationRepository, HistorySearchRepository, ArtifactRepository, QuestionRepository, ApprovalRepository, RunnerActivityRepository {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private closed = false;
@@ -130,6 +132,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   finishClone(id: string, status: 'succeeded' | 'failed' | 'interrupted' | 'cancelled', project: RegisteredProject | null, error: string | null): Promise<CloneJob> { return this.call({ method: 'finishClone', args: [id, status, project, error] }); }
   interruptClones(): Promise<void> { return this.call({ method: 'interruptClones', args: [] }); }
   listManagedProjects(): Promise<readonly RegisteredProject[]> { return this.call({ method: 'listManagedProjects', args: [] }); }
+  registerManagedProject(project: RegisteredProject, configured: readonly ProjectSummary[], projectsRoot: string): Promise<ProjectRegistration> { return this.call({ method: 'registerManagedProject', args: [project, configured, projectsRoot] }); }
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     if (this.closed) return this.worker.terminate().then(() => undefined);
@@ -138,7 +141,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
     return this.closePromise;
   }
 }
-export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository & ApprovalRepository & RunnerActivityRepository & Required<Pick<ExecutionRepository, 'getTaskApprovals'>>> {
+export async function openSqliteRepository(dataDir: string, runnerId: string, changed: () => void = () => {}): Promise<GitActivity & Required<Pick<ExecutionRepository, 'getTaskGitBase'>> & ThreadMetadataRepository & RunnerRepository & ExecutionRepository & CloneRepository & ProjectRegistrationRepository & HistorySearchRepository & ArtifactRepository & QuestionRepository & ApprovalRepository & RunnerActivityRepository & Required<Pick<ExecutionRepository, 'getTaskApprovals'>>> {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { dataDir, runnerId } });
   const repository = new SqliteRepository(worker, changed);
   try { await repository.ready; return repository; }
@@ -160,6 +163,7 @@ function changesInventory(operation: Operation, value: unknown): boolean {
       return true;
     case 'claimClone': case 'claimNextTask': return value !== null;
     case 'timeoutApproval': return value === true;
+    case 'registerManagedProject': return registersProject(value as ProjectRegistration);
     case 'getThreadMetadata': case 'listThreadMetadata':
     case 'findSteer': case 'findPendingSteer':
     case 'listQuestions':
@@ -170,4 +174,8 @@ function changesInventory(operation: Operation, value: unknown): boolean {
     case 'putAttachment': case 'getAttachment': case 'close': case 'searchHistory':
     case 'getTaskGitBase': case 'conversationActive': case 'inPlaceActive': case 'runnerActivity': return false;
   }
+}
+
+function registersProject(result: ProjectRegistration): boolean {
+  return result.status === 'registered' && result.created;
 }

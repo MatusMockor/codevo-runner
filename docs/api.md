@@ -550,6 +550,7 @@ Discovery advertises `projectManagement` and `threadManagement` only when matchi
 | `POST /v1/repositories/lookup` | `{provider,host,path}` → exact repository or typed failure |
 | `POST /v1/repositories/search` | `{provider,host,query,page}` → `{status:"ok",repositories,nextPage,truncated}` or typed failure |
 | `POST /v1/project-directories` | `{path?}` → `{path,parentPath,entries:[{name,path}],truncated}` |
+| `POST /v1/projects/register` | `{path,name}` → `{status:"registered",project:{id,name},created}` or `{status:"rejected",reason}` |
 | `GET /v1/tasks/:id/thread-metadata` | Canonical conversation metadata, defaults have revision zero |
 | `PATCH /v1/tasks/:id/thread-metadata` | `{expectedRevision,...changedFields}` → committed metadata; stale revision returns HTTP 409 |
 | `GET /v1/thread-metadata?after=:id` | `{items,nextAfter}`; optional cursor, 100 persisted records per page |
@@ -755,8 +756,8 @@ or error name, and failure counts; none are stored after the turn is cancelled.
 
 The current JSON reader accepts at most 4 MiB (4,194,304 bytes), including for task
 creation, continuation, steering, pending messages and surface/terminal commands.
-Repository lookup/search and thread metadata/order use 4 KiB, project directories
-and turn-file-diff use 8 KiB, Git fetch/update/push use 1 KiB, and Git commit uses
+Repository lookup/search and thread metadata/order use 4 KiB, project directories,
+project registration and turn-file-diff use 8 KiB, Git fetch/update/push use 1 KiB, and Git commit uses
 32 KiB. JSON requires `application/json`, optionally `; charset=utf-8`, and rejects
 Content-Encoding with 415 `unsupported_media`. Invalid JSON or UTF-8 is 400
 `invalid_input`; exceeding the applicable body limit is 413 `too_large`.
@@ -781,7 +782,7 @@ HTTP route it must equal the runner identity, otherwise 409
 `runner_identity_mismatch`; duplicate identity headers are 400
 `duplicate_runner_identity`. It is required on account usage, Git sync, port
 preview, turn changes, repository lookup/hosts/search, project directories,
-maintenance and thread metadata/order routes (including the metadata list); missing identity there
+project registration, maintenance and thread metadata/order routes (including the metadata list); missing identity there
 is 409 `runner_identity_mismatch`. Repository identity also requires it, but its
 controller returns 409 `conflict` when it is missing. Discovery accepts an optional
 matching identity. Disabled services return 404 `not_found` on their routes.
@@ -1154,6 +1155,31 @@ concurrent listings cause 503 `busy`, and lost directory ownership returns 503
 `storage_unavailable`. The
 controller aborts after ten seconds; unclassified filesystem/abort errors return
 500 `internal_error`. It requires runner identity and has no capability-header gate.
+
+`POST /v1/projects/register` registers a folder that already exists on the server
+and returns HTTP 200. Its closed body is exactly `{ path, name }`: `path` follows
+the project-directories rules and `name` matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`.
+Any other shape is 400 `invalid_input`, as are missing, outside-root, non-directory,
+unreadable and symlink-alias selections. The response never contains a filesystem path:
+
+- `{ status: "registered", project: { id, name }, created }`. `created` is false
+  when that exact folder already belongs to a configured or managed project; that
+  project is returned whatever name was requested.
+- `{ status: "rejected", reason }`, where `reason` is `not_allowed` (the projects
+  root itself, the runner data directory and anything beneath it, or the
+  destination of a clone that is queued, running or still removing its folder
+  after cancellation or failure),
+  `not_git_root` (`git rev-parse --show-toplevel` does not resolve to that exact
+  folder), `name_taken` (the name is the id or name of another configured or
+  managed project, or of a queued/running clone) or `limit_reached` (the shared
+  32-slot limit).
+
+A new registration is stored as `{ id: name, name, path }` beside cloned projects,
+and its conflict and quota checks commit with the insert. Four concurrent
+registrations cause 503 `busy`, as do a ten-second deadline, runner shutdown and a
+held maintenance lease; lost directory ownership returns 503 `storage_unavailable`.
+It requires runner identity, is 404 `not_found` when execution is disabled and has
+no capability-header gate.
 
 All thread metadata/order successes are HTTP 200. `expectedRevision` is a
 nonnegative safe integer. A non-null title must be nonblank without ASCII controls

@@ -32,6 +32,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectCloneService, ManagedProjectRegistry } from './application/project-clone-service.js';
 import { GitCloneAdapter } from './infrastructure/projects/clone.js';
+import { ProjectRegistrationService } from './application/project-registration-service.js';
+import { GitProjectFolderInspector } from './infrastructure/projects/project-folder.js';
 import { TaskService } from './application/task-service.js';
 import { openSqliteRepository } from './infrastructure/sqlite/index.js';
 import { createAttachmentStore } from './infrastructure/files/index.js';
@@ -96,6 +98,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
     let terminals: TerminalService | undefined;
     let artifacts: ArtifactService | undefined;
     let clones: ProjectCloneService | undefined;
+    let projectRegistration: ProjectRegistrationService | undefined;
     let gitSync: GitSyncService | undefined;
     let ports: PortPreviewService | undefined;
     let commandCatalog: CommandCatalogService | undefined;
@@ -106,6 +109,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         const configured = new ConfiguredProjectRegistry(options.projects);
         clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured, lease);
         await clones.initialize();
+        projectRegistration = new ProjectRegistrationService(repository, new GitProjectFolderInspector(options.projectsRoot ?? join(homedir(), 'Developer'), dataDir), configured, clones);
         const surfaceResolver = new RegisteredSurfaceWorkspaceResolver(
           new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), repository, repository);
         surfaces = new SurfaceService(surfaceResolver, new FileSystemSurfaceOperations());
@@ -159,7 +163,7 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       } finally { await attachments.close(); }
       throw error;
     }
-    const sources: readonly WorkSource[] = [execution, clones, terminals, gitSync, ports, artifacts, mcpServerManagement].filter(source => source !== undefined);
+    const sources: readonly WorkSource[] = [execution, clones, projectRegistration, terminals, gitSync, ports, artifacts, mcpServerManagement].filter(source => source !== undefined);
     const maintenance = new MaintenanceService(runnerId, lease, new RunnerIdleProbe(repository, sources));
     let closing: Promise<void> | undefined;
     return {
@@ -170,12 +174,13 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
       threadMetadata: new ThreadMetadataService(repository),
       questions: execution ? questions : undefined,
       approvals: execution ? approvals : undefined,
-      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, changes, artifacts, gitSync, ports,
+      historySearch: new HistorySearchService(repository), tasks: new TaskService(repository), attachments, execution, clones, projectRegistration, changes, artifacts, gitSync, ports,
       close(): Promise<void> {
         closing ??= (async () => {
           // Fence execution synchronously before the first await; usage and catalog
           // probes own separate cancellations and must not reopen the admission window.
           const executionClosing = execution?.close();
+          const registrationClosing = projectRegistration?.close();
           const usageClosing = accountUsage.close();
           const catalogClosing = commandCatalog?.close();
           const mcpServersClosing = mcpServers?.close();
@@ -191,7 +196,10 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
                   try { await terminals?.close(); }
                   finally {
                     try { await clones?.close(); }
-                    finally { await gitSync?.close(); }
+                    finally {
+                      try { await registrationClosing; }
+                      finally { await gitSync?.close(); }
+                    }
                   }
                 }
               }

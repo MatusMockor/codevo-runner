@@ -19,7 +19,7 @@ test('management endpoints reject unauthenticated, foreign and missing owners be
   const routes = [
     [`/v1/tasks/${taskId}/turn-changes`, 'GET'], [`/v1/tasks/${taskId}/turn-file-diff`, 'POST'],
     ['/v1/repositories/hosts', 'GET'], ['/v1/repositories/lookup', 'POST'], ['/v1/repositories/search', 'POST'],
-    ['/v1/project-directories', 'POST'], ['/v1/thread-metadata', 'GET'], [`/v1/thread-metadata?after=${taskId}`, 'GET'],
+    ['/v1/project-directories', 'POST'], ['/v1/projects/register', 'POST'], ['/v1/thread-metadata', 'GET'], [`/v1/thread-metadata?after=${taskId}`, 'GET'],
     [`/v1/tasks/${taskId}/thread-metadata`, 'GET'], [`/v1/tasks/${taskId}/thread-metadata`, 'PATCH'], [`/v1/tasks/${taskId}/thread-order`, 'POST'],
   ];
   for (const [path, method] of routes) {

@@ -13,6 +13,9 @@ export type PreparedClone = Readonly<{ project: RegisteredProject; rollback(): P
 export interface ProjectCloner {
   clone(input: CloneInput, jobId: string, signal: AbortSignal): Promise<PreparedClone>;
 }
+export interface CloneDestinations {
+  reserves(path: string, projectsRoot: string): boolean;
+}
 export interface CloneApplication {
   create(value: unknown): Promise<CloneJob>;
   get(id: string): Promise<CloneJob>;

@@ -35,3 +35,8 @@ export function parseCloneInput(value: unknown): CloneInput {
 export function validProjectDirectoryPath(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('/') && value.length <= 4096 && new TextEncoder().encode(value).length <= 4096 && !/[\x00-\x1f\x7f-\x9f]/.test(value) && !value.split('/').includes('..');
 }
+
+/** Equals the folder the clone adapter creates: the canonical parent joined with the name. */
+export function cloneDestination(input: Pick<CloneInput, 'name' | 'parentPath'>, projectsRoot: string): string {
+  return [...(input.parentPath ?? projectsRoot).split('/'), input.name].filter(part => part && part !== '.').map(part => `/${part}`).join('');
+}

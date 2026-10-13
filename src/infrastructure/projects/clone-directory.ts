@@ -31,6 +31,6 @@ export async function retainCloneDirectory(configuredRoot: string, selected?: st
     };
     if (!await owned()) throw new RunnerError('storage_unavailable');
     const anchor = process.platform === 'linux' ? `/proc/${process.pid}/fd/${handle.fd}` : path;
-    return { root, path, anchor, owned, close: () => handle.close() };
+    return { root, path, anchor, identity: { dev: identity.dev, ino: identity.ino }, owned, close: () => handle.close() };
   } catch (error) { await handle.close(); throw error; }
 }

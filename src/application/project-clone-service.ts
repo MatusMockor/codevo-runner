@@ -1,12 +1,12 @@
-import type { CloneApplication, CloneRepository, ProjectCloner, PreparedClone } from './clone-ports.js';
+import type { CloneApplication, CloneDestinations, CloneRepository, ProjectCloner, PreparedClone } from './clone-ports.js';
 import type { ProjectRegistry, WorkAdmission, WorkSource } from './execution-ports.js';
 import { isId, RunnerError } from '../domain/contracts.js';
-import { parseCloneInput } from '../domain/project-clone.js';
+import { cloneDestination, parseCloneInput, type CloneInput } from '../domain/project-clone.js';
 
 /** A single owned worker survives HTTP/SSH disconnects; SQLite owns durable state. */
-export class ProjectCloneService implements CloneApplication, WorkSource {
+export class ProjectCloneService implements CloneApplication, CloneDestinations, WorkSource {
   private worker?: Promise<void>;
-  private active?: { id: string; controller: AbortController };
+  private active?: { id: string; controller: AbortController; input: CloneInput };
   private closed = false;
   private admissions = 0;
   private timer?: NodeJS.Timeout;
@@ -14,6 +14,10 @@ export class ProjectCloneService implements CloneApplication, WorkSource {
   constructor(private readonly repository: CloneRepository, private readonly cloner: ProjectCloner,
     private readonly configured: ProjectRegistry, private readonly admission?: WorkAdmission) {}
   get working(): boolean { return this.active !== undefined || this.admissions > 0; }
+  // A cancelled or failed job is terminal in SQLite while its folder is still being removed.
+  reserves(path: string, projectsRoot: string): boolean {
+    return this.active !== undefined && cloneDestination(this.active.input, projectsRoot) === path;
+  }
   async initialize() {
     await this.repository.interruptClones();
     this.timer = setInterval(() => this.wake(), 500);
@@ -56,7 +60,7 @@ export class ProjectCloneService implements CloneApplication, WorkSource {
       const next = await this.repository.claimClone();
       if (!next) return;
       const controller = new AbortController();
-      this.active = { id: next.job.id, controller };
+      this.active = { id: next.job.id, controller, input: next.input };
       if (this.closed || (await this.repository.getClone(next.job.id)).status !== 'running') controller.abort();
       let prepared: PreparedClone | undefined;
       let published = false;

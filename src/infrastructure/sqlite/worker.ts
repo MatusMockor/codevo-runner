@@ -55,6 +55,7 @@ try {
         case 'finishClone': value = db.clones.finishClone(...request.args); break;
         case 'interruptClones': value = db.clones.interruptClones(); break;
         case 'listManagedProjects': value = db.clones.listManagedProjects(); break;
+        case 'registerManagedProject': value = db.clones.registerManagedProject(...request.args); break;
         case 'getTaskSession': value = db.getTaskSession(...request.args); break;
         case 'getResumeState': value = db.getResumeState(...request.args); break;
         case 'findContinuation': value = db.findContinuation(...request.args); break;

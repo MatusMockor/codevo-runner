@@ -14,6 +14,7 @@ import type { ArtifactApplication } from '../application/artifact-ports.js';
 import type { HistorySearchApplication } from '../application/history-search.js';
 import type { RunnerChangeSource } from '../application/runner-changes.js';
 import type { CloneApplication } from '../application/clone-ports.js';
+import type { ProjectRegistrationApplication } from '../application/project-registration-ports.js';
 import type { AttachmentStore, TaskApplication } from '../application/ports.js';
 import type { ExecutionApplication } from '../application/execution-ports.js';
 import type { GitSyncApplication } from '../application/git-sync-ports.js';
@@ -37,6 +38,7 @@ export interface RunnerServices {
   readonly historySearch?: HistorySearchApplication;
   readonly changes?: RunnerChangeSource;
   readonly clones?: CloneApplication;
+  readonly projectRegistration?: ProjectRegistrationApplication;
   readonly tasks: TaskApplication;
   readonly attachments: AttachmentStore;
   readonly execution?: ExecutionApplication;

@@ -294,7 +294,7 @@ test('a held lease refuses every unclassified route with busy while storage read
     ['POST', `/v1/tasks/${id}/git/push`, { idempotencyKey: randomUUID(), target: 'thread-branch' }],
     ['POST', '/v1/projects/sample/git/fetch', { idempotencyKey: randomUUID() }], ['POST', '/v1/projects/sample/git/update', { idempotencyKey: randomUUID() }],
     ['POST', '/v1/projects/clone', { idempotencyKey: randomUUID(), url: 'git@example.invalid:owner/project.git', name: 'project' }],
-    ['POST', `/v1/project-clones/${other}/cancel`], ['POST', '/v1/project-directories', { path: '/' }],
+    ['POST', `/v1/project-clones/${other}/cancel`], ['POST', '/v1/project-directories', { path: '/' }], ['POST', '/v1/projects/register', { path: '/', name: 'project' }],
     ['POST', '/v1/repositories/lookup', { query: 'owner/project' }], ['POST', '/v1/repositories/search', { query: 'project' }],
     ['POST', '/v1/projects/sample/surface/write', { path: 'README.md', text: 'changed\n' }], ['POST', '/v1/projects/sample/surface/read', { path: 'README.md' }],
     ['POST', '/v1/projects/sample/terminals', { cols: 80, rows: 24 }], ['POST', `/v1/projects/sample/terminals/${other}/input`, { data: 'ls\r' }],

@@ -11,6 +11,7 @@ import { PortPreviewController } from './transport/port-preview-controller.js';
 import { RepositoryLookupController } from './transport/repository-lookup-controller.js';
 import { ThreadMetadataController } from './transport/thread-metadata-controller.js';
 import { ProjectDirectoriesController } from './transport/project-directories-controller.js';
+import { ProjectRegistrationController } from './transport/project-registration-controller.js';
 import { TerminalController } from './transport/terminal-controller.js';
 import { SurfaceController } from './transport/surface-controller.js';
 import { QuestionController } from './transport/question-controller.js';
@@ -149,7 +150,7 @@ export async function createRunnerApplication(
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
-    controllers: [RunnerController, ...(services ? [SpeechController, AccountUsageController, CommandCatalogController, McpServersController, McpServerManagementController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, TerminalController, SurfaceController, QuestionController, ApprovalController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController, MaintenanceController] : [])],
+    controllers: [RunnerController, ...(services ? [SpeechController, AccountUsageController, CommandCatalogController, McpServersController, McpServerManagementController, TurnChangesController, GitSyncController, PortPreviewController, RepositoryLookupController, ThreadMetadataController, ProjectDirectoriesController, ProjectRegistrationController, TerminalController, SurfaceController, QuestionController, ApprovalController, ArtifactController, TaskController, AttachmentController, ProjectController, ProjectCloneController, HistorySearchController, MaintenanceController] : [])],
     providers: [
       RequestBoundary,
       ...(changes ? [{ provide: RunnerChangeTransport, useValue: changes }] : []),

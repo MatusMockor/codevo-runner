@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { RunnerError } from '../../domain/contracts.js';
-import type { RegisteredProject } from '../../domain/execution.js';
-import type { CloneInput, CloneJob, StoredClone } from '../../domain/project-clone.js';
+import type { ProjectSummary, RegisteredProject } from '../../domain/execution.js';
+import { cloneDestination, type CloneInput, type CloneJob, type StoredClone } from '../../domain/project-clone.js';
+import type { ProjectRegistration } from '../../domain/project-registration.js';
 
 export const CLONE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS project_clones (
@@ -32,12 +33,10 @@ export class CloneDatabase {
         if (previous['fingerprint'] !== fingerprint) throw new RunnerError('conflict');
         return JSON.parse(previous['payload'] as string) as CloneJob;
       }
-      if (this.db.prepare("SELECT 1 FROM project_clones WHERE name=? AND status IN ('queued','running')").get(input.name)
-        || this.db.prepare('SELECT 1 FROM managed_projects WHERE name=?').get(input.name)) throw new RunnerError('conflict');
+      if (this.nameTaken(input.name)) throw new RunnerError('conflict');
       const total = Number(this.db.prepare('SELECT count(*) AS n FROM project_clones').get()!['n']);
-      const active = Number(this.db.prepare("SELECT count(*) AS n FROM project_clones WHERE status IN ('queued','running')").get()!['n']);
-      const projects = Number(this.db.prepare('SELECT count(*) AS n FROM managed_projects').get()!['n']);
-      if (total >= 1000 || projects + active >= Math.max(0, Math.min(32, maximumProjects))) throw new RunnerError('quota_exceeded');
+      const active = this.activeClones();
+      if (total >= 1000 || this.full(active, maximumProjects)) throw new RunnerError('quota_exceeded');
       if (active >= 8) throw new RunnerError('busy');
       this.requireCapacity();
       const job: CloneJob = { id: randomUUID(), status: 'queued', project: null, error: null };
@@ -46,6 +45,36 @@ export class CloneDatabase {
       this.requireCapacity();
       return job;
     });
+  }
+  registerManagedProject(project: RegisteredProject, configured: readonly ProjectSummary[], projectsRoot: string): ProjectRegistration {
+    if (project.id !== project.name) throw new RunnerError('invalid_input');
+    return this.transaction(() => {
+      const existing = this.listManagedProjects().find(item => item.path === project.path);
+      if (existing) return { status: 'registered', project: { id: existing.id, name: existing.name }, created: false };
+      if (this.cloneDestination(project.path, projectsRoot)) return { status: 'rejected', reason: 'not_allowed' };
+      if (configured.some(item => item.id === project.name || item.name === project.name) || this.nameTaken(project.name))
+        return { status: 'rejected', reason: 'name_taken' };
+      if (this.full(this.activeClones(), 32 - configured.length)) return { status: 'rejected', reason: 'limit_reached' };
+      this.requireCapacity();
+      this.db.prepare('INSERT INTO managed_projects(id,name,payload) VALUES(?,?,?)').run(project.id, project.name, JSON.stringify(project));
+      return { status: 'registered', project: { id: project.id, name: project.name }, created: true };
+    });
+  }
+  private cloneDestination(path: string, projectsRoot: string): boolean {
+    return this.db.prepare("SELECT input FROM project_clones WHERE status IN ('queued','running')").all()
+      .map(row => JSON.parse(row['input'] as string) as CloneInput)
+      .some(input => cloneDestination(input, projectsRoot) === path);
+  }
+  private nameTaken(name: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM project_clones WHERE name=? AND status IN ('queued','running')").get(name)
+      || this.db.prepare('SELECT 1 FROM managed_projects WHERE id=? OR name=?').get(name, name));
+  }
+  private activeClones(): number {
+    return Number(this.db.prepare("SELECT count(*) AS n FROM project_clones WHERE status IN ('queued','running')").get()!['n']);
+  }
+  private full(active: number, maximumProjects: number): boolean {
+    const projects = Number(this.db.prepare('SELECT count(*) AS n FROM managed_projects').get()!['n']);
+    return projects + active >= Math.max(0, Math.min(32, maximumProjects));
   }
   private save(job: CloneJob): CloneJob {
     this.db.prepare('UPDATE project_clones SET status=?,payload=? WHERE id=?').run(job.status, JSON.stringify(job), job.id);
