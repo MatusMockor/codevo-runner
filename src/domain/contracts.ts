@@ -45,7 +45,7 @@ export type ErrorCode = 'delivery_uncertain' | 'invalid_input' | 'not_found' | '
   'git_remote_unavailable' | 'git_auth_failed' | 'git_timeout' | 'git_no_remote' | 'git_remote_unsupported' |
   'git_branch_not_found' | 'git_detached_head' | 'git_no_upstream' | 'git_dirty' | 'git_diverged' |
   'git_operation_in_progress' | 'git_rejected_non_fast_forward' | 'git_rejected' | 'git_nothing_to_commit' |
-  'git_identity_missing' | 'speech_unavailable' |
+  'git_identity_missing' | 'git_not_repository' | 'speech_unavailable' |
   'mcp_server_exists' | 'mcp_server_not_found' | 'mcp_change_unsupported' | 'mcp_login_unsupported' | 'mcp_login_inactive' | 'mcp_callback_rejected';
 export class RunnerError extends Error {
   constructor(readonly code: ErrorCode) { super(code); this.name = 'RunnerError'; }

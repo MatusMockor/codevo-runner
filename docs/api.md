@@ -15,7 +15,7 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks?after=0` | `{ items, nextCursor }` in ascending creation sequence |
 | `GET /v1/tasks/:id` | Task |
 | `POST /v1/tasks/:id/cancel` | Cancel task; no request body |
-| `GET /v1/projects` | `{ items: [{ id, name }] }`; execution deployment only |
+| `GET /v1/projects` | `{ items: [{ id, name }] }`; execution deployment only. Clients announcing `folderProjects` receive `{ id, name, kind }` items (see [Folder projects](#folder-projects)) |
 | `POST /v1/projects/clone` | Clone job, HTTP 202; body `{ idempotencyKey, url, name, branch?, parentPath? }` |
 | `GET /v1/project-clones/:id` | Clone job |
 | `POST /v1/project-clones/:id/cancel` | Cancel clone job; no request body |
@@ -691,8 +691,10 @@ Operation failures and admission refusals use the closed codes `git_remote_unava
 `git_auth_failed`, `git_timeout`, `git_no_remote`, `git_remote_unsupported`,
 `git_branch_not_found`, `git_detached_head`, `git_no_upstream`, `git_dirty`,
 `git_diverged`, `git_operation_in_progress`, `git_rejected_non_fast_forward`,
-`git_rejected`, `git_nothing_to_commit`, `git_identity_missing`, `busy` and
-`conflict`. As HTTP errors, `git_*` codes and `conflict` are 409 and `busy` is 503.
+`git_rejected`, `git_nothing_to_commit`, `git_identity_missing`,
+`git_not_repository`, `busy` and `conflict`. As HTTP errors, `git_*` codes and
+`conflict` are 409 and `busy` is 503. `git_not_repository` is the answer of every
+route in this section for a [folder project](#folder-projects).
 
 A follow-up turn waits (at most 130 seconds, then fails as busy) for a commit or push
 holding its workspace before the provider starts. Same-uid agents can still change
@@ -809,10 +811,12 @@ currently change server behavior is:
 | `projectManagement` | Adds the boolean `projectManagement` discovery field; true when repository, directory and clone services all exist. |
 | `threadManagement` | Adds the boolean `threadManagement` discovery field; true when thread metadata exists. |
 | `fileAttachments` | Adds the boolean `fileAttachments` discovery field; true when the attachment service exists. |
+| `folderProjects` | Adds the boolean `folderProjects` discovery field; true when project registration and the project list exist. Also admits non-repository folders on `POST /v1/projects/register` and adds `kind` to `GET /v1/projects` items, as described in [Folder projects](#folder-projects). |
 | `subagentLifecycleRetention` | Selects the retained subagent lifecycle shape on task event reads, as described in [Start and observe a task](#start-and-observe-a-task). |
 
-The first seven fields are omitted unless announced and defined in the descriptor.
-These tokens do not gate route access. Other syntactically valid tokens have no
+The first eight fields are omitted unless announced and defined in the descriptor.
+These tokens do not gate route access; `folderProjects` is the only one that also
+changes what two existing routes answer. Other syntactically valid tokens have no
 current effect. In particular, `taskLaunchOptions`, `taskSteering`, `taskIsolation`,
 `instructionSync`, `textAttachments`, `pendingMessages`, `interactiveQuestions`,
 `outputArtifacts`, `subagentTelemetry`, `taskFileDiffs`, `taskContinuation`,
@@ -1241,7 +1245,8 @@ unreadable and symlink-alias selections. The response never contains a filesyste
   destination of a clone that is queued, running or still removing its folder
   after cancellation or failure),
   `not_git_root` (`git rev-parse --show-toplevel` does not resolve to that exact
-  folder), `name_taken` (the name is the id or name of another configured or
+  folder; a client announcing `folderProjects` can register a folder outside any
+  repository instead, see [Folder projects](#folder-projects)), `name_taken` (the name is the id or name of another configured or
   managed project, or of a queued/running clone) or `limit_reached` (the shared
   32-slot limit).
 
@@ -1249,8 +1254,8 @@ A new registration is stored as `{ id: name, name, path }` beside cloned project
 and its conflict and quota checks commit with the insert. Four concurrent
 registrations cause 503 `busy`, as do a ten-second deadline, runner shutdown and a
 held maintenance lease; lost directory ownership returns 503 `storage_unavailable`.
-It requires runner identity, is 404 `not_found` when execution is disabled and has
-no capability-header gate.
+It requires runner identity and is 404 `not_found` when execution is disabled. The
+route itself has no capability-header gate; only `folderProjects` changes its verdict.
 
 All thread metadata/order successes are HTTP 200. `expectedRevision` is a
 nonnegative safe integer. A non-null title must be nonblank without ASCII controls
@@ -1286,6 +1291,94 @@ null error and a kind-specific result:
 Fetch/update/push keys are lowercase UUID v4. These routes require runner identity;
 `gitSync` only gates discovery, not requests. Read successes and commit are HTTP
 200; fetch/update/push admission is 202, including idempotent job retries.
+
+## Folder projects
+
+A folder project is a registered folder that is not a Git repository, for example a
+workspace folder whose children are separate repositories. Threads run in it in
+place only, and every Git-backed feature reports that it is unavailable instead of
+returning empty data. The runner does not discover repositories nested inside it.
+
+Clients opt in by announcing `folderProjects` in `X-Codevo-Client-Capabilities`:
+
+- `GET /v1/runner` adds `folderProjects`, true when project registration and the
+  project list are available.
+- `POST /v1/projects/register` admits a folder that is not a repository. The answer
+  keeps its shape, `{ status: "registered", project: { id, name }, created }`, and
+  carries no kind.
+- `GET /v1/projects` items are exactly `{ id, name, kind }`, where `kind` is
+  `"repository"` or `"folder"`, for configured, cloned and registered projects
+  alike. No other response gains a field; a clone job's `project` stays `{ id, name }`.
+
+A client that does not announce the token receives every response unchanged: a plain
+folder is still rejected with `not_git_root` and list items are `{ id, name }`. A
+folder project registered by another client is still listed and usable.
+
+### Registration verdict
+
+For an announcing client the verdict is decided in this order and fails closed:
+
+1. The projects root, the runner data directory and anything beneath it are
+   `not_allowed`, as before.
+2. `git rev-parse --git-dir` runs in the pinned folder with a C locale, captured
+   stderr and a three-second deadline.
+   - Exit 0: the folder is inside a repository, and `git rev-parse --show-toplevel`
+     runs under the same bounds. The folder is registered as a repository when
+     that resolves to exactly the folder. It is `not_git_root` when it resolves to
+     another directory (a subdirectory) or Git answers that there is no work tree
+     (a bare repository, inside `.git`). Any other outcome of this second command
+     is 503 `storage_unavailable`, as below.
+   - Exit 128 while the folder has a `.git` entry (a broken gitfile or an unusable
+     `.git` directory): `not_git_root`.
+   - Exit 128 with stderr starting `fatal: not a git repository` and no `.git`
+     entry: a folder. A folder that contains the runner data directory is
+     `not_allowed`.
+   - A timeout, a Git that cannot be started, any other exit status or message, or
+     a `.git` entry that cannot be inspected: 503 `storage_unavailable`. Nothing is
+     stored.
+
+Name, quota and clone-reservation rules are the ones of repository registration.
+A folder may contain registered repositories, and a repository may be registered
+beneath a folder project.
+
+The kind is fixed when the project is created: a folder project is stored with
+`kind: "folder"` beside `{ id, name, path }`, and a record without `kind` is a
+repository. Configured projects are always repositories. Registering the same
+folder again returns the existing project with its original kind. A folder project
+that later gains a `.git` (an agent runs `git init`) stays a folder project and the
+runner never runs Git in it; a repository project that loses `.git` fails as before.
+
+### Tasks
+
+`POST /v1/tasks/:id/start` in a folder project requires the task to have been
+created with `isolation: "in-place"` and accepts no `origin-branch` base
+(`checkout-head` is accepted). Anything else, including an omitted isolation, is 400
+`invalid_input` and the task stays a draft; the runner never turns a worktree task
+into an in-place one.
+
+Each turn runs with the folder as its working directory. Continuation, resume
+state, pending messages, steering, instruction sync, artifacts, terminals and port
+preview behave as in an in-place repository thread, and several threads can run in
+one folder project at the same time. The conversation records the folder by path
+and inode: a folder replaced by another directory is 409 `conflict`, as a replaced
+checkout is, and a conversation recorded for the other project kind is 409 `conflict`.
+
+### Git-backed routes
+
+| Routes | Folder project |
+| --- | --- |
+| `GET /v1/projects/:projectId/git/branches`, `GET .../git/status`, `POST .../git/fetch`, `POST .../git/update`, `GET /v1/tasks/:id/git/status`, `POST .../git/commit`, `POST .../git/push` | 409 `git_not_repository` before admission: no operation is created and Git is not started. Request validation still answers 400 first. |
+| `GET /v1/tasks/:id/diff`, `GET /v1/tasks/:id/files`, `POST /v1/tasks/:id/file-diff` | 409 `git_not_repository`, never an empty change list. |
+| `GET /v1/projects/:id/surface/capabilities` | `history` is false; `files` and `terminal` are unchanged. |
+| Surface `tree`, `read`, `write` | Unchanged; they read and write the folder. |
+| Surface `history`, `commit-files`, `commit-diff` | 409 `git_not_repository`. |
+| `GET /v1/projects/:id/repository-identity` | 200 `{ repositoryKey: null }`; Git is not asked. |
+| `GET /v1/tasks/:id/turn-changes` | Nothing is captured for the turn. 200 `{ turnId, state: "unavailable", files: [], truncated: false, reason: "This project is not a Git repository." }`. |
+| `POST /v1/tasks/:id/turn-file-diff` | 404 `not_found`, as for any turn without a retained snapshot. |
+| Command catalog, MCP servers and MCP server management | Unchanged; the provider CLI runs in the pinned folder. |
+
+`git_not_repository` is a closed error code with HTTP 409. It is part of the Git
+sync error code set, so a client validating that set must accept it.
 
 ## Additional pending and artifact errors
 

@@ -37,6 +37,7 @@ import { AttachmentController, ProjectController, ProjectCloneController, TaskCo
 import { clientCapabilities, send } from './transport/http.js';
 import { guardRequestDeadlines } from './transport/request-deadlines.js';
 import { FILE_ATTACHMENTS_CAPABILITY } from './domain/file-attachment.js';
+import { FOLDER_PROJECTS_CAPABILITY } from './domain/project-kind.js';
 import { AUTHORIZE, DESCRIPTOR, EXTENDED, SERVICES, type Authorize, type RunnerServices } from './transport/services.js';
 
 export type RunnerDescriptor = Readonly<{
@@ -76,6 +77,7 @@ export type RunnerDescriptor = Readonly<{
     imageAttachments?: boolean;
     textAttachments?: boolean;
     fileAttachments?: boolean;
+    folderProjects?: boolean;
   }>;
 }>;
 export type { RunnerServices } from './transport/services.js';
@@ -96,7 +98,7 @@ class RunnerController {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
     const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
-    const { eventBackwardPaging, speechTranscription, accountUsage, commandCatalog, mcpServers, mcpServerManagement, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, fileAttachments, ...legacy } = this.descriptor.capabilities;
+    const { eventBackwardPaging, speechTranscription, accountUsage, commandCatalog, mcpServers, mcpServerManagement, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, fileAttachments, folderProjects, ...legacy } = this.descriptor.capabilities;
     send(response, 200, { ...this.descriptor, capabilities: {
       ...legacy,
       ...(supported.has('eventBackwardPaging') && eventBackwardPaging !== undefined ? { eventBackwardPaging } : {}),
@@ -112,6 +114,7 @@ class RunnerController {
       ...(supported.has('threadManagement') && threadManagement !== undefined ? { threadManagement } : {}),
       ...(supported.has(INTERACTIVE_APPROVALS) && interactiveApprovals !== undefined ? { interactiveApprovals } : {}),
       ...(supported.has(FILE_ATTACHMENTS_CAPABILITY) && fileAttachments !== undefined ? { fileAttachments } : {}),
+      ...(supported.has(FOLDER_PROJECTS_CAPABILITY) && folderProjects !== undefined ? { folderProjects } : {}),
     } });
   }
 }
@@ -150,8 +153,8 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), mcpServerManagement: Boolean(services.mcpServerManagement), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventBackwardPaging: true, eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, fileAttachments: true, projectCloning: Boolean(services.clones) },
-  } : { ...descriptor, capabilities: { ...descriptor.capabilities, eventBackwardPaging: true, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, mcpServerManagement: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false, fileAttachments: false } };
+    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), mcpServerManagement: Boolean(services.mcpServerManagement), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventBackwardPaging: true, eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, fileAttachments: true, folderProjects: Boolean(services.projectRegistration && services.execution?.projectListings), projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, eventBackwardPaging: true, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, mcpServerManagement: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false, fileAttachments: false, folderProjects: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,

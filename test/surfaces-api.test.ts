@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { TerminalService } from '../src/application/terminal-service.js';
 import { openRunnerServices } from '../src/runtime.js';
 import { createRunnerApplication } from '../src/server.js';
+import { folderProjectRunner, NOT_REPOSITORY } from './folder-project-fixture.js';
 const exec = promisify(execFile);
 const authorization = 'Bearer surface-http-test';
 async function fixture(t: TestContext) {
@@ -74,4 +75,48 @@ test('terminal HTTP supports draft and task scope on every operation and rejects
     assert.equal((await request(`${path}${query}`, 'DELETE')).status, 200);
   }
   assert.deepEqual(writes, ['echo ok\r', 'echo ok\r']);
+});
+
+test('a folder project serves its files but answers every history operation with git_not_repository', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const repository = await state.repository('repo');
+  const folder = await state.registerFolder('workspace');
+  assert.equal((await state.register(repository, 'repo')).status, 200);
+  const thread = await state.run('workspace');
+  assert.equal(thread.status, 'succeeded');
+  const base = '/v1/projects/workspace/surface';
+  const commit = 'a'.repeat(40);
+  const files = async (scope: Record<string, string>) => {
+    const tree = await state.post(`${base}/tree`, { path: '', offset: 0, ...scope });
+    assert.equal(tree.status, 200);
+    assert.ok((await tree.json() as { entries: { path: string }[] }).entries.some(entry => entry.path === 'notes.txt'));
+    const read = await (await state.post(`${base}/read`, { path: 'notes.txt', ...scope })).json() as { text: string; version: string };
+    const saved = await state.post(`${base}/write`, { path: 'notes.txt', text: `${read.text}saved\n`, expectedVersion: read.version, ...scope });
+    assert.equal(saved.status, 200);
+    assert.equal(await readFile(join(folder, 'notes.txt'), 'utf8'), `${read.text}saved\n`);
+    assert.equal((await state.post(`${base}/write`, { path: 'notes.txt', text: 'stale\n', expectedVersion: read.version, ...scope })).status, 409);
+  };
+  const history = async (scope: Record<string, string>) => {
+    assert.deepEqual(await (await state.get(`${base}/capabilities`)).json(), { files: true, history: false, terminal: true });
+    const launched = await state.gitLaunches();
+    for (const [operation, body] of [['history', { offset: 0 }], ['commit-files', { commit }], ['commit-diff', { commit, path: 'notes.txt' }]] as const) {
+      const reply = await state.post(`${base}/${operation}`, { ...body, ...scope });
+      assert.equal(reply.status, 409, operation);
+      assert.deepEqual(await reply.json(), NOT_REPOSITORY, operation);
+    }
+    assert.deepEqual(await state.gitLaunches(), launched);
+  };
+  const scopes: readonly Record<string, string>[] = [{}, { taskId: thread.id }];
+  for (const scope of scopes) {
+    await files(scope);
+    await history(scope);
+  }
+  await exec(state.git, ['init', '-q', '-b', 'main', folder]);
+  await exec(state.git, ['-C', folder, 'add', '.']);
+  await exec(state.git, ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'later']);
+  for (const scope of scopes) await history(scope);
+  assert.equal((await state.post(`${base}/history`, { offset: -1 })).status, 400);
+  assert.deepEqual(await (await state.get('/v1/projects/repo/surface/capabilities')).json(), { files: true, history: true, terminal: true });
+  const tracked = await (await state.post('/v1/projects/repo/surface/history', { offset: 0 })).json() as { commits: { subject: string }[] };
+  assert.equal(tracked.commits[0]?.subject, 'Initial');
 });

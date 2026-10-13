@@ -5,6 +5,16 @@ export type SurfaceTree = Readonly<{ entries: readonly SurfaceEntry[]; nextOffse
 export type SurfaceFile = Readonly<{ path: string; text: string; version: string | null; unavailableReason: 'binary' | 'large' | null }>;
 export type SurfaceOperation = 'tree' | 'read' | 'write' | 'history' | 'commit-files' | 'commit-diff';
 export type SurfaceInput = Readonly<{ taskId?: string; path?: string; offset?: number; text?: string; expectedVersion?: string; commit?: string }>;
+export function readsHistory(operation: SurfaceOperation): boolean {
+  switch (operation) {
+    case 'tree': case 'read': case 'write': return false;
+    case 'history': case 'commit-files': case 'commit-diff': return true;
+    default: return unreachable(operation);
+  }
+}
+function unreachable(value: never): never {
+  throw new Error(`Unhandled surface operation: ${String(value)}`);
+}
 export function parseSurfaceInput(operation: SurfaceOperation, value: unknown): SurfaceInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RunnerError('invalid_input');
   const input = value as Record<string, unknown>;

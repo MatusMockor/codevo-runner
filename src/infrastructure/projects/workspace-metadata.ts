@@ -10,6 +10,10 @@ export type WorkspaceMetadata = Readonly<{
   version: 1; mode: 'in-place' | 'worktree'; projectId: string;
   source: string; sourceIdentity: Identity; common: string; commonIdentity: Identity;
 }>;
+export type FolderWorkspaceMetadata = Readonly<{
+  version: 2; kind: 'folder'; mode: 'in-place'; projectId: string; source: string; sourceIdentity: Identity;
+}>;
+export type StoredWorkspaceMetadata = WorkspaceMetadata | FolderWorkspaceMetadata;
 const LIMIT = 16 * 1024;
 const durable = (metadata: WorkspaceMetadata) => JSON.stringify([metadata.version, metadata.mode, metadata.projectId,
   metadata.source, metadata.sourceIdentity.ino, metadata.common, metadata.commonIdentity.ino]);
@@ -38,13 +42,40 @@ export async function validatePersistedWorkspace(metadata: WorkspaceMetadata, pr
   signal?.throwIfAborted();
 }
 
-export async function saveMetadata(root: string, taskId: string, metadata: WorkspaceMetadata) {
+export async function captureFolderWorkspace(project: RegisteredProject): Promise<FolderWorkspaceMetadata> {
+  const source = await realpath(project.path);
+  const sourceIdentity = await directoryIdentity(source);
+  const result = { version: 2 as const, kind: 'folder' as const, mode: 'in-place' as const, projectId: project.id, source, sourceIdentity };
+  if (Buffer.byteLength(JSON.stringify(result)) > LIMIT) throw new RunnerError('conflict');
+  return result;
+}
+
+export async function validateFolderWorkspace(metadata: FolderWorkspaceMetadata, project: RegisteredProject, signal?: AbortSignal) {
+  const current = await captureFolderWorkspace(project);
+  if (current.projectId !== metadata.projectId || current.source !== metadata.source ||
+      current.sourceIdentity.ino !== metadata.sourceIdentity.ino) throw new RunnerError('conflict');
+  signal?.throwIfAborted();
+}
+
+export async function saveMetadata(root: string, taskId: string, metadata: StoredWorkspaceMetadata) {
   await mkdir(root, { recursive: true, mode: 0o700 });
   await directoryIdentity(root);
   await writeFile(join(root, taskId), JSON.stringify(metadata), { flag: 'wx', mode: 0o600 });
 }
 
 export async function loadMetadata(root: string, taskId: string): Promise<WorkspaceMetadata | undefined> {
+  const metadata = await loadStoredMetadata(root, taskId);
+  if (metadata && metadata.version !== 1) throw new RunnerError('conflict');
+  return metadata;
+}
+
+export async function loadFolderMetadata(root: string, taskId: string): Promise<FolderWorkspaceMetadata | undefined> {
+  const metadata = await loadStoredMetadata(root, taskId);
+  if (metadata && metadata.version !== 2) throw new RunnerError('conflict');
+  return metadata;
+}
+
+export async function loadStoredMetadata(root: string, taskId: string): Promise<StoredWorkspaceMetadata | undefined> {
   try { await directoryIdentity(root); } catch (error) {
     if (missing(error)) return undefined;
     throw error;
@@ -61,6 +92,7 @@ export async function loadMetadata(root: string, taskId: string): Promise<Worksp
     const value: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString('utf8'));
     if (!value || typeof value !== 'object') throw new RunnerError('conflict');
     const m = value as Record<string, unknown>;
+    if (m.version === 2) return folderMetadata(m);
     if (Object.keys(m).sort().join(',') !== 'common,commonIdentity,mode,projectId,source,sourceIdentity,version' ||
         m.version !== 1 || (m.mode !== 'in-place' && m.mode !== 'worktree') || typeof m.projectId !== 'string' ||
         typeof m.source !== 'string' || !isAbsolute(m.source) || typeof m.common !== 'string' || !isAbsolute(m.common) ||
@@ -68,6 +100,13 @@ export async function loadMetadata(root: string, taskId: string): Promise<Worksp
     return { version: 1, mode: m.mode, projectId: m.projectId, source: m.source,
       sourceIdentity: m.sourceIdentity, common: m.common, commonIdentity: m.commonIdentity };
   } finally { await file.close(); }
+}
+
+function folderMetadata(m: Record<string, unknown>): FolderWorkspaceMetadata {
+  if (Object.keys(m).sort().join(',') !== 'kind,mode,projectId,source,sourceIdentity,version' ||
+      m.version !== 2 || m.kind !== 'folder' || m.mode !== 'in-place' || typeof m.projectId !== 'string' ||
+      typeof m.source !== 'string' || !isAbsolute(m.source) || !validIdentity(m.sourceIdentity)) throw new RunnerError('conflict');
+  return { version: 2, kind: 'folder', mode: 'in-place', projectId: m.projectId, source: m.source, sourceIdentity: m.sourceIdentity };
 }
 
 async function directoryIdentity(path: string): Promise<Identity> {

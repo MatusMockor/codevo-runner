@@ -6,7 +6,7 @@ export const GIT_ERROR_CODES = [
   'git_remote_unsupported', 'git_branch_not_found', 'git_detached_head',
   'git_no_upstream', 'git_dirty', 'git_diverged', 'git_operation_in_progress',
   'git_rejected_non_fast_forward', 'git_rejected', 'git_nothing_to_commit',
-  'git_identity_missing', 'busy', 'conflict',
+  'git_identity_missing', 'git_not_repository', 'busy', 'conflict',
 ] as const;
 export type GitErrorCode = (typeof GIT_ERROR_CODES)[number] & ErrorCode;
 

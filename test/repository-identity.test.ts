@@ -66,3 +66,21 @@ test('repository identity HTTP requires exact runner and keeps legacy catalog sh
   assert.equal((await request(route + '?extra=1', headers)).status, 404);
   assert.deepEqual(await (await request('/v1/projects', headers)).json(), { items: [{ id: 'project', name: 'Project' }] });
 });
+
+test('a folder project has no repository identity and Git is never asked for one', async t => {
+  const { folderProjectRunner } = await import('./folder-project-fixture.js');
+  const state = await folderProjectRunner(t);
+  const folder = await state.registerFolder('workspace');
+  const launched = await state.gitLaunches();
+  const identity = async () => {
+    const reply = await state.get('/v1/projects/workspace/repository-identity');
+    assert.equal(reply.status, 200);
+    return reply.json();
+  };
+  assert.deepEqual(await identity(), { repositoryKey: null });
+  execFileSync(state.git, ['init', '-q', folder], { stdio: 'ignore' });
+  execFileSync(state.git, ['config', 'remote.origin.url', 'git@github.com:Owner/Repo.git'], { cwd: folder });
+  assert.deepEqual(await identity(), { repositoryKey: null });
+  assert.deepEqual(await state.gitLaunches(), launched);
+  assert.equal((await state.get('/v1/projects/workspace/repository-identity', { authorization: state.owner.authorization })).status, 409);
+});

@@ -37,5 +37,12 @@ test('a configured project cannot remap a persisted managed project identity', a
     const identical = new ManagedProjectRegistry(new ConfiguredProjectRegistry([project]), repository);
     assert.deepEqual(await identical.list(), [{ id: 'app', name: 'app' }]);
     assert.deepEqual(await identical.get('app'), project);
+    assert.deepEqual(await repository.registerManagedProject({ id: 'folder', name: 'folder', path: '/tmp/folder', kind: 'folder' }, [], '/tmp'),
+      { status: 'registered', project: { id: 'folder', name: 'folder' }, created: true });
+    const rekinded = new ManagedProjectRegistry(new ConfiguredProjectRegistry([{ id: 'folder', name: 'Folder', path: '/tmp/folder' }]), repository);
+    await assert.rejects(rekinded.list(), { code: 'conflict' });
+    await assert.rejects(rekinded.listings(), { code: 'conflict' });
+    for (const id of ['folder', 'app']) await assert.rejects(rekinded.get(id), { code: 'conflict' });
+    assert.deepEqual(await identical.listings(), [{ id: 'app', name: 'app', kind: 'repository' }, { id: 'folder', name: 'folder', kind: 'folder' }]);
   } finally { await repository.close(); await rm(directory, { recursive: true, force: true }); }
 });

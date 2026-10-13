@@ -1,5 +1,5 @@
 import { RunnerError } from '../domain/contracts.js';
-import { parseSurfaceInput, type SurfaceOperation } from '../domain/surface-files.js';
+import { parseSurfaceInput, readsHistory, type SurfaceOperation } from '../domain/surface-files.js';
 import type { SurfaceWorkspaceResolver } from './surface-workspace.js';
 import type { SurfaceWorkspace } from './surface-workspace.js';
 import type { SurfaceInput } from '../domain/surface-files.js';
@@ -9,8 +9,8 @@ export class SurfaceService {
   private active = 0;
   constructor(private readonly resolver: SurfaceWorkspaceResolver, private readonly operations: SurfaceOperations) {}
   async capabilities(projectId: string) {
-    await this.resolver.resolve(projectId);
-    return { files: process.platform !== 'win32', history: process.platform !== 'win32' };
+    const workspace = await this.resolver.resolve(projectId);
+    return { files: process.platform !== 'win32', history: process.platform !== 'win32' && workspace.kind !== 'folder' };
   }
   async perform(projectId: string, operation: SurfaceOperation, value: unknown) {
     const input = parseSurfaceInput(operation, value);
@@ -19,6 +19,7 @@ export class SurfaceService {
     try {
       const signal = AbortSignal.timeout(15000);
       const workspace = await this.resolver.resolve(projectId, input.taskId, signal);
+      if (workspace.kind === 'folder' && readsHistory(operation)) throw new RunnerError('git_not_repository');
       const result = await this.operations.perform(workspace, operation, input, signal);
       await workspace.revalidate();
       return result;

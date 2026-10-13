@@ -10,6 +10,7 @@ import { test, type TestContext } from 'node:test';
 import { openRunnerServices } from '../src/runtime.js';
 import type { ProviderExecutor } from '../src/application/execution-ports.js';
 import { FileTurnChangesStore } from '../src/infrastructure/projects/turn-changes.js';
+import { folderProjectRunner } from './folder-project-fixture.js';
 
 const exec = promisify(execFile);
 const input = () => ({ idempotencyKey: randomUUID(), provider: 'codex' as const, isolation: 'in-place' as const, parts: [{ type: 'text' as const, text: 'Make this turn edit' }] });
@@ -227,4 +228,35 @@ test('cancellation reaches an awaiting end-capture and the worker proceeds witho
   assert.equal(endCancelled, true);
   assert.equal((await repository.getTask(task.id)).status, 'cancelled');
   assert.equal((await service.turnSummary(task.id)).state, 'unavailable');
+});
+
+test('a folder project turn captures nothing and reports its changes as unavailable rather than empty', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const folder = await state.registerFolder('workspace');
+  const launched = await state.gitLaunches();
+  let turn = 0;
+  state.provider(async request => {
+    await writeFile(join(request.cwd, 'notes.txt'), `agent edit ${++turn}\n`);
+    if (turn === 1) await exec(state.git, ['init', '-q', '-b', 'main', request.cwd]);
+    return { exitCode: 0, sessionId: request.resumeSessionId ?? randomUUID() };
+  });
+  const first = await state.run('workspace');
+  const second = await state.next(first.id);
+  assert.deepEqual([first.status, second.status], ['succeeded', 'succeeded']);
+  assert.equal(await readFile(join(folder, 'notes.txt'), 'utf8'), 'agent edit 2\n');
+  for (const id of [first.id, second.id]) {
+    const summary = await state.get(`/v1/tasks/${id}/turn-changes`);
+    assert.equal(summary.status, 200);
+    assert.deepEqual(await summary.json(), { turnId: id, state: 'unavailable', files: [], truncated: false, reason: 'This project is not a Git repository.' });
+    const diff = await state.post(`/v1/tasks/${id}/turn-file-diff`, { relativePath: 'notes.txt' });
+    assert.equal(diff.status, 404);
+    assert.deepEqual(await diff.json(), { error: 'not_found' });
+  }
+  assert.equal((await state.post(`/v1/tasks/${first.id}/turn-file-diff`, { relativePath: 'notes.txt', extra: true })).status, 400);
+  await assert.rejects(readFile(join(state.dataDir, 'turn-changes', `${first.id}.end`)), { code: 'ENOENT' });
+  assert.deepEqual(await new FileTurnChangesStore(state.dataDir).summary(first.id),
+    { turnId: first.id, state: 'unavailable', files: [], truncated: false, reason: 'A complete snapshot of this turn is unavailable.' });
+  await assert.rejects(readFile(join(folder, '.git', 'refs', 'codevo')), { code: 'ENOENT' });
+  assert.deepEqual((await exec(state.git, ['-C', folder, 'for-each-ref'])).stdout, '');
+  assert.deepEqual(await state.gitLaunches(), launched);
 });

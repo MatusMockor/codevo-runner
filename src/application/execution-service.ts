@@ -93,9 +93,10 @@ export class ExecutionService implements ExecutionApplication, WorkSource {
     this.assertAvailable();
     validateId(taskId);
     const { projectId, base } = parseStartInput(input);
-    await this.registry.get(projectId);
+    const project = await this.registry.get(projectId);
     const task = await this.tasks.getTask(taskId);
     if (base?.kind === 'origin-branch' && task.isolation === 'in-place') throw new RunnerError('invalid_input');
+    this.workspaces.validateStart?.(project, task.isolation, base);
     this.executorFor(task);
     this.assertAvailable();
     const queued = await this.executions.queueTask(taskId, projectId, base, turn?.approvals === true);
@@ -142,6 +143,11 @@ export class ExecutionService implements ExecutionApplication, WorkSource {
   }
 
   projects() { return this.registry.list(); }
+
+  async projectListings() {
+    if (!this.registry.listings) throw new RunnerError('not_found');
+    return this.registry.listings();
+  }
 
   async repositoryIdentity(projectId: string, signal?: AbortSignal) {
     this.assertAvailable();

@@ -4,6 +4,13 @@ import { CommandCatalogService, COMMAND_CATALOG_POLICY, type CommandCatalogPolic
 import { RunnerError } from '../src/domain/contracts.js';
 import type { CommandCatalog, CommandCatalogProvider } from '../src/domain/command-catalog.js';
 import type { RegisteredProject } from '../src/domain/execution.js';
+import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FolderProjectWorkspace } from '../src/infrastructure/projects/folder-workspace.js';
+import { GitProjectWorkspace } from '../src/infrastructure/projects/index.js';
+import { ProjectWorkspaceRouter } from '../src/infrastructure/projects/workspace-router.js';
+import { folderProjectRunner } from './folder-project-fixture.js';
 
 type Read = (provider: CommandCatalogProvider, workdir: CommandCatalogWorkdir, signal: AbortSignal) => Promise<unknown>;
 
@@ -258,4 +265,33 @@ test('close aborts pending probes, publishes nothing late and rejects new reads'
   await assert.rejects(service.read('missing', 'codex'), unavailable);
   assert.equal(state.calls.length, calls);
   await service.close();
+});
+
+test('a folder project is probed in its own pinned folder, while the same folder as a repository project stays unavailable', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runner-catalog-folder-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const folder = join(root, 'folder'), data = join(root, 'data');
+  await mkdir(folder);
+  const live = await lstat(folder);
+  const workspaces = new ProjectWorkspaceRouter(data, new GitProjectWorkspace(data), new FolderProjectWorkspace(data));
+  const probed: CommandCatalogWorkdir[] = [];
+  const reading = (project: RegisteredProject) => new CommandCatalogService({ get: async () => project }, workspaces,
+    { read: async (provider, workdir) => { probed.push(workdir); return catalog(provider, 'listed'); } });
+  for (const provider of ['claudeCode', 'codex'] as const)
+    assert.deepEqual(names(await reading({ id: 'folder', name: 'Folder', path: folder, kind: 'folder' }).read('folder', provider)), ['listed']);
+  assert.deepEqual(probed, [{ cwd: folder, identity: { dev: live.dev, ino: live.ino } }, { cwd: folder, identity: { dev: live.dev, ino: live.ino } }]);
+  await assert.rejects(reading({ id: 'folder', name: 'Folder', path: folder }).read('folder', 'claudeCode'), unavailable);
+  await assert.rejects(reading({ id: 'gone', name: 'Gone', path: join(root, 'gone'), kind: 'folder' }).read('gone', 'claudeCode'), unavailable);
+  assert.equal(probed.length, 2);
+});
+
+test('the command catalog route lists a folder project from the folder without launching Git', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const folder = await state.registerFolder('workspace');
+  const launched = await state.gitLaunches();
+  const reply = await state.get('/v1/projects/workspace/command-catalog/claude');
+  assert.equal(reply.status, 200);
+  const listed = await reply.json() as CommandCatalog;
+  assert.deepEqual(listed.entries.map(entry => [entry.name, entry.description]), [['folder-command', folder]]);
+  assert.deepEqual(await state.gitLaunches(), launched);
 });

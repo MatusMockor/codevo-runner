@@ -41,6 +41,9 @@ import { ExecutionService } from './application/execution-service.js';
 import type { ProviderExecutor } from './application/execution-ports.js';
 import type { RegisteredProject } from './domain/execution.js';
 import { ConfiguredProjectRegistry, GitProjectWorkspace } from './infrastructure/projects/index.js';
+import { FolderProjectWorkspace } from './infrastructure/projects/folder-workspace.js';
+import { ProjectWorkspaceRouter } from './infrastructure/projects/workspace-router.js';
+import { FolderTurnChanges, ProjectTurnChanges } from './application/project-turn-changes.js';
 import { CliProviderExecutor } from './infrastructure/execution/index.js';
 import { createExecutionAttachmentStager } from './infrastructure/files/execution-attachments.js';
 import { GitCoordination, type GitCoordinationOptions } from './application/git-coordination.js';
@@ -110,18 +113,19 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         clones = new ProjectCloneService(repository, new GitCloneAdapter(options.projectsRoot ?? join(homedir(), 'Developer')), configured, lease);
         await clones.initialize();
         projectRegistration = new ProjectRegistrationService(repository, new GitProjectFolderInspector(options.projectsRoot ?? join(homedir(), 'Developer'), dataDir), configured, clones);
+        const coordination = new GitCoordination(options.gitSync?.coordination);
+        const gitRepository = new GitRepositoryAdapter(options.gitSync?.timeouts);
+        const executionWorkspace = new ProjectWorkspaceRouter(dataDir,
+          new GitProjectWorkspace(dataDir, { bases: new GitOriginBases(coordination, gitRepository), leases: coordination }), new FolderProjectWorkspace(dataDir));
         const surfaceResolver = new RegisteredSurfaceWorkspaceResolver(
-          new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), repository, repository);
+          new ManagedProjectRegistry(configured, repository), executionWorkspace, repository, repository);
         surfaces = new SurfaceService(surfaceResolver, new FileSystemSurfaceOperations());
         terminals = new TerminalService(surfaceResolver, new NodePtyFactory());
         const cliOptions = { timeoutMs, interactiveQuestions: true, sandbox: options.isolation === 'container' ? 'external-sandbox' as const : 'workspace-write' as const };
         artifacts = new ArtifactService(repository, repository,
-          new WorkspaceArtifactReader(repository, repository, new ManagedProjectRegistry(configured, repository), new GitProjectWorkspace(dataDir), join(dataDir, 'workspaces')),
+          new WorkspaceArtifactReader(repository, repository, new ManagedProjectRegistry(configured, repository), executionWorkspace, join(dataDir, 'workspaces')),
           await FileArtifactBlobs.open(dataDir, await repository.listArtifactIds()));
         const instructionWorkspace = new FileInstructionWorkspace(dataDir);
-        const coordination = new GitCoordination(options.gitSync?.coordination);
-        const gitRepository = new GitRepositoryAdapter(options.gitSync?.timeouts);
-        const executionWorkspace = new GitProjectWorkspace(dataDir, { bases: new GitOriginBases(coordination, gitRepository), leases: coordination });
         gitSync = new GitSyncService(repository, repository, new ManagedProjectRegistry(configured, repository), executionWorkspace,
           gitRepository, coordination, { ...options.gitSync?.service, ...(options.gitAuthor ? { author: options.gitAuthor } : {}) }, instructionWorkspace);
         const processOwnership = new ProcessOwnershipRegistry();
@@ -129,7 +133,9 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
           new ManagedProjectRegistry(configured, repository), executionWorkspace,
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
-          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions, new FileTurnChangesStore(dataDir), options.executionConcurrency, processOwnership, approvals, lease);
+          (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions,
+          new ProjectTurnChanges(repository, new ManagedProjectRegistry(configured, repository), new FileTurnChangesStore(dataDir), new FolderTurnChanges()),
+          options.executionConcurrency, processOwnership, approvals, lease);
         await execution.initialize();
         // Catalogs describe the provider CLIs tasks launch; injected executors need an explicit probe configuration.
         if (options.providers === undefined || options.commandCatalogCli) {

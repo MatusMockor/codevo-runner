@@ -2,6 +2,7 @@ import type { CloneApplication, CloneDestinations, CloneRepository, ProjectClone
 import type { ProjectRegistry, WorkAdmission, WorkSource } from './execution-ports.js';
 import { isId, RunnerError } from '../domain/contracts.js';
 import { cloneDestination, parseCloneInput, type CloneInput } from '../domain/project-clone.js';
+import { projectKind } from '../domain/project-kind.js';
 
 /** A single owned worker survives HTTP/SSH disconnects; SQLite owns durable state. */
 export class ProjectCloneService implements CloneApplication, CloneDestinations, WorkSource {
@@ -105,7 +106,7 @@ export class ManagedProjectRegistry implements ProjectRegistry {
     for (const project of managed) {
       if (!configured.some(item => item.id === project.id)) continue;
       const host = await this.configured.get(project.id);
-      if (host.path !== project.path) throw new RunnerError('conflict');
+      if (host.path !== project.path || projectKind(host) !== projectKind(project)) throw new RunnerError('conflict');
     }
     return { configured, managed };
   }
@@ -113,6 +114,12 @@ export class ManagedProjectRegistry implements ProjectRegistry {
     const { configured, managed } = await this.projects();
     const ids = new Set(configured.map(project => project.id));
     return [...configured, ...managed.filter(project => !ids.has(project.id)).map(({ id, name }) => ({ id, name }))];
+  }
+  async listings() {
+    const { configured, managed } = await this.projects();
+    const ids = new Set(configured.map(project => project.id));
+    return [...configured.map(({ id, name }) => ({ id, name, kind: 'repository' as const })),
+      ...managed.filter(project => !ids.has(project.id)).map(project => ({ id: project.id, name: project.name, kind: projectKind(project) }))];
   }
   async get(id: string) {
     const { configured, managed } = await this.projects();

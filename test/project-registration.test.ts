@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,8 @@ import type { RegisteredProject } from '../src/domain/execution.js';
 import type { CloneJob } from '../src/domain/project-clone.js';
 import type { ProjectRegistration } from '../src/domain/project-registration.js';
 import { GitCloneAdapter } from '../src/infrastructure/projects/clone.js';
+import { localGitEnvironment, runGitProcess } from '../src/infrastructure/projects/git-command.js';
+import { repositoryStanding } from '../src/infrastructure/projects/repository-presence.js';
 import { ConfiguredProjectRegistry } from '../src/infrastructure/projects/index.js';
 import { GitProjectFolderInspector } from '../src/infrastructure/projects/project-folder.js';
 import { openSqliteRepository } from '../src/infrastructure/sqlite/index.js';
@@ -89,8 +91,14 @@ async function runner(t: TestContext, configure: (state: Space) => Promise<reado
     assert.equal(reply.status, 200, `${path} ${name}`);
     return await reply.json() as ProjectRegistration;
   };
-  const projects = async () => (await (await fetch(`${url}/v1/projects`, { headers: owner })).json() as { items: unknown[] }).items;
-  return { ...state, services, url, owner, post, register, projects };
+  const projects = async (headers = owner) => (await (await fetch(`${url}/v1/projects`, { headers })).json() as { items: unknown[] }).items;
+  const announced: Record<string, string> = { ...owner, 'x-codevo-client-capabilities': 'folderProjects' };
+  const registerAnnounced = async (path: string, name: string) => {
+    const reply = await post(route, { path, name }, announced);
+    assert.equal(reply.status, 200, `${path} ${name}`);
+    return await reply.json() as ProjectRegistration;
+  };
+  return { ...state, services, url, owner, announced, post, register, registerAnnounced, projects };
 }
 
 async function application(t: TestContext, inspect: (real: ProjectFolderInspector) => ProjectFolderInspector = real => real, cloner?: (state: Space) => ProjectCloner) {
@@ -303,6 +311,8 @@ test('the folder an active clone is filling cannot be registered until that clon
   assert.deepEqual(await state.register(destination, 'mine'), registered('foo', false));
   assert.deepEqual(await state.register(occupied, 'mine'), registered('mine', true));
   assert.deepEqual(await state.projects(), [{ id: 'foo', name: 'foo' }, { id: 'mine', name: 'mine' }, { id: 'team-foo', name: 'team-foo' }]);
+  assert.deepEqual(await state.projects(state.announced), [{ id: 'foo', name: 'foo', kind: 'repository' }, { id: 'mine', name: 'mine', kind: 'repository' }, { id: 'team-foo', name: 'team-foo', kind: 'repository' }]);
+  assert.deepEqual((await (await fetch(`${state.url}/v1/project-clones/${running}`, { headers: state.announced })).json() as CloneJob).project, { id: 'foo', name: 'foo' });
 });
 
 test('a held maintenance lease refuses registration and an in-flight registration refuses the lease', async t => {
@@ -509,4 +519,230 @@ test('a folder swapped for a symlink while it is selected never surfaces a serve
   const allowed = ['200 not_git_root', '400 invalid_input', '503 storage_unavailable'];
   assert.deepEqual([...outcomes].filter(([outcome]) => !allowed.includes(outcome)), []);
   assert.deepEqual(await state.projects(), []);
+});
+
+test('a client that announces folder projects registers a plain folder and is the only one shown project kinds', async t => {
+  const state = await runner(t, async host => [{ id: 'host', name: 'Host project', path: await host.repository('configured') }]);
+  const workspace = join(state.projectsRoot, 'workspace');
+  await mkdir(workspace);
+  const nested = await state.repository('workspace', 'nested');
+  assert.deepEqual(await state.register(workspace, 'workspace'), rejected('not_git_root'));
+  assert.deepEqual(await state.projects(), [{ id: 'host', name: 'Host project' }]);
+  const reply = await state.post(route, { path: workspace, name: 'workspace' }, state.announced);
+  assert.equal(reply.status, 200);
+  assert.equal(await reply.text(), '{"status":"registered","project":{"id":"workspace","name":"workspace"},"created":true}');
+  assert.deepEqual(await state.registerAnnounced(nested, 'nested'), registered('nested', true));
+  const listing = await fetch(`${state.url}/v1/projects`, { headers: state.owner });
+  assert.equal(await listing.text(), '{"items":[{"id":"host","name":"Host project"},{"id":"nested","name":"nested"},{"id":"workspace","name":"workspace"}]}');
+  assert.deepEqual(await state.projects(state.announced), [{ id: 'host', name: 'Host project', kind: 'repository' },
+    { id: 'nested', name: 'nested', kind: 'repository' }, { id: 'workspace', name: 'workspace', kind: 'folder' }]);
+  assert.deepEqual(await state.projects({ ...state.owner, 'x-codevo-client-capabilities': 'folderprojects,projectManagement' }),
+    [{ id: 'host', name: 'Host project' }, { id: 'nested', name: 'nested' }, { id: 'workspace', name: 'workspace' }]);
+  for (const name of ['workspace', 'renamed', 'host']) assert.deepEqual(await state.registerAnnounced(workspace, name), registered('workspace', false), name);
+  assert.deepEqual(await state.register(workspace, 'workspace'), rejected('not_git_root'));
+  const other = join(state.projectsRoot, 'other');
+  await mkdir(other);
+  for (const name of ['workspace', 'nested', 'host']) assert.deepEqual(await state.registerAnnounced(other, name), rejected('name_taken'), name);
+  assert.deepEqual(await state.register(other, 'other'), rejected('not_git_root'));
+  assert.deepEqual(await state.registerAnnounced(other, 'other'), registered('other', true));
+});
+
+test('with folder projects announced, a path inside a repository or around runner storage is still refused', async t => {
+  const state = await runner(t);
+  const repository = await state.repository('team', 'repo');
+  await mkdir(join(repository, 'packages', 'app'), { recursive: true });
+  const bare = join(state.projectsRoot, 'bare.git');
+  execFileSync('git', ['init', '-q', '--bare', bare], { stdio: 'ignore' });
+  const dangling = join(state.projectsRoot, 'dangling'), garbled = join(state.projectsRoot, 'garbled'), hollow = join(state.projectsRoot, 'hollow');
+  for (const path of [dangling, garbled, join(hollow, '.git')]) await mkdir(path, { recursive: true });
+  await writeFile(join(dangling, '.git'), 'gitdir: /nonexistent/codevo-registration\n');
+  await writeFile(join(garbled, '.git'), 'not a gitfile\n');
+  for (const path of [join(repository, 'packages'), join(repository, 'packages', 'app'), join(repository, '.git'), bare, dangling, garbled, hollow])
+    assert.deepEqual(await state.registerAnnounced(path, 'candidate'), rejected('not_git_root'), path);
+  const worktree = await state.repository('.agent', 'codevo-runner', 'workspaces', 'task');
+  await mkdir(join(state.dataDir, 'plain'));
+  for (const path of [state.projectsRoot, join(state.projectsRoot, '.agent'), state.dataDir, join(state.dataDir, 'workspaces'), join(state.dataDir, 'plain'), worktree])
+    assert.deepEqual(await state.registerAnnounced(path, 'candidate'), rejected('not_allowed'), path);
+  const plain = join(state.projectsRoot, 'plain');
+  await mkdir(plain);
+  await symlink(plain, join(state.projectsRoot, 'alias'));
+  const alias = await state.post(route, { path: join(state.projectsRoot, 'alias'), name: 'alias' }, state.announced);
+  assert.equal(alias.status, 400);
+  assert.deepEqual(await alias.json(), { error: 'invalid_input' });
+  assert.deepEqual(await state.projects(state.announced), []);
+  assert.deepEqual(await state.registerAnnounced(repository, 'repo'), registered('repo', true));
+  assert.deepEqual(await state.registerAnnounced(join(state.projectsRoot, 'team'), 'team'), registered('team', true));
+  assert.deepEqual(await state.projects(state.announced), [{ id: 'repo', name: 'repo', kind: 'repository' }, { id: 'team', name: 'team', kind: 'folder' }]);
+});
+
+test('a Git that cannot answer never turns a folder into a project', { timeout: 60_000 }, async t => {
+  const state = await runner(t);
+  const plain = join(state.projectsRoot, 'plain');
+  await mkdir(plain);
+  const python = execFileSync('sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim();
+  const original = process.env.PATH;
+  state.closers.push(() => { process.env.PATH = original; });
+  const substitute = async (name: string, script?: string) => {
+    const bin = join(state.temp, `substitute-${name}`);
+    await mkdir(bin);
+    await symlink(python, join(bin, 'python3'));
+    if (script !== undefined) await writeFile(join(bin, 'git'), `#!/bin/sh\n${script}\n`, { mode: 0o700 });
+    process.env.PATH = script === undefined ? bin : `${bin}:${original ?? ''}`;
+  };
+  const unanswered: Readonly<Record<string, string | undefined>> = {
+    failing: 'echo "fatal: not a git repository (or any of the parent directories): .git" >&2\nexit 1',
+    misreporting: 'echo "fatal: unable to access config" >&2\nexit 128',
+    silent: 'exit 128',
+    hanging: 'exec sleep 30',
+    missing: undefined,
+  };
+  for (const [name, script] of Object.entries(unanswered)) {
+    await substitute(name, script);
+    const reply = await state.post(route, { path: plain, name: 'plain' }, state.announced);
+    assert.equal(reply.status, 503, name);
+    assert.deepEqual(await reply.json(), { error: 'storage_unavailable' }, name);
+    assert.deepEqual(await state.projects(state.announced), [], name);
+  }
+  await substitute('legacy', 'exit 1');
+  assert.deepEqual(await state.register(plain, 'plain'), rejected('not_git_root'));
+  process.env.PATH = original;
+  assert.deepEqual(await state.projects(state.announced), []);
+  assert.deepEqual(await state.registerAnnounced(plain, 'plain'), registered('plain', true));
+});
+
+test('the folder verdict rests on what the real git binary reports under a forced C locale', async t => {
+  const state = await space(t);
+  const plain = join(state.projectsRoot, 'plain');
+  const repository = await state.repository('repo');
+  const bare = join(state.projectsRoot, 'bare.git');
+  execFileSync('git', ['init', '-q', '--bare', bare], { stdio: 'ignore' });
+  const dangling = join(state.projectsRoot, 'dangling'), garbled = join(state.projectsRoot, 'garbled'), hollow = join(state.projectsRoot, 'hollow');
+  for (const path of [plain, join(repository, 'packages'), dangling, garbled, join(hollow, '.git')]) await mkdir(path, { recursive: true });
+  await writeFile(join(dangling, '.git'), 'gitdir: /nonexistent/codevo-registration\n');
+  await writeFile(join(garbled, '.git'), 'not a gitfile\n');
+  const locale = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LC_MESSAGES: process.env.LC_MESSAGES, LANGUAGE: process.env.LANGUAGE };
+  state.closers.push(() => {
+    for (const [key, value] of Object.entries(locale)) {
+      delete process.env[key];
+      if (value !== undefined) process.env[key] = value;
+    }
+  });
+  Object.assign(process.env, { LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', LC_MESSAGES: 'de_DE.UTF-8', LANGUAGE: 'de:fr' });
+  const environment = localGitEnvironment();
+  assert.deepEqual([environment.LC_ALL, environment.LANGUAGE], ['C', '']);
+  const probe = (cwd: string) => runGitProcess({ cwd, args: ['rev-parse', '--git-dir'], env: localGitEnvironment(), timeoutMs: 5_000, stderrBytes: 4096 });
+  const disowned = await probe(plain);
+  assert.deepEqual([disowned.code, disowned.stdout.length, disowned.timedOut], [128, 0, false]);
+  assert.match(disowned.stderr, /^fatal: not a git repository \(or any /);
+  assert.match((await probe(dangling)).stderr, /^fatal: not a git repository: /);
+  assert.match((await probe(garbled)).stderr, /^fatal: invalid gitfile format: /);
+  for (const path of [repository, join(repository, 'packages'), join(repository, '.git'), bare]) assert.equal((await probe(path)).code, 0, path);
+  const unrooted = (cwd: string) => runGitProcess({ cwd, args: ['rev-parse', '--show-toplevel'], env: localGitEnvironment(), timeoutMs: 5_000, stderrBytes: 4096 });
+  for (const path of [join(repository, '.git'), bare]) {
+    const answer = await unrooted(path);
+    assert.equal(answer.code, 128, path);
+    assert.match(answer.stderr, /^fatal: this operation must be run in a work tree/, path);
+  }
+  const signal = new AbortController().signal;
+  const standing = async (path: string) => repositoryStanding({ path, anchor: path, identity: await lstat(path) }, signal);
+  assert.equal(await standing(plain), 'outside');
+  assert.equal(await standing(repository), 'root');
+  for (const path of [join(repository, 'packages'), join(repository, '.git'), bare, dangling, garbled, hollow]) assert.equal(await standing(path), 'elsewhere', path);
+  await assert.rejects(repositoryStanding({ path: plain, anchor: plain, identity: { dev: 0, ino: 0 } }, signal), { code: 'storage_unavailable' });
+  await assert.rejects(repositoryStanding({ path: plain, anchor: join(garbled, '.git'), identity: await lstat(plain) }, signal), { code: 'storage_unavailable' });
+  await assert.rejects(repositoryStanding({ path: plain, anchor: plain, identity: await lstat(plain) }, AbortSignal.abort()), { name: 'AbortError' });
+});
+
+test('the kind chosen at registration never changes for a project', async t => {
+  const state = await runner(t);
+  const folder = join(state.projectsRoot, 'folder');
+  await mkdir(folder);
+  const repository = await state.repository('repo');
+  assert.deepEqual(await state.registerAnnounced(folder, 'folder'), registered('folder', true));
+  assert.deepEqual(await state.registerAnnounced(repository, 'repo'), registered('repo', true));
+  execFileSync('git', ['init', '-q', '-b', 'main', folder], { stdio: 'ignore' });
+  await rm(join(repository, '.git'), { recursive: true });
+  const kinds = [{ id: 'folder', name: 'folder', kind: 'folder' }, { id: 'repo', name: 'repo', kind: 'repository' }];
+  for (const register of [state.register, state.registerAnnounced]) assert.deepEqual(await register(folder, 'again'), registered('folder', false));
+  assert.deepEqual(await state.registerAnnounced(repository, 'again'), registered('repo', false));
+  assert.deepEqual(await state.register(repository, 'again'), rejected('not_git_root'));
+  assert.deepEqual(await state.projects(state.announced), kinds);
+  assert.deepEqual(await state.projects(), [{ id: 'folder', name: 'folder' }, { id: 'repo', name: 'repo' }]);
+});
+
+test('a folder project is stored with its kind, only for a client that asked, and never when replaced after inspection', async t => {
+  let replace = true;
+  const state = await application(t, real => ({
+    retain: async (path, signal, admission) => {
+      const folder = await real.retain(path, signal, admission);
+      if (!replace) return folder;
+      replace = false;
+      await rename(path, `${path}-original`);
+      await mkdir(path);
+      return folder;
+    },
+  }));
+  const folder = join(state.projectsRoot, 'plain');
+  await mkdir(folder);
+  const signal = new AbortController().signal;
+  await assert.rejects(state.registration.register({ path: folder, name: 'plain' }, signal, 'repository-or-folder'), { code: 'storage_unavailable' });
+  assert.deepEqual(await state.store.listManagedProjects(), []);
+  assert.deepEqual(await state.registration.register({ path: folder, name: 'plain' }, signal), rejected('not_git_root'));
+  assert.deepEqual(await state.registration.register({ path: folder, name: 'plain' }, signal, 'repository'), rejected('not_git_root'));
+  assert.deepEqual(await state.store.listManagedProjects(), []);
+  assert.deepEqual(await state.registration.register({ path: folder, name: 'plain' }, signal, 'repository-or-folder'), registered('plain', true));
+  assert.deepEqual(await state.store.listManagedProjects(), [{ id: 'plain', name: 'plain', path: folder, kind: 'folder' }]);
+  const unknown = { id: 'odd', name: 'odd', path: join(state.projectsRoot, 'odd'), kind: 'bare' } as unknown as RegisteredProject;
+  await assert.rejects(state.store.registerManagedProject(unknown, [], state.projectsRoot), { code: 'invalid_input' });
+  assert.throws(() => new ConfiguredProjectRegistry([{ id: 'host', name: 'Host', path: folder, kind: 'folder' }]));
+});
+
+test('a folder verdict from the inspector is refused for a client that did not announce folder projects', async t => {
+  const state = await application(t, real => ({ retain: (path, signal) => real.retain(path, signal, 'repository-or-folder') }));
+  const folder = join(state.projectsRoot, 'plain');
+  await mkdir(folder);
+  const signal = new AbortController().signal;
+  assert.deepEqual(await state.registration.register({ path: folder, name: 'plain' }, signal), rejected('not_git_root'));
+  assert.deepEqual(await state.store.listManagedProjects(), []);
+  assert.deepEqual(await state.registration.register({ path: folder, name: 'plain' }, signal, 'repository-or-folder'), registered('plain', true));
+});
+
+test('a repository whose root cannot be confirmed is refused as unavailable for an announcing client and unchanged for a legacy one', { timeout: 60_000 }, async t => {
+  const state = await runner(t);
+  const repository = await state.repository('repo');
+  const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const original = process.env.PATH;
+  state.closers.push(() => { process.env.PATH = original; });
+  const substitute = async (name: string, outcome: string) => {
+    const bin = join(state.temp, `root-${name}`);
+    await mkdir(bin);
+    await writeFile(join(bin, 'git'), `#!/bin/sh\ncase "$*" in *--show-toplevel*) ${outcome} ;; esac\nexec "${git}" "$@"\n`, { mode: 0o700 });
+    process.env.PATH = `${bin}:${original ?? ''}`;
+  };
+  const unconfirmed: Readonly<Record<string, string>> = {
+    failing: 'exit 1',
+    crashing: 'kill -9 $$',
+    misreporting: 'echo "fatal: unable to access config" >&2; exit 128',
+    misplaced: 'echo /nonexistent/codevo-registration; exit 0',
+    hanging: 'exec sleep 30',
+  };
+  for (const [name, outcome] of Object.entries(unconfirmed)) {
+    await substitute(name, outcome);
+    const started = Date.now();
+    const reply = await state.post(route, { path: repository, name: 'repo' }, state.announced);
+    assert.equal(reply.status, 503, name);
+    assert.deepEqual(await reply.json(), { error: 'storage_unavailable' }, name);
+    assert.ok(Date.now() - started < 8_000, name);
+    assert.deepEqual(await state.projects(state.announced), [], name);
+  }
+  for (const name of ['failing', 'misreporting', 'misplaced']) {
+    await substitute(`legacy-${name}`, unconfirmed[name]!);
+    assert.deepEqual(await state.register(repository, 'repo'), rejected('not_git_root'), name);
+  }
+  await substitute('bare', 'echo "fatal: this operation must be run in a work tree" >&2; exit 128');
+  assert.deepEqual(await state.registerAnnounced(repository, 'repo'), rejected('not_git_root'));
+  process.env.PATH = original;
+  assert.deepEqual(await state.projects(state.announced), []);
+  assert.deepEqual(await state.registerAnnounced(join(repository, '.git'), 'repo'), rejected('not_git_root'));
+  assert.deepEqual(await state.registerAnnounced(repository, 'repo'), registered('repo', true));
 });

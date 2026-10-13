@@ -22,12 +22,13 @@ export class ConfiguredProjectRegistry implements ProjectRegistry {
   constructor(projects: readonly RegisteredProject[]) {
     for (const project of projects) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(project.id) || !project.name.trim() ||
-          project.name.length > 100 || !isAbsolute(project.path) || this.projects.has(project.id))
+          project.name.length > 100 || !isAbsolute(project.path) || this.projects.has(project.id) || project.kind !== undefined)
         throw new Error('Invalid or duplicate project registration');
       this.projects.set(project.id, Object.freeze({ ...project, path: resolve(project.path) }));
     }
   }
   async list() { return [...this.projects.values()].map(({ id, name }) => ({ id, name })); }
+  async listings() { return [...this.projects.values()].map(({ id, name }) => ({ id, name, kind: 'repository' as const })); }
   async get(id: string): Promise<RegisteredProject> {
     const project = this.projects.get(id);
     if (!project) throw new RunnerError('not_found');

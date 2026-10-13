@@ -8,6 +8,7 @@ import {
   type GitOperationKind, type GitOperationResult, type PushTarget, type ThreadGitStatus,
 } from '../domain/git-sync.js';
 import { isBranchList, isCheckoutStatus, isCommitResult, isGitOperation, isThreadGitStatus } from '../domain/git-sync-wire.js';
+import { requireRepository } from '../domain/project-kind.js';
 import { gitLeaseKey, type GitCoordination } from './git-coordination.js';
 import type {
   GitActivity, GitRepository, GitSyncApplication, GitWorkdir, GitWorkspaces, ManagedInstructionPaths, OriginBaseResolver,
@@ -226,7 +227,13 @@ export class GitSyncService implements GitSyncApplication, WorkSource {
 
   private async project(projectId: string): Promise<RegisteredProject> {
     if (!validProjectId(projectId)) throw new RunnerError('invalid_input');
-    return this.registry.get(projectId);
+    return this.repositoryProject(projectId);
+  }
+
+  private async repositoryProject(projectId: string): Promise<RegisteredProject> {
+    const project = await this.registry.get(projectId);
+    requireRepository(project);
+    return project;
   }
 
   private async checkout(project: RegisteredProject, signal: AbortSignal): Promise<GitWorkdir> {
@@ -237,7 +244,7 @@ export class GitSyncService implements GitSyncApplication, WorkSource {
     if (!isId(taskId)) throw new RunnerError('invalid_input');
     const task = await this.tasks.getTask(taskId);
     if (!task.projectId) throw new RunnerError('conflict');
-    const project = await this.registry.get(task.projectId);
+    const project = await this.repositoryProject(task.projectId);
     const { workspaceTaskId } = await this.tasks.getTaskSession(taskId);
     const thread = await guarded(() => this.workspaces.thread(project, workspaceTaskId, signal), signal);
     return { project, workspaceTaskId, thread, leaseKey: gitLeaseKey(thread.mode, project.id, workspaceTaskId) };

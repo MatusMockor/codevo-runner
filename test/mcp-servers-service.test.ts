@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MCP_SERVERS_POLICY, McpServersService, type McpServersPolicy, type McpServersWorkdir } from '../src/application/mcp-servers-service.js';
+import { MCP_SERVERS_POLICY, McpServersService, mcpServersCheckout, type McpServersPolicy, type McpServersWorkdir } from '../src/application/mcp-servers-service.js';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FolderProjectWorkspace } from '../src/infrastructure/projects/folder-workspace.js';
+import { GitProjectWorkspace } from '../src/infrastructure/projects/index.js';
+import { ProjectWorkspaceRouter } from '../src/infrastructure/projects/workspace-router.js';
+import { folderProjectRunner } from './folder-project-fixture.js';
 import { RunnerError } from '../src/domain/contracts.js';
 import type { RegisteredProject } from '../src/domain/execution.js';
 import type { McpServers, McpServersProvider } from '../src/domain/mcp-servers.js';
@@ -196,4 +203,36 @@ test('close aborts pending probes, waits for them, publishes nothing late and re
   await assert.rejects(service.read('missing', 'codex', connected()), unavailable);
   assert.equal(state.calls.length, calls);
   await service.close();
+});
+
+test('a folder project is probed, and managed, in its own pinned folder while the same folder as a repository project stays unavailable', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runner-mcp-folder-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const folder = join(root, 'folder'), data = join(root, 'data');
+  await mkdir(folder);
+  const live = await lstat(folder);
+  const pinned = { cwd: folder, identity: { dev: live.dev, ino: live.ino } };
+  const workspaces = new ProjectWorkspaceRouter(data, new GitProjectWorkspace(data), new FolderProjectWorkspace(data));
+  const project: RegisteredProject = { id: 'folder', name: 'Folder', path: folder, kind: 'folder' };
+  const probed: McpServersWorkdir[] = [];
+  const reading = (registered: RegisteredProject) => new McpServersService({ get: async () => registered }, workspaces,
+    { read: async (provider, workdir) => { probed.push(workdir); return snapshot(provider, 'listed'); } });
+  for (const provider of ['claude', 'codex'] as const) assert.deepEqual(names(await reading(project).read('folder', provider, connected())), ['listed']);
+  assert.deepEqual(probed, [pinned, pinned]);
+  assert.deepEqual(await mcpServersCheckout(workspaces, project, connected(), MCP_SERVERS_POLICY.checkoutMs), pinned);
+  await assert.rejects(reading({ id: 'folder', name: 'Folder', path: folder }).read('folder', 'claude', connected()), unavailable);
+  await assert.rejects(mcpServersCheckout(workspaces, { id: 'folder', name: 'Folder', path: folder }, connected(), MCP_SERVERS_POLICY.checkoutMs));
+  await assert.rejects(mcpServersCheckout(workspaces, project, AbortSignal.abort(), MCP_SERVERS_POLICY.checkoutMs), unavailable);
+  assert.equal(probed.length, 2);
+});
+
+test('the MCP servers route lists a folder project from the folder without launching Git', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const folder = await state.registerFolder('workspace');
+  const launched = await state.gitLaunches();
+  const reply = await state.get('/v1/projects/workspace/mcp-servers/claude');
+  assert.equal(reply.status, 200);
+  assert.deepEqual(names(await reply.json() as McpServers), ['folder-tools']);
+  assert.equal((await readFile(join(state.temp, 'cli', 'cwd'), 'utf8')).trim(), folder);
+  assert.deepEqual(await state.gitLaunches(), launched);
 });

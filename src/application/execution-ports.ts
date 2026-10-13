@@ -7,7 +7,7 @@ import type { WorkspaceFiles, WorkspaceFileDiff } from '../domain/workspace-file
 import type { ContinueTask, ResumeState, TaskSession } from '../domain/task-resume.js';
 import type { Task, TaskIsolation } from '../domain/contracts.js';
 import type { StartBase } from '../domain/git-sync.js';
-import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
+import type { ExecutionRequest, ExecutionResult, OutputChannel, ProjectListing, ProjectSummary, RegisteredProject, WorkspaceDiff, StagedExecutionAttachment } from '../domain/execution.js';
 
 /** Each state change and its event must commit atomically. Terminal state wins races. */
 export interface ExecutionRepository {
@@ -39,11 +39,13 @@ export interface ExecutionRepository {
 /** Registration comes from trusted host configuration, never a client filesystem path. */
 export interface ProjectRegistry {
   list(): Promise<readonly ProjectSummary[]>;
+  listings?(): Promise<readonly ProjectListing[]>;
   get(id: string): Promise<RegisteredProject>;
 }
 /** Creates a task-owned checkout and returns its server-local working directory. */
 export interface ProjectWorkspace {
   repositoryIdentity?(project: RegisteredProject, signal?: AbortSignal): Promise<string | null>;
+  validateStart?(project: RegisteredProject, isolation?: TaskIsolation, base?: StartBase): void;
   prepare(project: RegisteredProject, taskId: string, signal?: AbortSignal, isolation?: TaskIsolation, base?: StartBase): Promise<string>;
   awaitGitLease?(project: RegisteredProject, workspaceTaskId: string, isolation: TaskIsolation, signal?: AbortSignal): Promise<void>;
   diff(taskId: string, project?: RegisteredProject): Promise<WorkspaceDiff>;
@@ -81,6 +83,7 @@ export interface ExecutionApplication {
   continue(taskId: string, input: unknown, turn?: TurnOptions): Promise<Readonly<{ task: Task; created: boolean }>>;
   cancel(taskId: string): Promise<Task>;
   projects(): Promise<readonly ProjectSummary[]>;
+  projectListings?(): Promise<readonly ProjectListing[]>;
   diff(taskId: string): Promise<WorkspaceDiff>;
   files(taskId: string): Promise<WorkspaceFiles>;
   fileDiff(taskId: string, input: unknown): Promise<WorkspaceFileDiff>;

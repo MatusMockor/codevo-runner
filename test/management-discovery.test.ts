@@ -60,3 +60,35 @@ test('management discovery preserves the strict legacy descriptor and negotiates
   const silent = await (await fetch(url)).json();
   assert.equal('fileAttachments' in silent.capabilities, false);
 });
+
+test('folderProjects is announced only to clients that understand it and only when registration is offered', async t => {
+  const runnerId = randomUUID();
+  const root = await mkdtemp(join(tmpdir(), 'runner-folder-negotiation-'));
+  const services = await openRunnerServices(join(root, 'data'), runnerId, { projects: [], projectsRoot: join(root, 'projects'), providers: [] });
+  const stored = await openRunnerServices(join(root, 'stored'), runnerId);
+  const descriptor = { protocolVersion: 1 as const, runnerId, name: 'Folder negotiation', capabilities: { taskExecution: false, eventReplay: true, folderProjects: true } };
+  const apps = [await createRunnerApplication(descriptor, value => value === 'Bearer test', services), await createRunnerApplication(descriptor, value => value === 'Bearer test', stored),
+    await createRunnerApplication(descriptor, value => value === 'Bearer test')];
+  t.after(async () => {
+    for (const app of apps) await app.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const capabilities = async (app: typeof apps[number], header?: string) => {
+    if (!app.getHttpServer().listening) await app.listen(0, '127.0.0.1');
+    const response = await fetch(`http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}/v1/runner`, { headers: { authorization: 'Bearer test',
+      ...(header === undefined ? {} : { 'x-codevo-client-capabilities': header }) } });
+    assert.equal(response.status, 200);
+    return (await response.json() as { capabilities: Record<string, unknown> }).capabilities;
+  };
+  const [executing, storing, discovering] = apps as [typeof apps[number], typeof apps[number], typeof apps[number]];
+  const legacy = await capabilities(executing);
+  assert.equal('folderProjects' in legacy, false);
+  assert.deepEqual(await capabilities(executing, 'folderProjects'), { ...legacy, folderProjects: true });
+  assert.deepEqual(await capabilities(executing, 'fileAttachments, folderProjects'), { ...legacy, fileAttachments: true, folderProjects: true });
+  for (const header of ['folderprojects', 'FolderProjects', 'folderProjects2', 'folder-projects', 'projectManagement'])
+    assert.equal('folderProjects' in await capabilities(executing, header), false, header);
+  for (const app of [storing, discovering]) {
+    assert.equal('folderProjects' in await capabilities(app), false);
+    assert.equal((await capabilities(app, 'folderProjects')).folderProjects, false);
+  }
+});

@@ -47,7 +47,7 @@ export class CloneDatabase {
     });
   }
   registerManagedProject(project: RegisteredProject, configured: readonly ProjectSummary[], projectsRoot: string): ProjectRegistration {
-    if (project.id !== project.name) throw new RunnerError('invalid_input');
+    if (project.id !== project.name || !closedKind(project)) throw new RunnerError('invalid_input');
     return this.transaction(() => {
       const existing = this.listManagedProjects().find(item => item.path === project.path);
       if (existing) return { status: 'registered', project: { id: existing.id, name: existing.name }, created: false };
@@ -116,6 +116,15 @@ export class CloneDatabase {
     });
   }
   listManagedProjects(): readonly RegisteredProject[] {
-    return this.db.prepare('SELECT payload FROM managed_projects ORDER BY name').all().map(row => JSON.parse(row['payload'] as string) as RegisteredProject);
+    return this.db.prepare('SELECT payload FROM managed_projects ORDER BY name').all().map(row => stored(JSON.parse(row['payload'] as string) as RegisteredProject));
   }
+}
+
+function closedKind(project: RegisteredProject): boolean {
+  return project.kind === undefined || project.kind === 'folder';
+}
+
+function stored(project: RegisteredProject): RegisteredProject {
+  if (!closedKind(project)) throw new RunnerError('storage_unavailable');
+  return project;
 }

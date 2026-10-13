@@ -10,6 +10,7 @@ import type { RunnerDescriptor } from '../server.js';
 import { DESCRIPTOR, SERVICES, type RunnerServices } from './services.js';
 import { fileName, sendFileAttachment, uploadFileAttachment } from './file-attachments.js';
 import { FILE_ATTACHMENT_KIND, parseAttachmentKind } from '../domain/file-attachment.js';
+import { FOLDER_PROJECTS_CAPABILITY } from '../domain/project-kind.js';
 
 function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions' | 'awaiting'> {
   const { instructions: _instructions, awaiting: _awaiting, ...publicValue } = record as T & Pick<Task, 'awaiting'>;
@@ -223,10 +224,14 @@ export class ProjectController {
 
   @Get()
   @LeaseExempt('storage-read')
-  list(@Res() response: Response) {
+  list(@Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
-      if (!this.services.execution) throw new RunnerError('not_found');
-      send(response, 200, { items: await this.services.execution.projects() });
+      const execution = this.services.execution;
+      if (!execution) throw new RunnerError('not_found');
+      const announced = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(FOLDER_PROJECTS_CAPABILITY);
+      if (!announced || !execution.projectListings) return send(response, 200, { items: await execution.projects() });
+      const items = await execution.projectListings();
+      send(response, 200, { items: items.map(({ id, name, kind }) => ({ id, name, kind })) });
     });
   }
 }

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, rename, realpath, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, rm, symlink, rename, realpath, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { ConfiguredProjectRegistry, GitProjectWorkspace } from '../src/infrastructure/projects/index.js';
+import { FolderProjectWorkspace } from '../src/infrastructure/projects/folder-workspace.js';
+import { ProjectWorkspaceRouter } from '../src/infrastructure/projects/workspace-router.js';
 
 const exec = promisify(execFile);
 async function fixture(t: {after(fn:()=>Promise<void>):void}) {
@@ -207,3 +209,152 @@ for (const replaced of ['sourceIdentity', 'commonIdentity'] as const) {
     await assert.rejects(workspace.diff(taskId), /conflict/);
   });
 }
+
+async function folderFixture(t: {after(fn:()=>Promise<void>):void}) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'codevo-folder-workspace-')));
+  const path = process.env.PATH;
+  t.after(async () => {
+    process.env.PATH = path;
+    await rm(root, { recursive: true, force: true });
+  });
+  const folder = join(root, 'folder'), data = join(root, 'data'), bin = join(root, 'bin'), launches = join(root, 'git-launches');
+  for (const directory of [folder, bin]) await mkdir(directory);
+  await writeFile(join(folder, 'notes.txt'), 'plain folder\n');
+  const git = (await exec('sh', ['-c', 'command -v git'])).stdout.trim();
+  await writeFile(join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$PWD $*" >> "${launches}"\nexec "${git}" "$@"\n`, { mode: 0o700 });
+  process.env.PATH = `${bin}:${path ?? ''}`;
+  const project = { id: 'folder', name: 'Folder', path: folder, kind: 'folder' as const };
+  const router = () => new ProjectWorkspaceRouter(data, new GitProjectWorkspace(data), new FolderProjectWorkspace(data));
+  const gitLaunches = async () => (await readFile(launches, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  return { root, folder, data, git, project, router, workspace: router(), gitLaunches };
+}
+const notRepository = { name: 'RunnerError', code: 'git_not_repository' };
+const invalid = { name: 'RunnerError', code: 'invalid_input' };
+const conflicting = { name: 'RunnerError', code: 'conflict' };
+
+test('a folder project prepares in place only and records folder metadata instead of a Git baseline', async t => {
+  const { workspace, project, folder, data, gitLaunches } = await folderFixture(t);
+  const origin = { kind: 'origin-branch', branch: 'main' } as const;
+  for (const isolation of ['worktree', undefined] as const) {
+    assert.throws(() => workspace.validateStart(project, isolation), invalid);
+    await assert.rejects(workspace.prepare(project, randomUUID(), undefined, isolation), invalid);
+  }
+  assert.throws(() => workspace.validateStart(project, 'in-place', origin), invalid);
+  await assert.rejects(workspace.prepare(project, randomUUID(), undefined, 'in-place', origin), invalid);
+  await assert.rejects(workspace.prepare(project, '../escape', undefined, 'in-place'), invalid);
+  await assert.rejects(workspace.prepare(project, randomUUID(), AbortSignal.abort(), 'in-place'), { name: 'AbortError' });
+  await assert.rejects(readdir(data), { code: 'ENOENT' });
+  assert.equal(workspace.validateStart(project, 'in-place'), undefined);
+  assert.equal(workspace.validateStart(project, 'in-place', { kind: 'checkout-head' }), undefined);
+  for (const isolation of ['worktree', 'in-place', undefined] as const) assert.equal(workspace.validateStart({ ...project, kind: undefined }, isolation, origin), undefined);
+  const taskId = randomUUID();
+  assert.equal(await workspace.prepare(project, taskId, undefined, 'in-place'), folder);
+  const live = await lstat(folder);
+  assert.deepEqual(JSON.parse(await readFile(join(data, 'workspace-metadata', taskId), 'utf8')),
+    { version: 2, kind: 'folder', mode: 'in-place', projectId: 'folder', source: folder, sourceIdentity: { dev: live.dev, ino: live.ino } });
+  assert.deepEqual(await readdir(data), ['workspace-metadata']);
+  await assert.rejects(workspace.prepare(project, taskId, undefined, 'in-place'), { code: 'EEXIST' });
+  assert.equal(await workspace.resume(project, taskId), folder);
+  assert.deepEqual(await workspace.identity(project, taskId), { dev: live.dev, ino: live.ino });
+  assert.deepEqual(await workspace.checkout(project), { cwd: folder, identity: { dev: live.dev, ino: live.ino } });
+  assert.equal(await workspace.repositoryIdentity(project), null);
+  assert.equal(await workspace.awaitGitLease(project, taskId, 'in-place'), undefined);
+  await assert.rejects(workspace.thread(project, taskId), notRepository);
+  await assert.rejects(workspace.diff(taskId, project), notRepository);
+  await assert.rejects(workspace.diff(taskId), notRepository);
+  await assert.rejects(workspace.files(project, taskId), notRepository);
+  await assert.rejects(workspace.fileDiff(project, taskId, 'notes.txt'), notRepository);
+  assert.equal(await readFile(join(folder, 'notes.txt'), 'utf8'), 'plain folder\n');
+  assert.deepEqual(await gitLaunches(), []);
+});
+
+test('a folder that later becomes a repository stays a folder and Git is never run in it', async t => {
+  const { workspace, router, project, folder, git, gitLaunches } = await folderFixture(t);
+  const taskId = randomUUID();
+  await workspace.prepare(project, taskId, undefined, 'in-place');
+  await exec(git, ['init', '-q', '-b', 'main', folder]);
+  await exec(git, ['-C', folder, 'add', '.']);
+  await exec(git, ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'agent commit']);
+  const restarted = router();
+  const later = randomUUID();
+  assert.equal(await restarted.prepare(project, later, undefined, 'in-place'), folder);
+  for (const id of [taskId, later]) {
+    assert.equal(await restarted.resume(project, id), folder);
+    await assert.rejects(restarted.thread(project, id), notRepository);
+    await assert.rejects(restarted.diff(id, project), notRepository);
+    await assert.rejects(restarted.files(project, id), notRepository);
+  }
+  assert.equal(await restarted.repositoryIdentity(project), null);
+  assert.equal((await restarted.checkout(project)).cwd, folder);
+  assert.deepEqual(await gitLaunches(), []);
+  await assert.rejects(lstat(join(folder, '.git', 'refs', 'codevo')), { code: 'ENOENT' });
+});
+
+test('a task whose recorded kind differs from its project is refused in both directions', async t => {
+  const { workspace, project, folder, root, git } = await folderFixture(t);
+  const folderTask = randomUUID();
+  await workspace.prepare(project, folderTask, undefined, 'in-place');
+  const source = join(root, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'tracked.txt'), 'original\n');
+  await exec(git, ['init', '-q', '-b', 'main', source]);
+  await exec(git, ['-C', source, 'add', '.']);
+  await exec(git, ['-C', source, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'initial']);
+  const repository = { id: 'source', name: 'Source', path: source };
+  const repositoryTask = randomUUID();
+  await workspace.prepare(repository, repositoryTask, undefined, 'in-place');
+  await exec(git, ['init', '-q', '-b', 'main', folder]);
+  const mismatched = [[{ id: 'folder', name: 'Folder', path: folder }, folderTask], [{ ...repository, kind: 'folder' as const }, repositoryTask]] as const;
+  for (const [presented, taskId] of mismatched) {
+    await assert.rejects(workspace.resume(presented, taskId), conflicting);
+    await assert.rejects(workspace.identity(presented, taskId), conflicting);
+    await assert.rejects(workspace.thread(presented, taskId), conflicting);
+    await assert.rejects(workspace.diff(taskId, presented), conflicting);
+    await assert.rejects(workspace.files(presented, taskId), conflicting);
+    await assert.rejects(workspace.fileDiff(presented, taskId, 'tracked.txt'), conflicting);
+  }
+  for (const id of ['../escape', 'not-a-task', '']) {
+    await assert.rejects(workspace.resume(project, id), invalid);
+    await assert.rejects(workspace.diff(id, project), invalid);
+    await assert.rejects(workspace.thread(project, id), invalid);
+  }
+  await assert.rejects(workspace.resume(project, randomUUID()), conflicting);
+  await assert.rejects(workspace.diff(randomUUID(), project), notRepository);
+  await writeFile(join(source, 'tracked.txt'), 'edited\n');
+  assert.match((await workspace.diff(repositoryTask, repository)).patch, /\+edited/);
+  assert.match((await workspace.diff(repositoryTask)).patch, /\+edited/);
+  assert.equal((await workspace.thread(repository, repositoryTask)).mode, 'in-place');
+});
+
+test('repository projects pass through the router unchanged, including a repository that lost its Git directory', async t => {
+  const { workspace: direct, project, source, root } = await fixture(t);
+  const data = join(root, 'data');
+  const routed = new ProjectWorkspaceRouter(data, direct, new FolderProjectWorkspace(data));
+  const worktree = randomUUID(), inPlace = randomUUID();
+  const cwd = await routed.prepare(project, worktree);
+  assert.equal(cwd, join(data, 'workspaces', worktree));
+  assert.equal(await routed.prepare(project, inPlace, undefined, 'in-place'), await realpath(source));
+  await writeFile(join(cwd, 'tracked.txt'), 'task edit\n');
+  for (const taskId of [worktree, inPlace]) {
+    assert.equal(await routed.resume(project, taskId), await direct.resume(project, taskId));
+    assert.deepEqual(await routed.identity(project, taskId), await direct.identity(project, taskId));
+    assert.deepEqual(await routed.thread(project, taskId), await direct.thread(project, taskId));
+    assert.deepEqual(await routed.diff(taskId, project), await direct.diff(taskId, project));
+    assert.deepEqual(await routed.files(project, taskId), await direct.files(project, taskId));
+  }
+  assert.deepEqual(await routed.fileDiff(project, worktree, 'tracked.txt'), await direct.fileDiff(project, worktree, 'tracked.txt'));
+  assert.deepEqual(await routed.checkout(project), await direct.checkout(project));
+  assert.equal(await routed.repositoryIdentity(project), null);
+  await rm(join(root, 'data', 'workspace-metadata', worktree));
+  assert.equal(await routed.resume(project, worktree), cwd);
+  await rm(join(source, '.git'), { recursive: true });
+  const failure = (attempt: Promise<unknown>) => attempt.then(() => 'resolved', (error: Error) => `${error.name}: ${error.message}`);
+  for (const taskId of [worktree, inPlace]) {
+    assert.equal(await failure(routed.resume(project, taskId)), await failure(direct.resume(project, taskId)));
+    assert.notEqual(await failure(routed.resume(project, taskId)), 'resolved');
+    assert.equal(await failure(routed.diff(taskId, project)), await failure(direct.diff(taskId, project)));
+  }
+  assert.equal(await failure(routed.checkout(project)), await failure(direct.checkout(project)));
+  assert.notEqual(await failure(routed.checkout(project)), 'resolved');
+  assert.equal(await failure(routed.prepare(project, randomUUID(), undefined, 'in-place')), await failure(direct.prepare(project, randomUUID(), undefined, 'in-place')));
+});

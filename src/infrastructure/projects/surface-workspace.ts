@@ -3,6 +3,7 @@ import type { ProjectRegistry, ProjectWorkspace, ExecutionRepository } from '../
 import type { TaskRepository } from '../../application/ports.js';
 import type { SurfaceWorkspaceResolver, SurfaceWorkspace } from '../../application/surface-workspace.js';
 import { isId, RunnerError } from '../../domain/contracts.js';
+import { projectKind } from '../../domain/project-kind.js';
 
 export class RegisteredSurfaceWorkspaceResolver implements SurfaceWorkspaceResolver {
   constructor(private readonly registry: ProjectRegistry, private readonly workspaces: ProjectWorkspace,
@@ -25,7 +26,7 @@ export class RegisteredSurfaceWorkspaceResolver implements SurfaceWorkspaceResol
       signal?.throwIfAborted();
     };
     await revalidate();
-    return { cwd, identity: { dev: identity.dev, ino: identity.ino }, revalidate };
+    return { cwd, identity: { dev: identity.dev, ino: identity.ino }, kind: projectKind(project), revalidate };
   }
   private async workspaceTask(projectId: string, taskId: string) {
     if ((await this.tasks.getTask(taskId)).projectId !== projectId) throw new RunnerError('not_found');

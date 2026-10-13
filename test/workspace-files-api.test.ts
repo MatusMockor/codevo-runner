@@ -12,6 +12,7 @@ import type { Task } from '../src/domain/contracts.js';
 import { CliProviderExecutor } from '../src/infrastructure/execution/index.js';
 import { openRunnerServices } from '../src/runtime.js';
 import { createRunnerApplication } from '../src/server.js';
+import { folderProjectRunner, NOT_REPOSITORY } from './folder-project-fixture.js';
 
 const authorization = 'Bearer workspace-files-http-test';
 const exec = promisify(execFile);
@@ -135,4 +136,34 @@ test('HTTP file review enforces authentication, runner identity and closed metho
     assert.equal((await fetch(endpoint, { ...init, headers: { authorization, 'content-type': 'application/json', 'x-codevo-runner-id': runnerId } })).status, 200);
     assert.equal((await fetch(endpoint, { method: 'DELETE', headers: { authorization } })).status, 405);
   }
+});
+
+test('a folder project task answers every review route with git_not_repository instead of an empty change list', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const folder = await state.registerFolder('workspace');
+  state.provider(async request => {
+    await writeFile(join(request.cwd, 'notes.txt'), 'agent edit\n');
+    await writeFile(join(request.cwd, 'new.txt'), 'new file\n');
+    return { exitCode: 0, sessionId: randomUUID() };
+  });
+  const thread = await state.run('workspace');
+  assert.equal(thread.status, 'succeeded');
+  const review = async () => {
+    const launched = await state.gitLaunches();
+    const replies = [await state.get(`/v1/tasks/${thread.id}/diff`), await state.get(`/v1/tasks/${thread.id}/files`),
+      await state.post(`/v1/tasks/${thread.id}/file-diff`, { path: 'notes.txt' }), await state.post(`/v1/tasks/${thread.id}/file-diff`, { path: 'missing.txt' })];
+    for (const reply of replies) {
+      assert.equal(reply.status, 409, reply.url);
+      assert.deepEqual(await reply.json(), NOT_REPOSITORY, reply.url);
+    }
+    assert.deepEqual(await state.gitLaunches(), launched);
+  };
+  await review();
+  await exec(state.git, ['init', '-q', '-b', 'main', folder]);
+  await review();
+  assert.equal((await state.post(`/v1/tasks/${thread.id}/file-diff`, { path: '../outside' })).status, 400);
+  assert.equal((await state.get(`/v1/tasks/${randomUUID()}/files`)).status, 404);
+  const draft = await state.draft('in-place');
+  assert.equal((await state.get(`/v1/tasks/${draft.id}/files`)).status, 409);
+  assert.deepEqual(await (await state.get(`/v1/tasks/${draft.id}/files`)).json(), { error: 'conflict' });
 });

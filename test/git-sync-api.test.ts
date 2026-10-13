@@ -10,6 +10,8 @@ import test from 'node:test';
 import { openRunnerServices } from '../src/runtime.js';
 import { createRunnerApplication } from '../src/server.js';
 import { readConfig } from '../src/config.js';
+import { execFileSync } from 'node:child_process';
+import { folderProjectRunner, NOT_REPOSITORY } from './folder-project-fixture.js';
 
 type Example = Readonly<{ name: string; value: unknown }>;
 const fixture = JSON.parse(readFileSync(new URL('../../test/fixtures/remote-git-sync-wire.json', import.meta.url), 'utf8')) as
@@ -115,4 +117,45 @@ test('commit identity configuration must be complete, printable and bounded', ()
     { CODEVO_GIT_AUTHOR_NAME: ' ', CODEVO_GIT_AUTHOR_EMAIL: 'a@example.invalid' },
     { CODEVO_GIT_AUTHOR_NAME: 'é'.repeat(129), CODEVO_GIT_AUTHOR_EMAIL: 'a@example.invalid' }])
     assert.throws(() => readConfig({ ...base, ...invalid }), /CODEVO_GIT_AUTHOR/);
+});
+
+test('every git route answers git_not_repository for a folder project before any Git is launched', { timeout: 30_000 }, async t => {
+  const state = await folderProjectRunner(t);
+  const repository = await state.repository('repo');
+  const folder = await state.registerFolder('workspace');
+  assert.equal((await state.register(repository, 'repo')).status, 200);
+  const thread = await state.run('workspace');
+  assert.equal(thread.status, 'succeeded');
+  const refusals = async () => {
+    const launched = await state.gitLaunches();
+    const reads = ['/v1/projects/workspace/git/branches', '/v1/projects/workspace/git/status', `/v1/tasks/${thread.id}/git/status`];
+    const writes: readonly (readonly [string, unknown])[] = [
+      ['/v1/projects/workspace/git/fetch', { idempotencyKey: randomUUID() }], ['/v1/projects/workspace/git/update', { idempotencyKey: randomUUID() }],
+      [`/v1/tasks/${thread.id}/git/commit`, { message: 'Commit a folder' }],
+      [`/v1/tasks/${thread.id}/git/push`, { idempotencyKey: randomUUID(), target: 'thread-branch' }],
+      [`/v1/tasks/${thread.id}/git/push`, { idempotencyKey: randomUUID(), target: 'base-branch' }],
+    ];
+    for (const route of reads) {
+      const reply = await state.get(route);
+      assert.equal(reply.status, 409, route);
+      assert.deepEqual(await reply.json(), NOT_REPOSITORY, route);
+    }
+    for (const [route, body] of writes) {
+      const reply = await state.post(route, body);
+      assert.equal(reply.status, 409, route);
+      assert.deepEqual(await reply.json(), NOT_REPOSITORY, route);
+    }
+    assert.equal(state.services.gitSync!.working, false);
+    assert.deepEqual(await state.gitLaunches(), launched);
+  };
+  await refusals();
+  execFileSync(state.git, ['init', '-q', '-b', 'main', folder], { stdio: 'ignore' });
+  execFileSync(state.git, ['-C', folder, 'remote', 'add', 'origin', 'git@example.invalid:owner/project.git'], { stdio: 'ignore' });
+  await refusals();
+  assert.equal((await state.post('/v1/projects/workspace/git/fetch', { idempotencyKey: 'not-a-key' })).status, 400);
+  assert.equal((await state.post(`/v1/tasks/${thread.id}/git/commit`, { message: '' })).status, 400);
+  const status = await state.get('/v1/projects/repo/git/status');
+  assert.equal(status.status, 200);
+  assert.equal((await status.json() as { branch: string }).branch, 'main');
+  assert.notDeepEqual(await state.gitLaunches(), []);
 });
