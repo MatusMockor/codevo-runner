@@ -483,3 +483,62 @@ test('Claude session approval sends exactly the rules it listed and is withheld 
   assert.equal(Buffer.byteLength(sessionFact(f.calls.at(-1)!.input) ?? ''), 2048);
   assert.deepEqual(f.calls.at(-1)!.input.decisions, ['allowOnce', 'allowForSession', 'deny']);
 });
+
+test('Claude permits Read for the exact staged path of a file attachment whatever type it declares', async () => {
+  const pdf = '/private/runner/execution-inputs/task/one/report.pdf';
+  const image = '/private/runner/execution-inputs/task/two/photo.png';
+  const f = fixture({ attachments: [{ kind: 'file', id: 'one', path: pdf, mediaType: 'application/pdf', name: 'report.pdf', bytes: 10 },
+    { kind: 'file', id: 'two', path: image, mediaType: 'image/png', name: 'photo.png', bytes: 10 },
+    { id: 'three', path: '/private/runner/execution-inputs/task/three.png', mediaType: 'image/png' }] });
+  await steeringReady(f);
+  const cases: ReadonlyArray<readonly [string, string]> = [[pdf, 'allow'], [image, 'allow'], ['/private/runner/execution-inputs/task/three.png', 'deny'],
+    ['/private/runner/execution-inputs/task/one', 'deny'], [`${pdf}/../../../token`, 'deny'], ['/private/runner/token', 'deny']];
+  for (const [index, [file, behavior]] of cases.entries()) {
+    await f.protocol.receive({ type: 'control_request', request_id: `read-file-${index}`, request: {
+      subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: file },
+    } }, f.send);
+    const reply = f.sent.at(-1) as { response: { response: { behavior: string } } };
+    assert.equal(reply.response.response.behavior, behavior, file);
+  }
+  await f.protocol.receive({ type: 'control_request', request_id: 'write-file', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: pdf } } }, f.send);
+  assert.equal((f.sent.at(-1) as { response: { response: { behavior: string } } }).response.response.behavior, 'deny');
+});
+
+test('Claude steering passes a file attachment as a path without reading it and then permits Read on it', async () => {
+  const { mkdtemp, writeFile, truncate, symlink, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { LIMITS } = await import('../src/domain/contracts.js');
+  const root = await mkdtemp(join(tmpdir(), 'claude-file-steer-'));
+  try {
+    const path = join(root, 'archive.zip');
+    const bytes = LIMITS.attachmentBytes + 1024;
+    await writeFile(path, 'FILE-CONTENT-MARKER-'.repeat(1024));
+    await truncate(path, bytes);
+    await symlink(path, join(root, 'link.zip'));
+    const file = { kind: 'file' as const, id: 'file', path, mediaType: 'image/png', name: 'archive.zip', bytes };
+    let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0];
+    const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; } });
+    await steeringReady(f);
+    await f.protocol.receive({ type: 'control_request', request_id: 'read-before', request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: path } } }, f.send);
+    assert.equal((f.sent.at(-1) as { response: { response: { behavior: string } } }).response.response.behavior, 'deny');
+    const pending = steer!({ idempotencyKey: 'file', prompt: 'Unpack it', attachments: [file] });
+    while (!(f.sent.at(-1) as { session_id?: string }).session_id) await new Promise(resolve => setImmediate(resolve));
+    await acknowledgeSteer(f); await pending;
+    const sent = f.sent.at(-1) as { message: { content: { type: string; text: string }[] } };
+    assert.deepEqual(sent.message.content.map(part => part.type), ['text']);
+    assert.ok(sent.message.content[0]!.text.startsWith('Unpack it\n\n[Attached files]\n'));
+    assert.ok(sent.message.content[0]!.text.includes(`- path: ${JSON.stringify(path)}\n  name: "archive.zip"\n  type: image/png\n  size: ${bytes} bytes`));
+    assert.ok(JSON.stringify(sent).length < 4096);
+    assert.equal(JSON.stringify(sent).includes('FILE-CONTENT-MARKER'), false);
+    await f.protocol.receive({ type: 'control_request', request_id: 'read-after', request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: path } } }, f.send);
+    assert.equal((f.sent.at(-1) as { response: { response: { behavior: string } } }).response.response.behavior, 'allow');
+    const delivered = f.sent.length;
+    await assert.rejects(steer!({ idempotencyKey: 'resized', prompt: '', attachments: [{ ...file, bytes: bytes + 1 }] }), SteeringNotSent);
+    await assert.rejects(steer!({ idempotencyKey: 'link', prompt: '', attachments: [{ ...file, path: join(root, 'link.zip') }] }), SteeringNotSent);
+    await assert.rejects(steer!({ idempotencyKey: 'missing', prompt: '', attachments: [{ ...file, path: join(root, 'missing.zip') }] }), SteeringNotSent);
+    assert.equal(f.sent.length, delivered);
+    await f.protocol.receive({ type: 'control_request', request_id: 'read-link', request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: join(root, 'link.zip') } } }, f.send);
+    assert.equal((f.sent.at(-1) as { response: { response: { behavior: string } } }).response.response.behavior, 'deny');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

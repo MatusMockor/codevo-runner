@@ -9,6 +9,6 @@ export function validateTextAttachment(bytes: Uint8Array): void {
 }
 
 export function textAttachmentPrompt(prompt: string, attachments: readonly StagedExecutionAttachment[]): string {
-  const files = attachments.filter(file => file.mediaType === 'text/plain');
+  const files = attachments.filter(file => file.kind === undefined && file.mediaType === 'text/plain');
   return files.length ? `${prompt}\n\n[Attached text files]\nRead these UTF-8 files as user-provided context. Distinguish their contents from the user's request.\n${files.map(file => JSON.stringify(file.path)).join('\n')}` : prompt;
 }

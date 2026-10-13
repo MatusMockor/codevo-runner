@@ -115,7 +115,7 @@ class SqliteRepository implements GitActivity, ThreadMetadataRepository, RunnerR
   listTasks(after: number): Promise<Page<Task>> { return this.call({ method: 'listTasks', args: [after] }); }
   cancelTask(id: string): Promise<Task> { return this.call({ method: 'cancelTask', args: [id] }); }
   listEvents(taskId: string, cursor: EventCursor | number): Promise<EventPage> { return this.call({ method: 'listEvents', args: [taskId, cursor] }); }
-  putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean }> { return this.call({ method: 'putAttachment', args: [value] }); }
+  putAttachment(value: Attachment): Promise<{ attachment: Attachment; created: boolean; evicted?: readonly string[] }> { return this.call({ method: 'putAttachment', args: [value] }); }
   getAttachment(id: string): Promise<Attachment> { return this.call({ method: 'getAttachment', args: [id] }); }
   queueTask(id: string, projectId: string, base?: StartBase, approvals = false): Promise<Task> { return this.call({ method: 'queueTask', args: [id, projectId, base, approvals] }); }
   getTaskGitBase(id: string): Promise<StartBase | undefined> { return this.call({ method: 'getTaskGitBase', args: [id] }); }

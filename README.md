@@ -355,7 +355,9 @@ end-to-end task with your own provider account before relying on the deployment.
 - Tasks: create drafts, list, retrieve, cancel and poll stored events.
 - Opt-in execution: clone and list registered projects, start tasks, continue eligible
   provider sessions and retrieve worktree diffs.
-- Attachments: authenticated raw PNG/JPEG upload, metadata and content retrieval.
+- Attachments: authenticated raw PNG/JPEG and text upload, metadata and content retrieval;
+  other files up to 50 MiB as [file attachments](docs/api.md#file-attachments) for
+  clients that announce `fileAttachments`.
 - `taskDrafts`, `imageAttachments`, `eventReplay` and `subagentLifecycleRetention`
   are `true`;
   `taskExecution` reflects whether execution was enabled for this process.
@@ -370,7 +372,10 @@ are accepted for draft creation, task start, continuation and clone admission; u
 See [API details and limits](docs/api.md). Task and output history is durable SQLite
 storage with bounded read pages, without a fixed lifetime task count or output byte
 quota. The runner never automatically deletes persisted output. Attachment storage
-remains limited to 256 attachments (256 MiB total attachment bytes); generated
+is limited to 512 live attachments (2 GiB total attachment bytes); a full store
+evicts its oldest attachments that no draft, queued or running task (through its
+parts or its steering input) or queued message references and that are older than
+15 minutes; generated
 artifacts have their own count and byte limits. Actual disk exhaustion is reported.
 Previously evicted output cannot be recovered; legacy gap metadata remains visible.
 Local session import belongs to the editor and does not transfer provider history
@@ -598,8 +603,8 @@ older client always receives the oldest contract. The runner advertises the
 capabilities it can serve in `GET /v1/runner`. `projectManagement` and
 `threadManagement` are included only when the matching token is announced, so
 strict older editors remain compatible. `subagentLifecycleRetention` additionally
-negotiates lifecycle event encoding per request. `speechTranscription` is likewise
-included only when its token is announced.
+negotiates lifecycle event encoding per request. `speechTranscription` and
+`fileAttachments` are likewise included only when their token is announced.
 
 ### Speech transcription
 

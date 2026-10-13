@@ -1,12 +1,14 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openSqliteRepository } from '../src/infrastructure/sqlite/index.js';
 import { SteeringService } from '../src/application/steering-service.js';
 import type { ProviderSteerInput } from '../src/domain/steering.js';
+import { createAttachmentStore } from '../src/infrastructure/files/index.js';
+import { createExecutionAttachmentStager } from '../src/infrastructure/files/execution-attachments.js';
 
 async function fixture(t: TestContext) {
  const directory = await mkdtemp(join(tmpdir(), 'runner-steering-service-'));
@@ -118,4 +120,36 @@ test('steering owners are bounded and a stale close cannot remove a replacement'
  await session.close();
  assert.throws(()=>service.open(task.id,new AbortController().signal),{code:'conflict'});
  await Promise.all([...sessions,replacement].map(owner=>owner.close()));
+});
+
+test('file steering stages a private path-only copy for the live turn and removes it when the turn closes', async t => {
+ const directory = await realpath(await mkdtemp(join(tmpdir(), 'runner-steering-files-')));
+ const runnerId = randomUUID();
+ const repository = await openSqliteRepository(directory, runnerId);
+ const store = await createAttachmentStore(directory, runnerId, repository);
+ t.after(async () => { await store.close(); await repository.close(); await rm(directory, { recursive: true, force: true }); });
+ const task = (await repository.createTask({ idempotencyKey: randomUUID(), provider: 'claude', parts: [{ type: 'text', text: 'initial' }] })).task;
+ await repository.queueTask(task.id, 'project'); await repository.claimNextTask();
+ const service = new SteeringService(repository, await createExecutionAttachmentStager(directory, store));
+ const session = service.open(task.id, new AbortController().signal);
+ const id = randomUUID();
+ const bytes = Buffer.from('%PDF-1.7 steering payload');
+ await store.uploadFile(id, 'Q3 report.pdf', 'application/pdf', (async function* () { yield bytes; })(), new AbortController().signal);
+ const delivered: ProviderSteerInput[] = [];
+ const observed: Buffer[] = [];
+ session.ready(async value => { delivered.push(value); for (const file of value.attachments) observed.push(await readFile(file.path)); });
+ const unknown = { idempotencyKey: randomUUID(), parts: [{ type: 'attachment' as const, attachmentId: randomUUID() }] };
+ await assert.rejects(service.steer(task.id, unknown), { code: 'not_found' });
+ assert.equal(delivered.length, 0);
+ const message = { idempotencyKey: randomUUID(), parts: [{ type: 'text' as const, text: 'Use this file' }, { type: 'attachment' as const, attachmentId: id }] };
+ const receipt = await service.steer(task.id, message);
+ const path = join(directory, 'execution-inputs', receipt.messageId, id, 'Q3 report.pdf');
+ assert.deepEqual(delivered, [{ idempotencyKey: receipt.messageId, prompt: 'Use this file',
+  attachments: [{ kind: 'file', id, path, mediaType: 'application/pdf', name: 'Q3 report.pdf', bytes: bytes.length }] }]);
+ assert.deepEqual(observed, [bytes]);
+ assert.equal((await stat(path)).mode & 0o7777, 0o600);
+ await session.close();
+ await assert.rejects(stat(path));
+ assert.deepEqual(await readdir(join(directory, 'execution-inputs')), []);
+ assert.equal((await store.metadata(id)).bytes, bytes.length);
 });

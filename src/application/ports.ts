@@ -1,4 +1,4 @@
-import type { Attachment, CreateTask, EventPage, Page, Task, TaskEvent } from '../domain/contracts.js';
+import type { Attachment, CreateTask, EventPage, FileAttachment, Page, Task, TaskEvent } from '../domain/contracts.js';
 
 export type EventCursor = Readonly<{ direction: 'after'; sequence: number }> | Readonly<{ direction: 'before'; sequence: number }>;
 
@@ -14,17 +14,24 @@ export interface TaskRepository {
   listEvents(taskId: string, cursor: EventCursor | number): Promise<EventPage>;
 }
 export interface AttachmentRepository {
-  putAttachment(value: Attachment): Promise<Readonly<{ attachment: Attachment; created: boolean }>>;
+  putAttachment(value: Attachment): Promise<Readonly<{ attachment: Attachment; created: boolean; evicted?: readonly string[] }>>;
   getAttachment(id: string): Promise<Attachment>;
 }
 export interface RunnerRepository extends TaskRepository, AttachmentRepository {
   close(): Promise<void>;
 }
 /** Files are immutable; implementations validate bytes and own storage paths. */
+export interface AttachmentContent {
+  readonly attachment: Attachment;
+  chunks(): AsyncIterable<Uint8Array>;
+  close(): Promise<void>;
+}
 export interface AttachmentStore {
   metadata(id: string): Promise<Attachment>;
   upload(id: string, name: string, mediaType: string, source: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<Readonly<{ attachment: Attachment; created: boolean }>>;
+  uploadFile(id: string, name: string, mediaType: string, source: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<Readonly<{ attachment: FileAttachment; created: boolean }>>;
   read(id: string): Promise<Readonly<{ attachment: Attachment; bytes: Uint8Array }>>;
+  open(id: string): Promise<AttachmentContent>;
   close(): Promise<void>;
 }
 

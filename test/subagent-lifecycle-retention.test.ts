@@ -406,7 +406,7 @@ async function server(t: TestContext, page: EventPage) {
   const tasks: TaskRepository = { createTask: unavailable, getTask: unavailable, listTasks: unavailable, cancelTask: unavailable, listEvents: () => Promise.resolve(page) };
   const services: RunnerServices = {
     tasks: new TaskService(tasks),
-    attachments: { metadata: unavailable, upload: unavailable, read: unavailable, close: () => Promise.resolve() },
+    attachments: { metadata: unavailable, upload: unavailable, uploadFile: unavailable, read: unavailable, open: unavailable, close: () => Promise.resolve() },
     close: () => Promise.resolve(),
   };
   const app = await createRunnerApplication(

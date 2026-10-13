@@ -8,6 +8,8 @@ import { INTERACTIVE_APPROVALS } from '../domain/approvals.js';
 import type { PendingMessage } from '../domain/pending-message.js';
 import type { RunnerDescriptor } from '../server.js';
 import { DESCRIPTOR, SERVICES, type RunnerServices } from './services.js';
+import { fileName, sendFileAttachment, uploadFileAttachment } from './file-attachments.js';
+import { FILE_ATTACHMENT_KIND, parseAttachmentKind } from '../domain/file-attachment.js';
 
 function publicRecord<T extends Task | PendingMessage>(record: T): Omit<T, 'instructions' | 'awaiting'> {
   const { instructions: _instructions, awaiting: _awaiting, ...publicValue } = record as T & Pick<Task, 'awaiting'>;
@@ -229,13 +231,6 @@ export class ProjectController {
   }
 }
 
-function fileName(request: Request): string {
-  const value = request.headers['x-file-name'];
-  if (typeof value !== 'string' || !value.length) throw new RunnerError('invalid_input');
-  try { return decodeURIComponent(value); }
-  catch { throw new RunnerError('invalid_input'); }
-}
-
 @Controller('v1/attachments')
 export class AttachmentController {
   private downloads = 0;
@@ -244,6 +239,8 @@ export class AttachmentController {
   @Put(':id')
   upload(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
+      if (parseAttachmentKind(request.headers['x-codevo-attachment-kind']) === FILE_ATTACHMENT_KIND)
+        return uploadFileAttachment(this.services.attachments, id, request, response);
       const mediaType = request.headers['content-type'];
       if (request.headers['content-encoding'] || (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'text/plain'))
         throw new RunnerError('unsupported_media');
@@ -291,6 +288,10 @@ export class AttachmentController {
       response.once('finish', completed);
       response.once('close', completed);
       try {
+        if ((await this.services.attachments.metadata(id)).kind === FILE_ATTACHMENT_KIND) {
+          await sendFileAttachment(this.services.attachments, id, response);
+          return;
+        }
         const { attachment, bytes } = await this.services.attachments.read(id);
         if (response.destroyed || response.writableEnded) return;
         response.writeHead(200, {

@@ -1,16 +1,13 @@
 import { validateTextAttachment } from '../../domain/text-attachment.js';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
+import { mkdir, open, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AttachmentStore } from '../../application/ports.js';
 import type { ExecutionAttachmentStager, StagedExecutionInputs } from '../../application/execution-ports.js';
 import type { StagedExecutionAttachment } from '../../domain/execution.js';
-import { isId, LIMITS, RunnerError } from '../../domain/contracts.js';
-
-async function assertDirectory(path: string): Promise<void> {
-  const stat = await lstat(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new RunnerError('storage_unavailable');
-}
+import { isId, LIMITS, RunnerError, type FileAttachment } from '../../domain/contracts.js';
+import { FILE_ATTACHMENT_KIND, stagedFileName } from '../../domain/file-attachment.js';
+import { assertDirectory } from './directory.js';
 
 class FileExecutionAttachmentStager implements ExecutionAttachmentStager {
   constructor(private readonly directory: string, private readonly store: AttachmentStore) {}
@@ -35,6 +32,11 @@ class FileExecutionAttachmentStager implements ExecutionAttachmentStager {
       owned = true;
       const attachments: StagedExecutionAttachment[] = [];
       for (const id of attachmentIds) {
+        const metadata = await this.store.metadata(id);
+        if (metadata.kind === FILE_ATTACHMENT_KIND) {
+          attachments.push(await this.stageFile(directory, metadata));
+          continue;
+        }
         const { attachment, bytes } = await this.store.read(id);
         if (bytes.byteLength > LIMITS.attachmentBytes) throw new RunnerError('too_large');
         if (attachment.mediaType !== 'image/png' && attachment.mediaType !== 'image/jpeg' && attachment.mediaType !== 'text/plain') throw new RunnerError('unsupported_media');
@@ -51,6 +53,29 @@ class FileExecutionAttachmentStager implements ExecutionAttachmentStager {
       if (error instanceof RunnerError) throw error;
       throw new RunnerError('storage_unavailable');
     }
+  }
+
+  private async stageFile(directory: string, expected: FileAttachment): Promise<StagedExecutionAttachment> {
+    if (expected.bytes < 1 || expected.bytes > LIMITS.fileAttachmentBytes) throw new RunnerError('too_large');
+    const content = await this.store.open(expected.id);
+    try {
+      const { attachment } = content;
+      if (attachment.kind !== FILE_ATTACHMENT_KIND || attachment.id !== expected.id || attachment.sha256 !== expected.sha256 || attachment.bytes !== expected.bytes) throw new RunnerError('storage_unavailable');
+      const owner = join(directory, attachment.id);
+      await mkdir(owner, { mode: 0o700 });
+      const path = join(owner, stagedFileName(attachment.name));
+      const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try {
+        let written = 0;
+        for await (const chunk of content.chunks()) {
+          written += chunk.byteLength;
+          if (written > attachment.bytes) throw new RunnerError('storage_unavailable');
+          await file.writeFile(chunk);
+        }
+        if (written !== attachment.bytes || (await file.stat()).size !== attachment.bytes) throw new RunnerError('storage_unavailable');
+      } finally { await file.close(); }
+      return { kind: FILE_ATTACHMENT_KIND, id: attachment.id, path, mediaType: attachment.mediaType, name: attachment.name, bytes: attachment.bytes };
+    } finally { await content.close(); }
   }
 }
 

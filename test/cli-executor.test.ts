@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, realpath, rm, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile, symlink, truncate, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { Task } from '../src/domain/contracts.js';
+import { LIMITS, type Task } from '../src/domain/contracts.js';
 import type { ExecutionRequest } from '../src/domain/execution.js';
 import { CliProviderExecutor } from '../src/infrastructure/execution/index.js';
 
@@ -399,5 +399,100 @@ test('an approval callback selects the interactive Claude protocol and answers t
     assert.deepEqual(result, { exitCode: 0, sessionId });
     assert.deepEqual(asked, ['command:npm test']);
     assert.match(f.output(), /Approved/);
+  } finally { await f.close(); }
+});
+
+const FILE_MARKER = 'FILE-CONTENT-MARKER-';
+async function stagedFile(cwd: string, id: string, mediaType: string) {
+  const directory = join(cwd, 'staged', id);
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, 'report final.pdf');
+  await writeFile(path, FILE_MARKER.repeat(4096));
+  await truncate(path, LIMITS.attachmentBytes + 4096);
+  return { kind: 'file' as const, id, path, mediaType, name: 'Report "final".pdf', bytes: LIMITS.attachmentBytes + 4096 };
+}
+const claudeFileProvider = `
+  const fs = require('node:fs');
+  const emit = frame => console.log(JSON.stringify(frame));
+  const answers = [];
+  require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+    const frame = JSON.parse(line);
+    if (frame.type === 'control_request') emit({type:'control_response',response:{subtype:'success',request_id:'codevo-initialize'}});
+    if (frame.type === 'user') {
+      fs.writeFileSync('captured.json', JSON.stringify({ args: process.argv.slice(2), stdin: line }));
+      const path = JSON.parse(/- path: (".*")/.exec(frame.message.content.at(-1).text)[1]);
+      emit({type:'system',subtype:'init',session_id:'${sessionId}'});
+      emit({type:'control_request',request_id:'read-staged',request:{subtype:'can_use_tool',tool_name:'Read',tool_use_id:'toolu_1',input:{file_path:path}}});
+      emit({type:'control_request',request_id:'read-sibling',request:{subtype:'can_use_tool',tool_name:'Read',tool_use_id:'toolu_2',input:{file_path:path + '.bak'}}});
+      emit({type:'control_request',request_id:'bash-staged',request:{subtype:'can_use_tool',tool_name:'Bash',tool_use_id:'toolu_3',input:{command:'cat ' + path}}});
+    }
+    if (frame.type === 'control_response') {
+      answers.push(frame.response);
+      if (answers.length < 3) return;
+      fs.writeFileSync('answers.json', JSON.stringify(answers));
+      emit({type:'result',subtype:'success',is_error:false,session_id:'${sessionId}'});
+      process.exit(0);
+    }
+  });`;
+
+for (const provider of ['codex', 'claude'] as const) {
+  for (const mediaType of ['application/pdf', 'image/png', 'text/plain']) {
+    test(`${provider} receives a ${mediaType} file attachment as a path in the prompt and never its bytes`, async () => {
+      const f = await fixture(provider === 'claude' ? claudeFileProvider : `let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
+        console.log(JSON.stringify({args:process.argv.slice(2),stdin,type:'diagnostic'}));
+        ${providerSuccess(provider)}
+      });`);
+      try {
+        const id = randomUUID();
+        const file = await stagedFile(f.cwd, id, mediaType);
+        const result = await new CliProviderExecutor(provider, { executable: f.executable, timeoutMs: 15_000 }).execute({ ...f.request,
+          task: { ...f.request.task, provider, parts: [{ type: 'text', text: 'Summarize the report' }, { type: 'attachment', attachmentId: id }] },
+          attachments: [file] });
+        assert.equal(result.error, undefined);
+        assert.equal(result.exitCode, 0);
+        const observed: { args: string[]; stdin: string } = provider === 'codex' ? JSON.parse(f.output().split('\n')[0]!) : JSON.parse(await readFile(join(f.cwd, 'captured.json'), 'utf8'));
+        const delivered = JSON.stringify(observed);
+        assert.ok(delivered.length < 16 * 1024, `provider input was ${delivered.length} bytes`);
+        assert.equal(delivered.includes(FILE_MARKER), false);
+        assert.equal(delivered.includes(Buffer.from(FILE_MARKER.repeat(3)).toString('base64').slice(4, 40)), false);
+        assert.equal(observed.args.includes('-i'), false);
+        assert.equal(observed.args.some(argument => argument.includes(file.path)), false);
+        const prompt: string = provider === 'codex' ? observed.stdin : JSON.parse(observed.stdin).message.content.at(-1).text;
+        assert.ok(prompt.includes('Summarize the report'));
+        assert.ok(prompt.includes(`[Attached files]`));
+        assert.ok(prompt.includes(`- path: ${JSON.stringify(file.path)}\n  name: "Report \\"final\\".pdf"\n  type: ${mediaType}\n  size: ${file.bytes} bytes\n[End of attached files]`));
+        assert.match(prompt, /exists only until the current turn ends/);
+        assert.equal(prompt.includes('[Attached text files]'), false);
+        if (provider === 'claude') {
+          assert.deepEqual(JSON.parse(observed.stdin).message.content.map((part: { type: string }) => part.type), ['text']);
+          assert.equal(observed.args[observed.args.indexOf('--permission-prompt-tool') + 1], 'stdio');
+          const answers = JSON.parse(await readFile(join(f.cwd, 'answers.json'), 'utf8')) as Array<{ request_id: string; response: { behavior: string; updatedInput?: { file_path: string } } }>;
+          assert.deepEqual(answers.map(answer => [answer.request_id, answer.response.behavior]), [['read-staged', 'allow'], ['read-sibling', 'deny'], ['bash-staged', 'deny']]);
+          assert.equal(answers[0]!.response.updatedInput?.file_path, file.path);
+        }
+      } finally { await f.close(); }
+    });
+  }
+}
+
+test('a file attachment that is missing, linked, resized or of an unknown kind fails before CLI spawn', async () => {
+  const f = await fixture('require("node:fs").writeFileSync("spawned","bad")');
+  try {
+    const id = randomUUID();
+    const file = await stagedFile(f.cwd, id, 'application/pdf');
+    const task: Task = { ...f.request.task, parts: [{ type: 'attachment', attachmentId: id }] };
+    for (const provider of ['codex', 'claude'] as const) {
+      const executor = new CliProviderExecutor(provider, { executable: f.executable });
+      const run = (attachment: unknown) => executor.execute({ ...f.request, task: { ...task, provider }, attachments: [attachment as typeof file] });
+      assert.equal((await run({ ...file, bytes: file.bytes - 1 })).error, 'attachment_input_invalid');
+      assert.equal((await run({ ...file, bytes: LIMITS.fileAttachmentBytes + 1 })).error, 'attachment_input_invalid');
+      assert.equal((await run({ ...file, path: join(f.cwd, 'missing.pdf') })).error, 'attachment_input_invalid');
+      assert.equal((await run({ ...file, path: 'staged/relative.pdf' })).error, 'attachment_input_invalid');
+      assert.equal((await run({ ...file, kind: 'folder' })).error, 'attachment_input_invalid');
+      assert.equal((await run({ id, path: file.path, mediaType: 'application/pdf' })).error, 'attachment_input_invalid');
+      await symlink(file.path, join(f.cwd, `link-${provider}.pdf`));
+      assert.equal((await run({ ...file, path: join(f.cwd, `link-${provider}.pdf`) })).error, 'attachment_input_invalid');
+    }
+    await assert.rejects(readFile(join(f.cwd, 'spawned')));
   } finally { await f.close(); }
 });

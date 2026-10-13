@@ -29,7 +29,7 @@ unsupported query parameters and trailing-slash aliases are not accepted.
 | `GET /v1/tasks/:id/events?before=n` | Same event envelope, paging toward older events |
 | `PUT /v1/attachments/:id` | `{ attachment, created }`, 201 for new or 200 for retry |
 | `GET /v1/attachments/:id` | Attachment metadata |
-| `GET /v1/attachments/:id/content` | Original validated image or text bytes |
+| `GET /v1/attachments/:id/content` | Original validated image or text bytes; a [file attachment](#file-attachments) as an opaque streamed download |
 
 Backward event paging accepts `GET /v1/tasks/:id/events?before=n`, where `n` is a
 decimal integer from 1 through Number.MAX_SAFE_INTEGER without signs or leading
@@ -156,7 +156,8 @@ parts are ordered nonblank text or attachment references, with no duplicate atta
 It is display metadata, at most 255 UTF-8 bytes after decoding, with no path
 separators or control characters. Upload content type is exactly `image/png`,
 `image/jpeg` or `text/plain`; images must match and decode as a supported single image,
-and text must be nonempty valid UTF-8 without NUL.
+and text must be nonempty valid UTF-8 without NUL. Any other file is uploaded as a
+[file attachment](#file-attachments) by adding `X-Codevo-Attachment-Kind: file`.
 Content is sent directly, not base64 or multipart. No client filesystem path is
 accepted by the API.
 
@@ -334,15 +335,16 @@ defensive image-envelope bounds are in `src/infrastructure/files/image-preflight
 | Combined prompt text | 48,000 UTF-8 bytes |
 | Ordered parts / distinct attachments per draft | 16 / 8 |
 | One uploaded image | 8 MiB |
+| One uploaded file attachment (`X-Codevo-Attachment-Kind: file`) | 50 MiB (52,428,800 bytes), at least 1 byte |
 | Image dimension / total pixels | 8,192 per side / 16,000,000 pixels |
 | Image metadata aggregate | 256 KiB, counting encoded and inflated PNG metadata |
 | Inflated compressed PNG metadata chunk | 64 KiB |
 | PNG chunks / JPEG markers | 1,024 |
-| Stored attachments / aggregate image bytes | 256 / 256 MiB |
+| Live stored attachments / aggregate attachment bytes | 512 / 2 GiB (2,147,483,648 bytes); see [storage budget and eviction](#storage-budget-and-eviction) |
 | Stored tasks / output history | No fixed lifetime quota; available disk |
-| Concurrent uploads / upload deadline | 2 / 30 seconds |
+| Concurrent uploads / upload deadline | 2 / 30 seconds; a file attachment has 15 minutes in total and 60 seconds without body bytes |
 | Concurrent attachment-store reads (metadata and content combined) | 2 |
-| Concurrent HTTP image downloads | 2, held until response finish/close |
+| Concurrent HTTP attachment downloads | 2, held until response finish/close |
 | Task or event page | 50 items / 3 MiB serialized item data |
 
 Unsupported image structures or malformed metadata fail closed; a PNG/JPEG extension
@@ -354,7 +356,9 @@ retrieval until bytes are returned to HTTP. A separate HTTP download limit remai
 held until the response finishes or closes, including slow clients.
 HTTP transport can terminate stalled requests
 earlier than the attachment deadline. There is no automatic eviction of retained
-records; task cancellation does not delete attachments or release storage quota.
+task records; task cancellation does not delete attachments. Attachment storage is
+the exception: a full store evicts its oldest unpinned attachments as described in
+[storage budget and eviction](#storage-budget-and-eviction).
 Do not manually delete database rows/files to work around quotas.
 
 Error bodies use `{ "error": "code" }`: invalid input is 400, missing records 404,
@@ -762,7 +766,7 @@ project registration and turn-file-diff use 8 KiB, Git fetch/update/push use 1 K
 Content-Encoding with 415 `unsupported_media`. Invalid JSON or UTF-8 is 400
 `invalid_input`; exceeding the applicable body limit is 413 `too_large`.
 Attachment uploads have a separate 8 MiB transport bound, with the text-specific
-limit described below. These are current reader limits for the additional contracts.
+limit described below; file attachments have their own 50 MiB bound. These are current reader limits for the additional contracts.
 
 The HTTP boundary matches the complete request URL against the allowlist before
 controller dispatch. Lowercase UUID v4 path identifiers and project IDs matching
@@ -804,9 +808,10 @@ currently change server behavior is:
 | `portPreview` | Adds the boolean `portPreview` discovery field; true on Linux when execution and port services exist. |
 | `projectManagement` | Adds the boolean `projectManagement` discovery field; true when repository, directory and clone services all exist. |
 | `threadManagement` | Adds the boolean `threadManagement` discovery field; true when thread metadata exists. |
+| `fileAttachments` | Adds the boolean `fileAttachments` discovery field; true when the attachment service exists. |
 | `subagentLifecycleRetention` | Selects the retained subagent lifecycle shape on task event reads, as described in [Start and observe a task](#start-and-observe-a-task). |
 
-The first six fields are omitted unless announced and defined in the descriptor.
+The first seven fields are omitted unless announced and defined in the descriptor.
 These tokens do not gate route access. Other syntactically valid tokens have no
 current effect. In particular, `taskLaunchOptions`, `taskSteering`, `taskIsolation`,
 `instructionSync`, `textAttachments`, `pendingMessages`, `interactiveQuestions`,
@@ -1098,8 +1103,74 @@ Invalid UTF-8, empty or NUL-containing text is 415 `unsupported_media`; excessiv
 bytes are 413 `too_large`. Shared attachment errors include 400 `invalid_input`,
 404 `not_found`, 409 `conflict` for changed retry bytes/metadata, 429
 `quota_exceeded`, 503 `busy`/`storage_unavailable`, and upload timeout 408
-`request_timeout`. Text files share the 256-file/256 MiB attachment store and
+`request_timeout`. Text files share the 512-file/2 GiB attachment store and
 per-task eight-reference limit with images.
+
+## File attachments
+
+Anything that is neither a validated image nor pasted text is a file attachment.
+A client uploads it with `PUT /v1/attachments/:id` and the additional header
+`X-Codevo-Attachment-Kind: file`. Without that header the route keeps the image and
+text contract above unchanged; any other header value is 400 `invalid_input`.
+`GET /v1/runner` reports `fileAttachments: true` only to clients that announce the
+`fileAttachments` token, so older editors never see the field.
+
+`Content-Type` must be a lowercase `type/subtype` without parameters, matching
+`^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$`; anything else,
+and any `Content-Encoding`, is 415 `unsupported_media`. The declared type is stored
+verbatim as `mediaType` and is never trusted: file bytes are not decoded, sniffed or
+validated as an image or as text, including for `image/png` and `text/plain`.
+`X-File-Name` follows the existing rule and is stored for display and download.
+
+The body is at most 50 MiB (52,428,800 bytes) and at least one byte. A larger
+`Content-Length` is refused with 413 `too_large` before the body is read, and the
+same limit is enforced while streaming whatever the client announced. An empty body
+is 400 `invalid_input`. The body is written to a private temporary file while its
+SHA-256 is computed and is published atomically; the temporary file is removed on
+every failure, client disconnect, timeout and shutdown. An upload may take 15 minutes
+in total and may go 60 seconds without body bytes; either expiry is 408
+`{ "error": "request_timeout" }`.
+
+Success is `{ attachment, created }`, 201 for new or 200 for an identical retry of
+the same ID. The same ID with a different name, kind, media type, length or digest
+is 409 `conflict`. Metadata is `{ id, runnerId, name, bytes, sha256, createdAt,
+kind: "file", mediaType }`. `kind` is absent on image and text attachments, so a
+consumer must test `kind === "file"` before it looks at `mediaType`.
+
+`GET /v1/attachments/:id/content` streams a file attachment from disk with
+`Content-Length`, `Content-Type: application/octet-stream` (the declared media type
+is never echoed), `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and
+`Content-Disposition: attachment; filename="<ASCII fallback>"; filename*=UTF-8''<name>`.
+The fallback replaces every character outside `[A-Za-z0-9._-]` with `_`. Stored
+length and SHA-256 are verified before the final bytes are sent: a corrupted blob
+ends in 503 `storage_unavailable` or a connection closed before the last byte, never
+in a completed response. The two-download admission limit applies.
+
+Draft, continuation, pending and steering parts reference a file attachment with the
+existing `{ "type": "attachment", "attachmentId" }` shape. For execution the runner
+copies the file to `<data dir>/execution-inputs/<task id>/<attachment id>/<name>`,
+where `<name>` is the stored name with characters outside `[A-Za-z0-9._ -]` replaced
+by `_`, leading dots, dashes and spaces removed and at most 100 bytes. Both providers
+receive only that absolute path, in a delimited `[Attached files]` block of the
+prompt that lists path, original name, declared type and size. File bytes are never
+placed in the prompt, on provider standard input or in a native image input. The copy
+exists until the turn ends and is then deleted; later turns do not see it.
+
+### Storage budget and eviction
+
+The store holds at most 512 live attachments and 2 GiB of live attachment bytes,
+shared by images, text and files. When a new upload would exceed either bound, the
+runner evicts the oldest attachments, ordered by creation time and then ID, and only
+as many as the upload needs. It never evicts an attachment that is referenced by a
+queued pending message, by a task that is still `draft`, `queued` or `running`, or by
+a steering input of such a task (delivered or not), nor one uploaded less than 15
+minutes ago. Steering input of a task that has finished pins nothing. If the upload still does not fit, it is refused with 429 `quota_exceeded` and
+nothing is evicted.
+
+An evicted attachment behaves as unknown: metadata and content return 404
+`not_found`, and new draft, continuation, pending and steering input that references
+it is rejected with 404 `not_found`. History that already references it keeps the
+ID. Uploading the same ID again stores it as a new attachment.
 
 ## Additional repository and question contract details
 

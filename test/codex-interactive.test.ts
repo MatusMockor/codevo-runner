@@ -631,3 +631,25 @@ setInterval(()=>{},1000);
     assert.deepEqual(asked.map(input => [input.kind, input.title, input.detail]), [['command', 'Run a command?', 'npm test']]);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
+
+test('Codex receives file attachments as prompt paths and never as localImage input, initially and when steering', async () => {
+  let steer: Parameters<NonNullable<ExecutionRequest['onSteeringReady']>>[0] | undefined;
+  const file = { kind: 'file' as const, id: 'file', path: '/data/execution-inputs/task/file/photo.png', mediaType: 'image/png', name: 'photo.png', bytes: 2048 };
+  const f = fixture({ onSteeringReady: handler => { if (handler) steer = handler; },
+    attachments: [file, { id: 'image', path: '/data/execution-inputs/task/image.png', mediaType: 'image/png' }] });
+  await f.ready();
+  const turnInput = (f.sent.find(frame => frame.method === 'turn/start')!.params as { input: Array<Record<string, unknown>> }).input;
+  assert.deepEqual(turnInput.slice(1), [{ type: 'localImage', path: '/data/execution-inputs/task/image.png' }]);
+  const steered = { ...file, id: 'steered', path: '/data/execution-inputs/message/steered/archive.zip', mediaType: 'application/zip', name: 'archive.zip' };
+  const pending = steer!({ idempotencyKey: 'file', prompt: 'Unpack it', attachments: [steered, { id: 'pasted', path: '/data/execution-inputs/message/pasted.txt', mediaType: 'text/plain' }] });
+  await new Promise(resolve => setImmediate(resolve));
+  const rpc = f.sent.at(-1)!;
+  const input = (rpc.params as { input: { type: string; text: string }[] }).input;
+  assert.equal(rpc.method, 'turn/steer');
+  assert.deepEqual(input.map(part => part.type), ['text']);
+  assert.ok(input[0]!.text.startsWith('Unpack it\n\n[Attached text files]\n'));
+  assert.ok(input[0]!.text.includes('- path: "/data/execution-inputs/message/steered/archive.zip"\n  name: "archive.zip"\n  type: application/zip\n  size: 2048 bytes\n[End of attached files]'));
+  assert.ok(input[0]!.text.includes('"/data/execution-inputs/message/pasted.txt"'));
+  await f.receive({ id: rpc.id, result: { turnId: turn } });
+  await pending;
+});

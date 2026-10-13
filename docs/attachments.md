@@ -14,8 +14,16 @@ See [API examples and exact limits](api.md). Uploads are not multipart requests.
 The display filename never selects a filesystem path. Repeating an upload ID with
 the same metadata and bytes returns its existing record; conflicting reuse fails.
 Startup removes leftover temporary files and unregistered blobs within a bounded
-scan. There is no expiry, attachment deletion or garbage collection of completed
-abandoned uploads yet; these count against the retained-storage quota.
+scan. There is no time-based expiry or client-initiated deletion. Completed uploads
+count against the live storage budget; when it is full, the oldest attachments that
+no unfinished task (through its parts or its steering input) or queued message references are
+evicted to admit a new upload, as described in the
+[storage budget](api.md#storage-budget-and-eviction).
+
+Files that are neither images nor pasted text are accepted as
+[file attachments](api.md#file-attachments) up to 50 MiB. Their declared media type
+is never trusted or decoded, they are stored and downloaded as opaque bytes, and the
+provider receives only the path of a task-scoped copy in its prompt.
 
 All holders of the runner token share one authority. Per-user attachment ownership
 is not implemented. An ID is a runner-scoped reference, not an access credential.

@@ -1,4 +1,5 @@
-import { textAttachmentPrompt, validateTextAttachment } from '../../domain/text-attachment.js';
+import { validateTextAttachment } from '../../domain/text-attachment.js';
+import { attachmentPrompt, isPathInput, isStagedSize, stagedAttachmentRole } from '../../domain/file-attachment.js';
 import { randomUUID } from 'node:crypto';
 import { SteeringNotSent } from '../../domain/steering.js';
 import { open } from 'node:fs/promises';
@@ -55,7 +56,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
   let done = false;
   let steering = false;
   const initialCommand = randomUUID();
-  const readableTextFiles = new Set(plan.request.attachments.filter(file => file.mediaType === 'text/plain').map(file => file.path));
+  const readableTextFiles = new Set(plan.request.attachments.filter(isPathInput).map(file => file.path));
   let lifecycleSupported = false;
   let promptStarted = false;
   let lifecycleSession: string | undefined;
@@ -221,16 +222,18 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
           steering = true;
           let writing = false;
           try {
-            if (readableTextFiles.size + input.attachments.filter(file => file.mediaType === 'text/plain' && !readableTextFiles.has(file.path)).length > 256) throw new Error('attachment_input_limit');
+            if (readableTextFiles.size + input.attachments.filter(file => isPathInput(file) && !readableTextFiles.has(file.path)).length > 256) throw new Error('attachment_input_limit');
             if (input.attachments.length > LIMITS.attachmentsPerTask) throw new Error('attachment_input_invalid');
             const images: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [];
             for (const attachment of input.attachments) {
-              if (!isAbsolute(attachment.path) || !['image/png', 'image/jpeg', 'text/plain'].includes(attachment.mediaType)) throw new Error('attachment_input_invalid');
+              if (!isAbsolute(attachment.path)) throw new Error('attachment_input_invalid');
+              const role = stagedAttachmentRole(attachment);
               const handle = await open(attachment.path, constants.O_RDONLY | constants.O_NOFOLLOW);
               try {
                 assertOwner();
                 const stat = await handle.stat(); assertOwner();
-                if (!stat.isFile() || stat.size < 1 || stat.size > LIMITS.attachmentBytes) throw new Error('attachment_input_invalid');
+                if (!stat.isFile() || !isStagedSize(attachment, stat.size)) throw new Error('attachment_input_invalid');
+                if (role === 'file') continue;
                 const bytes = Buffer.alloc(stat.size);
                 let offset = 0;
                 while (offset < bytes.length) {
@@ -238,7 +241,7 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
                   if (!read.bytesRead) throw new Error('attachment_changed');
                   offset += read.bytesRead;
                 }
-                if (attachment.mediaType === 'text/plain') validateTextAttachment(bytes);
+                if (role === 'text') validateTextAttachment(bytes);
                 else images.push({ type: 'image', source: { type: 'base64', media_type: attachment.mediaType, data: bytes.toString('base64') } });
               } finally { await handle.close(); }
             }
@@ -248,8 +251,8 @@ export function createClaudeProtocol(plan: ClaudePlan): InteractiveProtocol {
               const timer = setTimeout(() => reject(new Error('steering_timeout')), 15_000);
               commands.set(uuid, { completed: false, acknowledged: false, resolve, reject, timer });
               writing = true;
-              for (const file of input.attachments) if (file.mediaType === 'text/plain') readableTextFiles.add(file.path);
-              void send({ type: 'user', uuid, session_id: ownedSession, message: { role: 'user', content: [...images, { type: 'text', text: textAttachmentPrompt(input.prompt, input.attachments) || 'Inspect the attached images.' }] } })
+              for (const file of input.attachments) if (isPathInput(file)) readableTextFiles.add(file.path);
+              void send({ type: 'user', uuid, session_id: ownedSession, message: { role: 'user', content: [...images, { type: 'text', text: attachmentPrompt(input.prompt, input.attachments) || 'Inspect the attached images.' }] } })
                 .catch(error => { clearTimeout(timer); reject(error); });
             });
           } catch (error) {

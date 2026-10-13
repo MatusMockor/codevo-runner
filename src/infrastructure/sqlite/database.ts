@@ -17,6 +17,7 @@ import { launchIdentity, parseLaunchOptions } from '../../domain/launch.js';
 import { ResumeDatabase, RESUME_SCHEMA } from './resume-database.js';
 import type { ContinueTask, ResumeState } from '../../domain/task-resume.js';
 import { CloneDatabase, CLONE_SCHEMA } from './clone-database.js';
+import { AttachmentDatabase, type StoredAttachment } from './attachment-database.js';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, statfsSync } from 'node:fs';
@@ -39,6 +40,7 @@ export class RepositoryDatabase {
   readonly resumes: ResumeDatabase;
   readonly pending: PendingDatabase;
   readonly steering: SteeringDatabase;
+  private readonly attachments: AttachmentDatabase;
   constructor(private readonly dataDir: string, private readonly runnerId: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     try {
@@ -47,6 +49,7 @@ export class RepositoryDatabase {
       this.db = new DatabaseSync(join(dataDir, 'runner.sqlite'));
       this.db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA max_page_count=4294967294; PRAGMA journal_size_limit=4194304;');
       this.migrate();
+      this.attachments = new AttachmentDatabase(this.db, { runnerId, transaction: action => this.transaction(action), requireCapacity: () => this.requireBulkCapacity() });
       this.threadMetadata = new ThreadMetadataDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.questions = new QuestionDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
       this.approvals = new ApprovalDatabase(this.db, action => this.transaction(action), id => this.getTask(id), () => this.requireBulkCapacity());
@@ -306,31 +309,8 @@ export class RepositoryDatabase {
     const subagentLifecycle = readStoredLifecycle(saved?.['payload']);
     return { ...(subagentLifecycle ? { subagentLifecycle } : {}), ...outputRetentionMetadata(this.db, taskId), items, nextCursor };
   }
-  getAttachment(id: string): Attachment {
-    const row = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(id);
-    if (!row) throw new RunnerError('not_found');
-    const value = JSON.parse(row['payload'] as string) as Attachment;
-    if (value.runnerId !== this.runnerId) throw new RunnerError('not_found');
-    return value;
-  }
-  putAttachment(value: Attachment): { attachment: Attachment; created: boolean } {
-    return this.transaction(() => {
-      if (value.runnerId !== this.runnerId) throw new RunnerError('conflict');
-      const previous = this.db.prepare('SELECT payload FROM attachments WHERE id=?').get(value.id);
-      if (previous) {
-        const attachment = JSON.parse(previous['payload'] as string) as Attachment;
-        const fields = ['id', 'runnerId', 'name', 'mediaType', 'bytes', 'sha256', 'width', 'height'] as const;
-        if (fields.some(field => attachment[field] !== value[field])) throw new RunnerError('conflict');
-        return { attachment, created: false };
-      }
-      const usage = this.db.prepare('SELECT count(*) AS n,coalesce(sum(bytes),0) AS bytes FROM attachments').get()!;
-      if (Number(usage['n']) >= LIMITS.attachments || Number(usage['bytes']) + value.bytes > LIMITS.storageBytes) throw new RunnerError('quota_exceeded');
-      this.requireBulkCapacity();
-      this.db.prepare('INSERT INTO attachments VALUES(?,?,?)').run(value.id, JSON.stringify(value), value.bytes);
-      this.requireBulkCapacity();
-      return { attachment: value, created: true };
-    });
-  }
+  getAttachment(id: string): Attachment { return this.attachments.getAttachment(id); }
+  putAttachment(value: Attachment): StoredAttachment { return this.attachments.putAttachment(value); }
   close(): void {
     try { this.db.close(); } finally { this.lease.close(); }
   }

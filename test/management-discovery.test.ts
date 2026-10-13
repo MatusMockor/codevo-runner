@@ -28,6 +28,12 @@ test('management discovery preserves the strict legacy descriptor and negotiates
   assert.equal('projectManagement' in legacy, false);
   assert.equal('threadManagement' in legacy, false);
   assert.equal('turnChanges' in legacy, false);
+  assert.equal('fileAttachments' in legacy, false);
+  assert.deepEqual([legacy.imageAttachments, legacy.textAttachments], [true, true]);
+  assert.deepEqual((await get('fileAttachments')).capabilities, { ...legacy, fileAttachments: true });
+  assert.deepEqual((await get('subagentLifecycleRetention, fileAttachments ,turnChanges')).capabilities, { ...legacy, turnChanges: true, fileAttachments: true });
+  for (const header of ['fileattachments', 'FileAttachments', 'fileAttachments2', 'file-attachments', 'imageAttachments,textAttachments'])
+    assert.deepEqual((await get(header)).capabilities, legacy, header);
   for (const header of [undefined, 'subagentLifecycleRetention', 'projectmanagement', 'x'.repeat(513), Array(17).fill('threadManagement').join(',')]) {
     assert.deepEqual((await get(header)).capabilities, legacy);
   }
@@ -48,4 +54,9 @@ test('management discovery preserves the strict legacy descriptor and negotiates
   const descriptor = await (await fetch(url, { headers: { 'x-codevo-client-capabilities': 'projectManagement,threadManagement' } })).json();
   assert.equal(descriptor.capabilities.projectManagement, false);
   assert.equal(descriptor.capabilities.threadManagement, false);
+  assert.equal('fileAttachments' in descriptor.capabilities, false);
+  const announced = await (await fetch(url, { headers: { 'x-codevo-client-capabilities': 'fileAttachments' } })).json();
+  assert.equal(announced.capabilities.fileAttachments, false);
+  const silent = await (await fetch(url)).json();
+  assert.equal('fileAttachments' in silent.capabilities, false);
 });
