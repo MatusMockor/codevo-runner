@@ -142,6 +142,27 @@ test('legacy JSON start and complete records remain readable after upgrade', asy
   assert.equal((await reopened.diff(id, 'file')).modified.text, 'legacy after\n');
 });
 
+test('legacy JSON end capture skips an untracked nested repository and still rejects unsupported names', async t => {
+  const f = await fixture(); const id = randomUUID();
+  t.after(() => rm(f.root, { recursive: true, force: true }));
+  await writeFile(join(f.cwd, 'file'), 'legacy before\n');
+  const snapshot = await runTurnHelper({ mode: 'capture', cwd: f.cwd, identity: f.identity }, f.signal);
+  await mkdir(join(f.root, 'state', 'turn-changes'), { recursive: true });
+  await writeFile(join(f.root, 'state', 'turn-changes', `${id}.start`), JSON.stringify({ cwd: f.cwd, identity: f.identity, snapshot }));
+  await mkdir(join(f.cwd, 'nested')); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'nested') });
+  await writeFile(join(f.cwd, 'nested', 'inner'), 'nested\n');
+  await writeFile(join(f.cwd, 'file'), 'legacy after\n');
+  await f.store.captureEnd(id, f.cwd, f.identity, f.signal);
+  const summary = await f.store.summary(id);
+  assert.equal(summary.state, 'ready');
+  assert.deepEqual(summary.files.map(file => file.relativePath), ['file']);
+  assert.equal((await f.store.diff(id, 'file')).modified.text, 'legacy after\n');
+  await assert.rejects(runTurnHelper({ mode: 'capture', cwd: f.cwd, identity: f.identity, baselinePaths: ['absent/'] }, f.signal));
+  await assert.rejects(runTurnHelper({ mode: 'capture', cwd: f.cwd, identity: f.identity, baselinePaths: ['nested/'] }, f.signal));
+  await mkdir(join(f.cwd, 'name:unsupported')); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'name:unsupported') });
+  await assert.rejects(runTurnHelper({ mode: 'capture', cwd: f.cwd, identity: f.identity }, f.signal));
+});
+
 test('cancelling a stopped Git descendant reaps it and removes the privately owned scratch', async t => {
   if (process.platform !== 'linux') return t.skip('Linux process ownership test.');
   const f = await fixture(); const id = randomUUID();

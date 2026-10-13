@@ -127,3 +127,84 @@ test('paths unsupported by editor contracts make snapshots explicitly unavailabl
     }
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
+
+test('untracked nested repositories and linked worktrees are skipped instead of hiding the turn changes', async () => {
+  const f = await fixture(); const id = randomUUID(); const idle = randomUUID();
+  try {
+    execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'initial'], { cwd: f.cwd });
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'agent', '.claude/worktrees/agent'], { cwd: f.cwd });
+    await mkdir(join(f.cwd, 'nested')); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'nested') });
+    await writeFile(join(f.cwd, '.claude', 'worktrees', 'agent', 'inner'), 'worktree before\n');
+    await writeFile(join(f.cwd, 'nested', 'inner'), 'nested before\n');
+    await writeFile(join(f.cwd, 'file'), 'before\n');
+    const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: f.cwd }).toString().split('\0').filter(Boolean);
+    assert.deepEqual(listed, ['.claude/worktrees/agent/', 'file', 'nested/']);
+    await f.store.captureStart(id, f.cwd, f.identity, f.signal);
+    await writeFile(join(f.cwd, 'file'), 'after\n');
+    await writeFile(join(f.cwd, '.claude', 'worktrees', 'agent', 'inner'), 'worktree after\n');
+    await writeFile(join(f.cwd, 'nested', 'added'), 'nested after\n');
+    await f.store.captureEnd(id, f.cwd, f.identity, f.signal);
+    const summary = await f.store.summary(id);
+    assert.equal(summary.state, 'ready');
+    assert.deepEqual(summary.files, [{ relativePath: 'file', oldRelativePath: null, status: 'modified', addedLines: 1, deletedLines: 1 }]);
+    assert.equal((await f.store.diff(id, 'file')).original.text, 'before\n');
+    assert.equal((await f.store.diff(id, 'file')).modified.text, 'after\n');
+    await assert.rejects(f.store.diff(id, 'nested/added'), { code: 'not_found' });
+    await f.store.captureStart(idle, f.cwd, f.identity, f.signal);
+    await f.store.captureEnd(idle, f.cwd, f.identity, f.signal);
+    assert.deepEqual(await f.store.summary(idle), { turnId: idle, state: 'ready', files: [], truncated: false, reason: null });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('a nested repository appearing or disappearing during a turn leaves the other changes listed', async () => {
+  const f = await fixture(); const appeared = randomUUID(); const disappeared = randomUUID();
+  try {
+    await mkdir(join(f.cwd, 'plain'));
+    await writeFile(join(f.cwd, 'plain', 'kept'), 'unchanged baseline\n');
+    await writeFile(join(f.cwd, 'file'), 'first\n');
+    await f.store.captureStart(appeared, f.cwd, f.identity, f.signal);
+    execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'plain') });
+    await mkdir(join(f.cwd, 'nested')); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'nested') });
+    await writeFile(join(f.cwd, 'nested', 'inner'), 'nested\n');
+    await writeFile(join(f.cwd, 'file'), 'second\n');
+    await f.store.captureEnd(appeared, f.cwd, f.identity, f.signal);
+    const added = await f.store.summary(appeared);
+    assert.equal(added.state, 'ready');
+    assert.deepEqual(added.files.map(file => file.relativePath), ['file']);
+    await f.store.captureStart(disappeared, f.cwd, f.identity, f.signal);
+    await rm(join(f.cwd, 'nested'), { recursive: true });
+    await writeFile(join(f.cwd, 'file'), 'third\n');
+    await f.store.captureEnd(disappeared, f.cwd, f.identity, f.signal);
+    const removed = await f.store.summary(disappeared);
+    assert.equal(removed.state, 'ready');
+    assert.deepEqual(removed.files.map(file => file.relativePath), ['file']);
+    assert.equal((await f.store.diff(disappeared, 'file')).original.text, 'second\n');
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('a nested repository under an unsupported name still makes snapshots explicitly unavailable', async () => {
+  const f = await fixture(); const id = randomUUID();
+  try {
+    await mkdir(join(f.cwd, 'name:unsupported')); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'name:unsupported') });
+    await writeFile(join(f.cwd, 'valid'), 'baseline\n');
+    await f.store.captureStart(id, f.cwd, f.identity, f.signal);
+    const summary = await f.store.summary(id);
+    assert.equal(summary.state, 'unavailable');
+    assert.equal(summary.reason, 'A workspace filename is unsupported by the changes viewer.');
+    assert.deepEqual(summary.files, []);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('a nested repository inside a case-variant Git directory name still fails closed', async t => {
+  if (process.platform !== 'linux') return t.skip('Case-sensitive filesystem test.');
+  const f = await fixture(); const id = randomUUID();
+  try {
+    await mkdir(join(f.cwd, 'folder', '.GiT'), { recursive: true }); execFileSync('git', ['init', '-q'], { cwd: join(f.cwd, 'folder', '.GiT') });
+    const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: f.cwd }).toString().split('\0').filter(Boolean);
+    assert.deepEqual(listed, ['folder/.GiT/']);
+    await f.store.captureStart(id, f.cwd, f.identity, f.signal);
+    const summary = await f.store.summary(id);
+    assert.equal(summary.state, 'unavailable');
+    assert.equal(summary.reason, 'A workspace filename is unsupported by the changes viewer.');
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});

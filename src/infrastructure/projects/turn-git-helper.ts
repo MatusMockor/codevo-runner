@@ -111,6 +111,11 @@ def path(value):
         raise ValueError('A workspace filename is unsupported by the changes viewer.')
     return value
 
+def nested_repository(value):
+    if not value.endswith('/'): return False
+    path(value[:-1])
+    return True
+
 def oid(value):
     if not re.fullmatch('[a-f0-9]{40}|[a-f0-9]{64}', value): raise ValueError('Invalid Git object identity.')
     return value
@@ -159,7 +164,8 @@ def paths(tree=None):
         data = git(['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
     values = set(data.decode('utf-8', errors='strict').split('\x00')) - {''}
     if len(values) > MAX_FILES: raise ValueError('Git checkpoint file limit exceeded (32768 files).')
-    return values
+    if tree: return values
+    return {value for value in values if not nested_repository(value)}
 
 def capture(prior):
     side = 'after' if prior else 'before'

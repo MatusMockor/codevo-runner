@@ -35,14 +35,19 @@ def capture(request):
             raise ValueError('paths limit')
         if listing.wait() != 0:
             raise ValueError('not git')
-        paths = sorted((set(data.decode('utf-8', errors='strict').split('\x00')) | set(request.get('baselinePaths', []))) - {''})
+        listed = set(data.decode('utf-8', errors='strict').split('\x00'))
+        baseline = set(request.get('baselinePaths', []))
+        paths = sorted((listed | baseline) - {''})
         if len(paths) > 8192:
             raise ValueError('file limit')
         files, total, scanned = [], 0, 0
         for path in paths:
+            nested = path.endswith('/') and path not in baseline
+            if nested: path = path[:-1]
             parts = path.split('/')
             if ':' in path or len(path.encode()) > 4096 or len(parts) > 64 or any(p in ('', '.', '..') or p.lower() == '.git' for p in parts) or '\\' in path or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in path):
                 raise ValueError('path')
+            if nested: continue
             fds = []
             try:
                 directory = root
