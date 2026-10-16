@@ -31,6 +31,18 @@ export function claudeMcpAddPlan(change: McpServerAdd): McpCliPlan {
   };
 }
 
+export function claudeMcpAddJsonPlan(name: string, json: string): McpCliPlan {
+  const existing = `MCP server ${name} already exists in `;
+  return {
+    args: ['mcp', 'add-json', '--scope', 'local', '--', name, json],
+    outcome(exitCode, output) {
+      if (exitCode === 0) return 'ok';
+      if (exitCode === 1 && hasLine(output, line => line.startsWith(existing))) return 'exists';
+      return 'failed';
+    },
+  };
+}
+
 export function claudeMcpRemovePlan(change: McpServerRemove): McpCliPlan {
   const missing = `No MCP server named "${change.name}" in `;
   return {

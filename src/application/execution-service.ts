@@ -1,4 +1,4 @@
-import { EXECUTION_LIMITS, type ExecutionRequest } from '../domain/execution.js';
+import { EXECUTION_LIMITS, type ExecutionRequest, type RegisteredProject } from '../domain/execution.js';
 import type { TurnChanges } from './turn-changes.js';
 import { SubagentLifecycleCollector } from '../domain/subagent-lifecycle.js';
 import { SteeringService } from './steering-service.js';
@@ -10,9 +10,11 @@ import { parseContinueTask } from '../domain/task-resume.js';
 import { RunnerError, type Task } from '../domain/contracts.js';
 import { validateId } from '../domain/task-input.js';
 import { isGitErrorCode, parseStartInput } from '../domain/git-sync.js';
-import type { InstructionWorkspace, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs, TurnOptions, WorkAdmission, WorkSource } from './execution-ports.js';
+import type { InstructionWorkspace, McpServerPreapprovals, ProviderExecutor, ExecutionApplication, ExecutionAttachmentStager, ExecutionRepository, ProjectRegistry, ProjectWorkspace, StagedExecutionInputs, TurnOptions, WorkAdmission, WorkSource } from './execution-ports.js';
 import type { TaskRepository } from './ports.js';
 import type { AgentProcessOwnership, ProcessOwnershipLease } from './process-ownership.js';
+
+const MCP_PREAPPROVAL_MS = 5_000;
 
 /** One serialized admission pump owns bounded, independently cancellable workers. */
 export class ExecutionService implements ExecutionApplication, WorkSource {
@@ -41,6 +43,7 @@ export class ExecutionService implements ExecutionApplication, WorkSource {
     private readonly processOwnership?: AgentProcessOwnership,
     private readonly approvals?: ApprovalService,
     private readonly admission?: WorkAdmission,
+    private readonly mcpPreapprovals?: McpServerPreapprovals,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > EXECUTION_LIMITS.activeTasks) throw new RunnerError('invalid_input');
     this.steering = new SteeringService(executions, attachments);
@@ -220,6 +223,12 @@ export class ExecutionService implements ExecutionApplication, WorkSource {
     if (!this.initialized || this.closing || this.workerFailure) throw new RunnerError('busy');
   }
 
+  private async preapprovedMcpServers(project: RegisteredProject, signal: AbortSignal): Promise<readonly string[]> {
+    if (!this.mcpPreapprovals) return [];
+    try { return await this.mcpPreapprovals.claudeServers(project, AbortSignal.any([signal, AbortSignal.timeout(MCP_PREAPPROVAL_MS)])); }
+    catch { return []; }
+  }
+
   private executorFor(task: Task): ProviderExecutor {
     const executor = this.providers.find((candidate) => candidate.provider === task.provider);
     if (!executor) throw new RunnerError('invalid_input');
@@ -336,8 +345,10 @@ export class ExecutionService implements ExecutionApplication, WorkSource {
         } catch { /* Snapshot failures must not prevent the authorized provider task. */ }
         abort.signal.throwIfAborted();
       }
+      const preapprovedMcpServers = task.provider === 'claude' ? await this.preapprovedMcpServers(project, abort.signal) : [];
+      abort.signal.throwIfAborted();
       processes = this.processOwnership?.open({ conversationId: session.workspaceTaskId, projectId: project.id, isolation: task.isolation ?? 'worktree' });
-      const result = await executor.execute({ task, cwd, ...(processes ? { processes } : {}), onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
+      const result = await executor.execute({ task, cwd, ...(preapprovedMcpServers.length > 0 ? { preapprovedMcpServers } : {}), ...(processes ? { processes } : {}), onSteeringReady: steering.ready, onToolBoundary: steering.boundary, ...(cwdIdentity ? { cwdIdentity } : {}), ...(task.parentTaskId && session.sessionId ? { resumeSessionId: session.sessionId } : {}), signal: abort.signal, attachments: inputs?.attachments ?? [],
         ...(this.questions ? { onQuestion: (questions: Parameters<QuestionService['ask']>[1]) => this.questions!.ask(task, questions, abort.signal) } : {}),
         ...(onApproval ? { onApproval } : {}),
         onSession: async (sessionId) => {

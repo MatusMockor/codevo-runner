@@ -55,6 +55,10 @@ export interface ProjectWorkspace {
   resume(project: RegisteredProject, workspaceTaskId: string, signal?: AbortSignal): Promise<string>;
 }
 /** Adapter owns its child process group and waits for it to stop before settling. */
+export interface McpServerPreapprovals {
+  claudeServers(project: RegisteredProject, signal: AbortSignal): Promise<readonly string[]>;
+}
+
 export interface ProviderExecutor {
   readonly provider: 'codex' | 'claude';
   readonly supportsAttachments: boolean;

@@ -1,7 +1,7 @@
 import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { LIMITS, RunnerError, type Task } from '../domain/contracts.js';
-import { clientCapabilities, cursor, eventsCursor, handle, jsonBody, send } from './http.js';
+import { announcedClientCapabilities, cursor, eventsCursor, handle, jsonBody, send } from './http.js';
 import { LeaseExempt } from './lease-exempt.js';
 import { SUBAGENT_LIFECYCLE_RETENTION } from '../domain/subagent-lifecycle.js';
 import { INTERACTIVE_APPROVALS } from '../domain/approvals.js';
@@ -24,7 +24,7 @@ function publicTask(task: Task, approvals: boolean): Omit<Task, 'instructions'> 
 }
 
 function announcesApprovals(request: Request): boolean {
-  return clientCapabilities(request.headers['x-codevo-client-capabilities']).has(INTERACTIVE_APPROVALS);
+  return announcedClientCapabilities(request.headers).has(INTERACTIVE_APPROVALS);
 }
 
 @Controller('v1/tasks')
@@ -169,7 +169,7 @@ export class TaskController {
   @LeaseExempt('storage-read')
   events(@Param('id') id: string, @Req() request: Request, @Res() response: Response) {
     return handle(response, async () => {
-      const detail = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(SUBAGENT_LIFECYCLE_RETENTION) ? 'retained' : 'legacy';
+      const detail = announcedClientCapabilities(request.headers).has(SUBAGENT_LIFECYCLE_RETENTION) ? 'retained' : 'legacy';
       send(response, 200, await this.services.tasks.events(id, eventsCursor(request), detail));
     });
   }
@@ -228,7 +228,7 @@ export class ProjectController {
     return handle(response, async () => {
       const execution = this.services.execution;
       if (!execution) throw new RunnerError('not_found');
-      const announced = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(FOLDER_PROJECTS_CAPABILITY);
+      const announced = announcedClientCapabilities(request.headers).has(FOLDER_PROJECTS_CAPABILITY);
       if (!announced || !execution.projectListings) return send(response, 200, { items: await execution.projects() });
       const items = await execution.projectListings();
       send(response, 200, { items: items.map(({ id, name, kind }) => ({ id, name, kind })) });

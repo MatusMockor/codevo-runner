@@ -9,6 +9,10 @@ import { McpServersService } from './application/mcp-servers-service.js';
 import { CliMcpServersReader, type McpServersCliOptions } from './infrastructure/execution/mcp-servers.js';
 import { McpServerManagementService } from './application/mcp-server-management-service.js';
 import { CliMcpServerManager, type McpServerManagementCliOptions } from './infrastructure/execution/mcp-server-management.js';
+import { McpDeviceSyncPreapprovals } from './application/mcp-device-sync.js';
+import { CliMcpDeviceSyncExecutor } from './infrastructure/execution/mcp-device-sync.js';
+import { FileClaudeLocalConfig } from './infrastructure/execution/claude-local-config.js';
+import { FileMcpDeviceSyncLedger } from './infrastructure/files/mcp-device-sync-ledger.js';
 import { FileTurnChangesStore } from './infrastructure/projects/turn-changes.js';
 import { RepositoryLookupService } from './application/repository-lookup-service.js';
 import { CliRepositoryLookup } from './infrastructure/projects/repository-lookup.js';
@@ -63,6 +67,7 @@ export type RunnerExecutionOptions = Readonly<{
   commandCatalogCli?: CommandCatalogCliOptions;
   mcpServersCli?: McpServersCliOptions;
   mcpServerManagementCli?: McpServerManagementCliOptions;
+  claudeLocalConfigPath?: string;
   projectsRoot?: string;
   executionTimeoutMs?: number;
   executionConcurrency?: number;
@@ -129,13 +134,16 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         gitSync = new GitSyncService(repository, repository, new ManagedProjectRegistry(configured, repository), executionWorkspace,
           gitRepository, coordination, { ...options.gitSync?.service, ...(options.gitAuthor ? { author: options.gitAuthor } : {}) }, instructionWorkspace);
         const processOwnership = new ProcessOwnershipRegistry();
+        const deviceSyncLedgers = new FileMcpDeviceSyncLedger(dataDir);
+        const claudeLocalConfig = new FileClaudeLocalConfig(options.claudeLocalConfigPath);
         execution = new ExecutionService(repository, repository,
           new ManagedProjectRegistry(configured, repository), executionWorkspace,
           options.providers ?? [new CliProviderExecutor('codex', cliOptions), new CliProviderExecutor('claude', cliOptions)],
           await createExecutionAttachmentStager(dataDir, attachments),
           (taskId, paths) => artifacts!.captureOutput(taskId, paths), instructionWorkspace, questions,
           new ProjectTurnChanges(repository, new ManagedProjectRegistry(configured, repository), new FileTurnChangesStore(dataDir), new FolderTurnChanges()),
-          options.executionConcurrency, processOwnership, approvals, lease);
+          options.executionConcurrency, processOwnership, approvals, lease,
+          new McpDeviceSyncPreapprovals(executionWorkspace, deviceSyncLedgers, claudeLocalConfig));
         await execution.initialize();
         // Catalogs describe the provider CLIs tasks launch; injected executors need an explicit probe configuration.
         if (options.providers === undefined || options.commandCatalogCli) {
@@ -148,7 +156,8 @@ export async function openRunnerServices(dataDir: string, runnerId: string, opti
         }
         if (options.providers === undefined || options.mcpServerManagementCli) {
           mcpServerManagement = new McpServerManagementService(new ManagedProjectRegistry(configured, repository), executionWorkspace,
-            new CliMcpServerManager(options.mcpServerManagementCli));
+            new CliMcpServerManager(options.mcpServerManagementCli), {},
+            { config: claudeLocalConfig, ledgers: deviceSyncLedgers, executor: new CliMcpDeviceSyncExecutor(options.mcpServerManagementCli) });
         }
         if (process.platform === 'linux') {
           ports = new PortPreviewService(repository, new ManagedProjectRegistry(configured, repository), processOwnership, terminals,

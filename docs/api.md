@@ -799,8 +799,17 @@ errors below use the same `{ "error": "code" }` envelope.
 The reader accepts at most 512 printable ASCII characters and 16 comma-separated
 entries, trims each entry, and retains tokens matching `[A-Za-z][A-Za-z0-9]{0,63}`.
 An oversized, non-ASCII or non-string header, or more than 16 entries, announces
-nothing; invalid individual tokens are ignored. The complete list of tokens that
-currently change server behavior is:
+nothing; invalid individual tokens are ignored.
+
+`X-Codevo-Client-Capabilities-2` is a second, independent header with the same
+grammar and the same limits (512 printable ASCII characters, at most 16 entries,
+all or nothing). Each header is validated on its own: an oversized or invalid second
+header announces nothing but leaves the first one intact, and vice versa. The
+effective client capability set is the union of both headers wherever the runner
+reads announced capabilities. Clients whose first header is full announce newer
+tokens, such as `mcpDeviceSync`, in the second one.
+
+The complete list of tokens that currently change server behavior is:
 
 | Token | What it switches on |
 | --- | --- |
@@ -812,9 +821,10 @@ currently change server behavior is:
 | `threadManagement` | Adds the boolean `threadManagement` discovery field; true when thread metadata exists. |
 | `fileAttachments` | Adds the boolean `fileAttachments` discovery field; true when the attachment service exists. |
 | `folderProjects` | Adds the boolean `folderProjects` discovery field; true when project registration and the project list exist. Also admits non-repository folders on `POST /v1/projects/register` and adds `kind` to `GET /v1/projects` items, as described in [Folder projects](#folder-projects). |
+| `mcpDeviceSync` | Adds the boolean `mcpDeviceSync` discovery field; true when MCP server management with device sync exists. See [MCP device sync](#mcp-device-sync). |
 | `subagentLifecycleRetention` | Selects the retained subagent lifecycle shape on task event reads, as described in [Start and observe a task](#start-and-observe-a-task). |
 
-The first eight fields are omitted unless announced and defined in the descriptor.
+The first nine fields are omitted unless announced and defined in the descriptor.
 These tokens do not gate route access; `folderProjects` is the only one that also
 changes what two existing routes answer. Other syntactically valid tokens have no
 current effect. In particular, `taskLaunchOptions`, `taskSteering`, `taskIsolation`,
@@ -1637,6 +1647,135 @@ logged or persisted and appear only in `authorizationUrl`.
 | 409 `mcp_callback_rejected` | The provider did not accept the pasted address |
 | 503 `busy` | A change or a callback delivery is already running, or a maintenance lease is held |
 | 503 `storage_unavailable` | Checkout validation, the provider, a timeout or an unusable reply failed, or the runner is closing |
+
+## MCP device sync
+
+Clients announcing `mcpDeviceSync` in `X-Codevo-Client-Capabilities` or
+`X-Codevo-Client-Capabilities-2` discover the optional `mcpDeviceSync` capability,
+true when MCP server management is enabled; otherwise the route below returns 404.
+The editor uses it before it starts a new Claude Code thread to install the MCP
+servers of the user's device into the Claude Code *local* scope of the server
+project, so the server's `claude` CLI can use them while the device is offline.
+Authentication, exact runner identity and the maintenance fence match the other
+mutating MCP routes.
+
+| Route | Body | 200 response |
+| --- | --- | --- |
+| `PUT /v1/projects/:projectId/mcp-servers/:provider/device-sync` | `{version:1,servers,retain}`, at most 256 KiB | `{version:1,results:[{name,outcome}]}` |
+
+| Value | Shape |
+| --- | --- |
+| `servers` | At most 32 `{name,launch}` |
+| `launch` | `{kind:"stdio",command,args,env}`, `{kind:"http",url,headers}` or `{kind:"sse",url,headers}`; `args`, `env` and `headers` are always present and may be empty |
+| `retain` | At most 64 names present on the device but not transferable |
+| `outcome` | `added`, `updated`, `unchanged`, `removed`, `keptServerEntry`, `commandMissing` or `failed` |
+
+Every object is closed; an unknown or missing field is 400 `invalid_input`. Names in
+`servers` and `retain` match `^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$` and are unique
+across both lists. `command`, `args` and `url` follow the limits of MCP server
+management. `env` holds at most 64 entries with keys matching
+`^[A-Za-z_][A-Za-z0-9_]{0,127}$` and values of at most 8 KiB without NUL. `headers`
+holds at most 32 entries whose names are RFC 7230 tokens of at most 128 bytes,
+unique without regard to case, with values of at most 8 KiB without CR, LF or NUL.
+The `add-json` argument of each server, the compact UTF-8 JSON
+`{"type","command","args","env"}` or `{"type","url","headers"}` exactly as
+`JSON.stringify` writes it (key order does not change its length), must not exceed
+32,768 bytes, the per-argument limit of the pinned provider launch. Such a server is
+accepted in the request but never installed or removed: it is reported `failed`
+while the rest of the batch proceeds.
+`:provider` `codex` is 409 `mcp_change_unsupported` after the body is validated.
+
+The sync runs in the registered checkout with the executable, environment allowlist
+and pinned directory of the other MCP changes and holds the same single change
+slot: a sync while another change or sync runs is 503 `busy`, and a running sync
+counts as active work for maintenance. It is bounded to 5 seconds of checkout
+validation, at most 32 CLI runs of at most 20 seconds each and 60 seconds overall:
+the ledger load, configuration reads, command lookups and CLI runs stop after 55
+seconds, and the last 5 seconds are reserved for the final configuration read and
+the ledger write. A client disconnect does not cancel it. When a deadline answers
+503 while a configuration read, ledger write, command lookup or CLI run is still in
+flight, the change slot (and active work) is held until that operation has actually
+finished, so a late ledger write cannot overwrite the result of a newer sync. The runner reads the Claude Code local
+configuration read-only, at most 32 MiB, from `$CLAUDE_CONFIG_DIR/.claude.json` or
+`$HOME/.claude.json`, and uses only `projects["<checkout path>"].mcpServers`. A
+stored entry is compared in normalized form: a missing `type` is `stdio`, missing
+`args`, `env` or `headers` are empty, key order is ignored, and an entry with any
+other field or type is treated as edited on the server.
+
+The per-project ledger `<CODEVO_DATA_DIR>/mcp-device-sync/<projectId>.json` (mode
+0600, directory 0700, replaced atomically through a temporary file and rename)
+records only server names and the SHA-256 digest of the normalized entry the runner
+wrote; it never holds commands, URLs, environment or header values. A name is
+*managed* when the ledger holds it and the server copy still has that digest.
+
+| Server state for a requested name | Action | Outcome |
+| --- | --- | --- |
+| Absent | `claude mcp add-json --scope local -- <name> <json>` | `added` |
+| Equal to the request | none; the name becomes managed | `unchanged` |
+| Different and managed | `claude mcp remove --scope local -- <name>`, then `add-json` | `updated` |
+| Different and not managed (server-owned or edited on the server) | none, never touched | `keptServerEntry` |
+| Absent or managed, `stdio` command not found | none | `commandMissing` |
+
+Immediately before every `remove` (of an update or of a stale name) the runner
+reads that server entry again; when its digest no longer equals the ledger digest
+the entry was edited on the server meanwhile, nothing is removed or added, the name
+is reported `keptServerEntry` and forgotten. When that read fails, nothing is
+removed or added, the name is reported `failed` and stays managed with its previous
+digest. A small window between that read and the CLI run remains.
+
+A managed name that is neither requested nor in `retain` is removed and reported
+`removed` only while its server copy still has the ledger digest; an edited copy is
+reported `keptServerEntry` and forgotten, and a copy already gone is forgotten
+silently. Retained names are left alone and stay managed. Server entries the ledger
+does not know are never changed. An unreadable or corrupt ledger removes nothing
+and is replaced by the managed set of the current sync. A `stdio` command is found
+when it is an executable file: a name containing `/` relative to the checkout, or a
+bare name in an absolute directory of the provider `PATH` (at most 64 directories).
+
+After the CLI runs the runner reads the configuration again; an `added` or
+`updated` entry that is not stored under the expected project key with the
+requested digest, a removed entry that is still present, a CLI failure, a run that
+would exceed 32 CLI runs and work left when the 60 seconds elapse are all reported
+`failed`. Results list requested names in request order, then ledger names in name
+order, at most 96; ledger names beyond that budget are deferred to a later sync.
+The ledger holds at most 96 names, the same limit its reader accepts. A managed
+name whose server copy still matches is never forgotten to make room: a requested
+name that would become newly managed is installed only while the ledger has room;
+otherwise an absent name is reported `failed` and not installed, and an equal name
+is reported `unchanged` without becoming managed.
+The ledger is written only when it changed; a failed write is 503
+`storage_unavailable`. Shutdown during a sync is 503 `storage_unavailable` without a
+ledger write, as is a final read or ledger write that misses the 60 second
+deadline; the next sync adopts equal entries as `unchanged`.
+
+`add-json` receives the server configuration, including environment and header
+values, as one argv element, so the values are briefly visible in the process
+argument list (`/proc/<pid>/cmdline`) of the runner account while the CLI runs.
+Responses, errors and the ledger never contain those values, and the runner logs
+neither the request nor the CLI output.
+
+When the runner launches a Claude Code task it pre-approves every managed name of
+that project whose server copy is present under the checkout key: in every launch
+mode except `bypassPermissions` the names are added to `--allowedTools` as
+`mcp__<name>`, appended to the runner's own allowlist when it passes one and added
+as a separate `--allowedTools` otherwise. No other tool is widened. A name that
+contains `__` or starts with `_` is synced like any other but never pre-approved,
+because Claude Code would read `mcp__github__delete_repository` as the single tool
+`delete_repository` of a server `github`; its tools keep the normal approval flow.
+The name rule already excludes `*`, `(`, `)`, `,`, `:` and whitespace. A missing,
+corrupt or unreadable ledger or configuration, or a lookup over 5 seconds,
+pre-approves nothing and does not delay the task further.
+
+| Status and error | Cause |
+| --- | --- |
+| 400 `invalid_input` | Invalid JSON, an unknown or missing field, or a value outside its limit |
+| 415 `unsupported_media` | Body that is not `application/json`, or any `Content-Encoding` |
+| 413 `too_large` | Body above 256 KiB |
+| 404 `not_found` | Unknown project, provider or route, or device sync not enabled |
+| 405 `method_not_allowed` | Any method other than `PUT` |
+| 409 `mcp_change_unsupported` | Provider `codex` |
+| 503 `busy` | Another MCP change or sync is running, or a maintenance lease is held |
+| 503 `storage_unavailable` | Checkout validation, configuration read or ledger write failed, or the runner is closing |
 
 ## Speech transcription
 

@@ -14,7 +14,7 @@ import { LIMITS } from '../../domain/contracts.js';
 import type { ExecutionRequest, ExecutionResult } from '../../domain/execution.js';
 import { isProviderSessionId, ProviderOutputParser } from '../../domain/provider-output.js';
 import { parseLaunchOptions } from '../../domain/launch.js';
-import { launchArguments, launchPrompt } from '../../domain/launch-arguments.js';
+import { launchArguments, launchPrompt, withMcpServerPreapproval } from '../../domain/launch-arguments.js';
 import { runProcess } from './process-runner.js';
 
 export type CliExecutorOptions = Readonly<{
@@ -24,6 +24,7 @@ export type CliExecutorOptions = Readonly<{
   sandbox?: 'workspace-write' | 'external-sandbox';
 }>;
 
+const CLAUDE_DEFAULT_PERMISSIONS: readonly string[] = ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash'];
 const ENVIRONMENT_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR',
   'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR'] as const;
 
@@ -106,7 +107,8 @@ export class CliProviderExecutor implements ProviderExecutor {
         ...(request.resumeSessionId ? [request.resumeSessionId] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json',
         '--append-system-prompt', ARTIFACT_HINT,
-        ...(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash']),
+        ...withMcpServerPreapproval(launch ? launchArguments(launch, Boolean(request.resumeSessionId)) : CLAUDE_DEFAULT_PERMISSIONS, launch,
+          request.preapprovedMcpServers ?? []),
         ...(request.resumeSessionId ? ['--resume', request.resumeSessionId] : [])];
     // Codex exec requires nonempty stdin even when image flags are present.
     const stdin = this.provider === 'codex' ? `[Codevo presentation capability]\n${ARTIFACT_HINT}\n[User request]\n${prompt || 'Inspect the attached images.'}` : `${JSON.stringify({

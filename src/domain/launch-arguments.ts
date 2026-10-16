@@ -1,4 +1,8 @@
 import type { AgentLaunchOptions, ClaudeLaunchOptions } from './launch.js';
+import { isConfigurableMcpServerName } from './mcp-server-management.js';
+
+const ALLOWED_TOOLS = '--allowedTools';
+const MAX_PREAPPROVED_MCP_SERVERS = 96;
 
 /** Arguments contain only validated semantic launch choices, never shell text. */
 export function launchArguments(options: AgentLaunchOptions, resumed: boolean): string[] {
@@ -41,6 +45,19 @@ function claudeSettings(options: ClaudeLaunchOptions): string[] {
     ...(options.thinkingMode ? { alwaysThinkingEnabled: true } : {}),
   };
   return Object.keys(settings).length ? ['--settings', JSON.stringify(settings)] : [];
+}
+
+export function isPreapprovableMcpServerName(name: string): boolean {
+  return isConfigurableMcpServerName(name) && !name.includes('__') && !name.startsWith('_');
+}
+
+export function withMcpServerPreapproval(args: readonly string[], launch: AgentLaunchOptions | undefined, servers: readonly string[]): string[] {
+  if (launch?.provider === 'codex' || launch?.mode === 'bypassPermissions') return [...args];
+  const tools = [...new Set(servers.filter(isPreapprovableMcpServerName))].slice(0, MAX_PREAPPROVED_MCP_SERVERS).map(name => `mcp__${name}`);
+  if (tools.length === 0) return [...args];
+  const index = args.indexOf(ALLOWED_TOOLS);
+  if (index < 0 || index + 1 >= args.length) return [...args, ALLOWED_TOOLS, tools.join(',')];
+  return args.map((value, position) => position === index + 1 ? [value, ...tools].join(',') : value);
 }
 
 export function launchPrompt(options: AgentLaunchOptions, prompt: string): string {

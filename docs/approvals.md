@@ -230,6 +230,12 @@ Which requests appear depends on the launch mode chosen for the task:
 | `auto` | whatever the automatic classifier escalates |
 | `bypassPermissions` | none |
 
+MCP servers installed by [MCP device sync](api.md#mcp-device-sync) are pre-approved
+through `--allowedTools mcp__<name>` in every mode except `bypassPermissions`, so
+their tools do not surface as approvals. Names containing `__` or starting with `_`
+are not pre-approved, so `mcp__<name>` can never be read as a tool of another
+server; such servers keep the normal approval flow.
+
 ### Codex
 
 Codex asks through app-server approval requests. The runner selects the approval

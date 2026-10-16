@@ -279,6 +279,33 @@ for (const resumed of [false, true]) {
   }
 }
 
+test('claude launches pre-approve synced MCP servers in every non-bypass mode', async () => {
+  const f = await fixture(`let stdin='';process.stdin.on('data',c=>stdin+=c);process.stdin.on('end',()=>{
+    console.log(JSON.stringify({args:process.argv.slice(2),type:'diagnostic'}));
+    ${providerSuccess('claude')}
+  });`);
+  try {
+    const run = async (launch: Task['launch']) => {
+      const before = f.output().length;
+      const result = await new CliProviderExecutor('claude', { executable: f.executable }).execute({ ...f.request,
+        preapprovedMcpServers: ['docs', 'github__delete_repository', 'web'], task: { ...f.request.task, provider: 'claude', ...(launch ? { launch } : {}) } });
+      assert.equal(result.error, undefined);
+      return JSON.parse(f.output().slice(before).split('\n')[0]!).args as string[];
+    };
+    const legacy = await run(undefined);
+    assert.deepEqual(legacy.slice(legacy.indexOf('--allowedTools'), legacy.indexOf('--allowedTools') + 2), ['--allowedTools', 'Read,Write,Edit,Glob,Grep,Bash,mcp__docs,mcp__web']);
+    assert.equal(legacy.filter(arg => arg === '--allowedTools').length, 1);
+    for (const mode of ['default', 'plan', 'supervised', 'acceptEdits', 'auto'] as const) {
+      const args = await run({ provider: 'claudeCode', model: 'opus', mode, effort: 'high' });
+      assert.deepEqual(args.slice(args.indexOf('--allowedTools'), args.indexOf('--allowedTools') + 2), ['--allowedTools', 'mcp__docs,mcp__web'], mode);
+    }
+    assert.ok(!legacy.some(arg => arg.includes('delete_repository')));
+    const bypass = await run({ provider: 'claudeCode', model: 'opus', mode: 'bypassPermissions', effort: 'high' });
+    assert.ok(!bypass.includes('--allowedTools'));
+    assert.ok(!bypass.some(arg => arg.includes('mcp__')));
+  } finally { await f.close(); }
+});
+
 test('invalid persisted launch fails before provider spawn', async () => {
   const f = await fixture('require("node:fs").writeFileSync("spawned","bad")');
   try {

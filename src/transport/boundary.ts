@@ -41,13 +41,14 @@ const mcpServersRoute = new RegExp(`^/v1/projects/${projectSegment}/mcp-servers/
 const mcpServersBase = `/v1/projects/${projectSegment}/mcp-servers/(?:claude|codex)`;
 const mcpServerLogin = `${mcpServersBase}/logins/[A-Za-z0-9-]{8,64}`;
 const mcpServerChangesRoute = new RegExp(`^${mcpServersBase}/changes$`);
+const mcpServerDeviceSyncRoute = new RegExp(`^${mcpServersBase}/device-sync$`);
 const mcpServerLoginsRoute = new RegExp(`^${mcpServersBase}/logins$`);
 const mcpServerLoginRoute = new RegExp(`^${mcpServerLogin}$`);
 const mcpServerLoginCallbackRoute = new RegExp(`^${mcpServerLogin}/callback$`);
 const maintenanceBase = '/v1/maintenance/';
 const maintenancePrepareRoute = /^\/v1\/maintenance\/prepare$/;
 const maintenanceLeaseRoute = new RegExp(`^/v1/maintenance/${uuid}$`);
-const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, mcpServerChangesRoute, mcpServerLoginsRoute, mcpServerLoginRoute, mcpServerLoginCallbackRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
+const ownedRoutes = [speechRoute, accountUsageRoute, commandCatalogRoute, mcpServersRoute, mcpServerChangesRoute, mcpServerDeviceSyncRoute, mcpServerLoginsRoute, mcpServerLoginRoute, mcpServerLoginCallbackRoute, turnChangesRoute, turnFileDiffRoute, managementMetadataRoute, managementOrderRoute,
   projectGitReadRoute, projectGitBodyRoute, taskGitReadRoute, taskGitBodyRoute, gitOperationRoute, portRoute];
 const routes = [
   { pattern: maintenancePrepareRoute, methods: ['POST'] },
@@ -57,6 +58,7 @@ const routes = [
   { pattern: commandCatalogRoute, methods: ['GET'] },
   { pattern: mcpServersRoute, methods: ['GET'] },
   { pattern: mcpServerChangesRoute, methods: ['POST'] },
+  { pattern: mcpServerDeviceSyncRoute, methods: ['PUT'] },
   { pattern: mcpServerLoginsRoute, methods: ['POST'] },
   { pattern: mcpServerLoginRoute, methods: ['GET', 'DELETE'] },
   { pattern: mcpServerLoginCallbackRoute, methods: ['POST'] },

@@ -1,10 +1,12 @@
-import { Controller, Delete, Get, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Inject, Param, Post, Put, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { McpServerManagementApplication } from '../application/mcp-server-management-service.js';
 import { RunnerError } from '../domain/contracts.js';
+import { MCP_DEVICE_SYNC_LIMITS } from '../domain/mcp-device-sync.js';
 import { isMcpServersProvider, type McpServersProvider } from '../domain/mcp-servers.js';
 import { handle, jsonBody, send } from './http.js';
 import { LeaseExempt } from './lease-exempt.js';
+import { extendRequestDeadline } from './request-deadlines.js';
 import { SERVICES, type RunnerServices } from './services.js';
 
 const CHANGE_BODY_BYTES = 96 * 1024;
@@ -22,6 +24,16 @@ export class McpServerManagementController {
     return handle(response, async () => {
       const target = this.target(provider);
       send(response, 200, await target.management.change(projectId, target.provider, await jsonBody(request, CHANGE_BODY_BYTES)));
+    });
+  }
+
+  @Put(':projectId/mcp-servers/:provider/device-sync')
+  syncDevice(@Param('projectId') projectId: string, @Param('provider') provider: string, @Req() request: Request, @Res() response: Response) {
+    return handle(response, async () => {
+      const target = this.deviceSyncTarget(provider);
+      const release = extendRequestDeadline(request);
+      try { send(response, 200, await target.management.syncDevice(projectId, target.provider, await jsonBody(request, MCP_DEVICE_SYNC_LIMITS.bodyBytes))); }
+      finally { release(); }
     });
   }
 
@@ -61,6 +73,12 @@ export class McpServerManagementController {
       const target = this.target(provider);
       send(response, 200, await target.management.cancelLogin(projectId, target.provider, loginId));
     });
+  }
+
+  private deviceSyncTarget(provider: string): Target {
+    const target = this.target(provider);
+    if (!target.management.supportsDeviceSync) throw new RunnerError('not_found');
+    return target;
   }
 
   private target(provider: string): Target {

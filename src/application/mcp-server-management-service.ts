@@ -7,9 +7,11 @@ import {
   type McpServerLoginStarted, type McpServerLoginState, type McpServerLoginStatus, type McpServerLoginStep,
 } from '../domain/mcp-server-management.js';
 import type { McpServersProvider } from '../domain/mcp-servers.js';
+import { parseMcpDeviceSyncRequest, type McpDeviceSyncReport, type McpDeviceSyncRequest } from '../domain/mcp-device-sync.js';
 import type { ProjectRegistry, WorkSource } from './execution-ports.js';
 import type { GitWorkspaces } from './git-sync-ports.js';
 import { mcpServersCheckout, mcpServersProject, type McpServersWorkdir } from './mcp-servers-service.js';
+import { McpDeviceSyncIo, synchronizeDevice, type McpDeviceSyncPorts } from './mcp-device-sync.js';
 
 export interface McpServerLoginProcess {
   readonly finished: Promise<void>;
@@ -25,7 +27,9 @@ export interface McpServerManager {
   login(provider: McpServersProvider, request: McpServerLoginRequest, workdir: McpServersWorkdir, signal: AbortSignal): Promise<McpServerLoginAttempt>;
 }
 export interface McpServerManagementApplication {
+  readonly supportsDeviceSync: boolean;
   change(projectId: string, provider: McpServersProvider, input: unknown): Promise<McpServerChanged>;
+  syncDevice(projectId: string, provider: McpServersProvider, input: unknown): Promise<McpDeviceSyncReport>;
   startLogin(projectId: string, provider: McpServersProvider, input: unknown, disconnected: AbortSignal): Promise<McpServerLoginStarted>;
   loginState(projectId: string, provider: McpServersProvider, loginId: string): Promise<McpServerLoginStatus>;
   submitLoginCallback(projectId: string, provider: McpServersProvider, loginId: string, input: unknown): Promise<McpServerChanged>;
@@ -34,10 +38,11 @@ export interface McpServerManagementApplication {
 }
 
 export type McpServerManagementPolicy = Readonly<{
-  concurrentChanges: number; checkoutMs: number; loginDeadlineMs: number; loginRetentionMs: number; retainedLogins: number;
+  concurrentChanges: number; checkoutMs: number; loginDeadlineMs: number; loginRetentionMs: number; retainedLogins: number; deviceSyncMs: number;
+  deviceSyncSettleMs: number;
 }>;
 export const MCP_SERVER_MANAGEMENT_POLICY: McpServerManagementPolicy = Object.freeze({
-  concurrentChanges: 1, checkoutMs: 5_000, loginDeadlineMs: 300_000, loginRetentionMs: 60_000, retainedLogins: 16,
+  concurrentChanges: 1, checkoutMs: 5_000, loginDeadlineMs: 300_000, loginRetentionMs: 60_000, retainedLogins: 16, deviceSyncMs: 60_000, deviceSyncSettleMs: 5_000,
 });
 export type McpServerManagementOptions = Readonly<{ policy?: Partial<McpServerManagementPolicy> }>;
 
@@ -87,11 +92,14 @@ export class McpServerManagementService implements McpServerManagementApplicatio
     private readonly workspaces: Pick<GitWorkspaces, 'checkout'>,
     private readonly manager: McpServerManager,
     options: McpServerManagementOptions = {},
+    private readonly deviceSync?: McpDeviceSyncPorts,
   ) {
     this.policy = { ...MCP_SERVER_MANAGEMENT_POLICY, ...options.policy };
   }
 
   get working(): boolean { return this.changes.size > 0 || this.settling.size > 0; }
+
+  get supportsDeviceSync(): boolean { return this.deviceSync !== undefined; }
 
   async change(projectId: string, provider: McpServersProvider, input: unknown): Promise<McpServerChanged> {
     const change = parseMcpServerChangeRequest(input);
@@ -106,6 +114,25 @@ export class McpServerManagementService implements McpServerManagementApplicatio
     catch (error) { throw reported(error); }
     finally { this.changes.delete(applied); }
     return CHANGED;
+  }
+
+  async syncDevice(projectId: string, provider: McpServersProvider, input: unknown): Promise<McpDeviceSyncReport> {
+    const ports = this.deviceSync;
+    if (!ports) throw new RunnerError('not_found');
+    const request = parseMcpDeviceSyncRequest(input);
+    if (provider !== 'claude') throw new RunnerError('mcp_change_unsupported');
+    this.assertOpen();
+    const project = await mcpServersProject(this.projects, projectId);
+    this.assertOpen();
+    if (this.changes.size >= this.policy.concurrentChanges) throw new RunnerError('busy');
+    const io = new McpDeviceSyncIo();
+    const synchronized = this.synchronize(ports, project, request, io);
+    const settled = synchronized.then(ignore, ignore).then(() => io.drained());
+    this.changes.add(settled);
+    void settled.then(() => this.changes.delete(settled));
+    try { return await synchronized; }
+    catch (error) { throw reported(error); }
+    finally { if (io.idle) this.changes.delete(settled); }
   }
 
   async startLogin(projectId: string, provider: McpServersProvider, input: unknown, disconnected: AbortSignal): Promise<McpServerLoginStarted> {
@@ -170,6 +197,20 @@ export class McpServerManagementService implements McpServerManagementApplicatio
     const workdir = await mcpServersCheckout(this.workspaces, project, signal, this.policy.checkoutMs);
     signal.throwIfAborted();
     await this.manager.change(provider, change, workdir, signal);
+  }
+
+  private async synchronize(ports: McpDeviceSyncPorts, project: RegisteredProject, request: McpDeviceSyncRequest,
+    io: McpDeviceSyncIo): Promise<McpDeviceSyncReport> {
+    const working = new AbortController(), settling = new AbortController();
+    const timers = [setTimeout(() => working.abort(), Math.max(0, this.policy.deviceSyncMs - this.policy.deviceSyncSettleMs)),
+      setTimeout(() => settling.abort(), this.policy.deviceSyncMs)];
+    const settle = AbortSignal.any([this.cancellation.signal, settling.signal]);
+    const work = AbortSignal.any([settle, working.signal]);
+    try {
+      const workdir = await mcpServersCheckout(this.workspaces, project, work, this.policy.checkoutMs);
+      work.throwIfAborted();
+      return await synchronizeDevice(ports, project.id, workdir, request, { work, settle }, io);
+    } finally { timers.forEach(clearTimeout); }
   }
 
   private async located(projectId: string, provider: McpServersProvider, loginId: string): Promise<LoginSession | undefined> {

@@ -46,6 +46,10 @@ export function clientCapabilities(header: string | string[] | undefined): Reado
   return new Set(tokens.filter(token => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(token)));
 }
 
+export function announcedClientCapabilities(headers: Request['headers']): ReadonlySet<string> {
+  return new Set([...clientCapabilities(headers['x-codevo-client-capabilities']), ...clientCapabilities(headers['x-codevo-client-capabilities-2'])]);
+}
+
 export function cursor(request: Request): number {
   const separator = request.url.indexOf('?after=');
   if (separator === -1) return 0;

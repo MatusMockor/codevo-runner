@@ -21,6 +21,7 @@ export type ExecutionRequest = Readonly<{
   onApproval?: (request: AgentApprovalInput, signal: AbortSignal) => Promise<AgentApprovalOutcome>;
   onSession?: (sessionId: string) => Promise<void>;
   attachments: readonly StagedExecutionAttachment[];
+  preapprovedMcpServers?: readonly string[];
   cwd: string;
   cwdIdentity?: Readonly<{ dev: number; ino: number }>;
   signal: AbortSignal;

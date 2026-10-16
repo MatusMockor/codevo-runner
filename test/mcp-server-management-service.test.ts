@@ -92,7 +92,7 @@ function awaited(step: McpServerLoginStep): Extract<McpServerLoginStep, { kind: 
 }
 
 test('management policy allows one change at a time, a five minute login and a one minute memory of its end', () => {
-  assert.deepEqual(MCP_SERVER_MANAGEMENT_POLICY, { concurrentChanges: 1, checkoutMs: 5_000, loginDeadlineMs: 300_000, loginRetentionMs: 60_000, retainedLogins: 16 });
+  assert.deepEqual(MCP_SERVER_MANAGEMENT_POLICY, { concurrentChanges: 1, checkoutMs: 5_000, loginDeadlineMs: 300_000, loginRetentionMs: 60_000, retainedLogins: 16, deviceSyncMs: 60_000, deviceSyncSettleMs: 5_000 });
 });
 
 test('a change is validated before any lookup and applied once in the registered checkout', async t => {

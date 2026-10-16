@@ -2,7 +2,7 @@ import { Controller, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { RunnerError } from '../domain/contracts.js';
 import { FOLDER_PROJECTS_CAPABILITY } from '../domain/project-kind.js';
-import { clientCapabilities, handle, jsonBody, send } from './http.js';
+import { announcedClientCapabilities, handle, jsonBody, send } from './http.js';
 import { SERVICES, DESCRIPTOR, type RunnerServices } from './services.js';
 import type { RunnerDescriptor } from '../server.js';
 
@@ -20,7 +20,7 @@ export class ProjectRegistrationController {
       const timeout = setTimeout(() => controller.abort(new RunnerError('busy')), 10_000);
       response.once('close', abort);
       try {
-        const admission = clientCapabilities(request.headers['x-codevo-client-capabilities']).has(FOLDER_PROJECTS_CAPABILITY) ? 'repository-or-folder' : 'repository';
+        const admission = announcedClientCapabilities(request.headers).has(FOLDER_PROJECTS_CAPABILITY) ? 'repository-or-folder' : 'repository';
         const result = await this.services.projectRegistration.register(await jsonBody(request, 8192), controller.signal, admission);
         if (!response.destroyed) send(response, 200, result);
       } finally { clearTimeout(timeout); response.off('close', abort); }

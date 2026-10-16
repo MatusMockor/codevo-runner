@@ -5,6 +5,7 @@ import { McpServersController } from './transport/mcp-servers-controller.js';
 import { MCP_SERVERS_CAPABILITY } from './domain/mcp-servers.js';
 import { McpServerManagementController } from './transport/mcp-server-management-controller.js';
 import { MCP_SERVER_MANAGEMENT_CAPABILITY } from './domain/mcp-server-management.js';
+import { MCP_DEVICE_SYNC_CAPABILITY } from './domain/mcp-device-sync.js';
 import { TurnChangesController } from './transport/turn-changes-controller.js';
 import { GitSyncController } from './transport/git-sync-controller.js';
 import { PortPreviewController } from './transport/port-preview-controller.js';
@@ -34,7 +35,7 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { RequestBoundary } from './transport/boundary.js';
 import { AttachmentController, ProjectController, ProjectCloneController, TaskController } from './transport/controllers.js';
-import { clientCapabilities, send } from './transport/http.js';
+import { announcedClientCapabilities, send } from './transport/http.js';
 import { guardRequestDeadlines } from './transport/request-deadlines.js';
 import { FILE_ATTACHMENTS_CAPABILITY } from './domain/file-attachment.js';
 import { FOLDER_PROJECTS_CAPABILITY } from './domain/project-kind.js';
@@ -51,6 +52,7 @@ export type RunnerDescriptor = Readonly<{
     commandCatalog?: boolean;
     mcpServers?: boolean;
     mcpServerManagement?: boolean;
+    mcpDeviceSync?: boolean;
     turnChanges?: boolean;
     gitSync?: boolean;
     portPreview?: boolean;
@@ -97,8 +99,8 @@ class RunnerController {
   runner(@Req() request: Request, @Res() response: Response) {
     // Older editors validate discovery strictly. New optional features are announced
     // only to clients which explicitly understand the same feature contract.
-    const supported = clientCapabilities(request.headers['x-codevo-client-capabilities']);
-    const { eventBackwardPaging, speechTranscription, accountUsage, commandCatalog, mcpServers, mcpServerManagement, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, fileAttachments, folderProjects, ...legacy } = this.descriptor.capabilities;
+    const supported = announcedClientCapabilities(request.headers);
+    const { eventBackwardPaging, speechTranscription, accountUsage, commandCatalog, mcpServers, mcpServerManagement, mcpDeviceSync, turnChanges, gitSync, portPreview, projectManagement, threadManagement, interactiveApprovals, fileAttachments, folderProjects, ...legacy } = this.descriptor.capabilities;
     send(response, 200, { ...this.descriptor, capabilities: {
       ...legacy,
       ...(supported.has('eventBackwardPaging') && eventBackwardPaging !== undefined ? { eventBackwardPaging } : {}),
@@ -107,6 +109,7 @@ class RunnerController {
       ...(supported.has('commandCatalog') && commandCatalog !== undefined ? { commandCatalog } : {}),
       ...(supported.has(MCP_SERVERS_CAPABILITY) && mcpServers !== undefined ? { mcpServers } : {}),
       ...(supported.has(MCP_SERVER_MANAGEMENT_CAPABILITY) && mcpServerManagement !== undefined ? { mcpServerManagement } : {}),
+      ...(supported.has(MCP_DEVICE_SYNC_CAPABILITY) && mcpDeviceSync !== undefined ? { mcpDeviceSync } : {}),
       ...(supported.has('turnChanges') && turnChanges !== undefined ? { turnChanges } : {}),
       ...(supported.has('gitSync') && gitSync !== undefined ? { gitSync } : {}),
       ...(supported.has('portPreview') && portPreview !== undefined ? { portPreview } : {}),
@@ -153,8 +156,8 @@ export async function createRunnerApplication(
   adapter.getInstance().disable('x-powered-by');
   const effectiveDescriptor: RunnerDescriptor = services ? {
     ...descriptor,
-    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), mcpServerManagement: Boolean(services.mcpServerManagement), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventBackwardPaging: true, eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, fileAttachments: true, folderProjects: Boolean(services.projectRegistration && services.execution?.projectListings), projectCloning: Boolean(services.clones) },
-  } : { ...descriptor, capabilities: { ...descriptor.capabilities, eventBackwardPaging: true, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, mcpServerManagement: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false, fileAttachments: false, folderProjects: false } };
+    capabilities: { speechTranscription: Boolean(services.speech), accountUsage: Boolean(services.accountUsage), commandCatalog: Boolean(services.commandCatalog), mcpServers: Boolean(services.mcpServers), mcpServerManagement: Boolean(services.mcpServerManagement), mcpDeviceSync: Boolean(services.mcpServerManagement?.supportsDeviceSync), turnChanges: Boolean(services.execution?.turnSummary && services.execution?.turnFileDiff), gitSync: Boolean(services.execution && services.gitSync), portPreview: process.platform === 'linux' && Boolean(services.execution && services.ports), projectManagement: Boolean(services.repositories && services.projectDirectories && services.clones), threadManagement: Boolean(services.threadMetadata), taskIsolation: Boolean(services.execution), interactiveQuestions: Boolean(services.questions), interactiveApprovals: Boolean(services.approvals), instructionSync: process.platform === 'linux' && Boolean(services.execution), outputArtifacts: Boolean(services.artifacts), pendingMessages: Boolean(services.execution), taskSteering: Boolean(services.execution), subagentTelemetry: Boolean(services.execution), taskFileDiffs: Boolean(services.execution), taskLaunchOptions: Boolean(services.execution), taskContinuation: Boolean(services.execution), taskExecution: Boolean(services.execution), eventBackwardPaging: true, eventReplay: true, subagentLifecycleRetention: true, taskDrafts: true, imageAttachments: true, textAttachments: true, fileAttachments: true, folderProjects: Boolean(services.projectRegistration && services.execution?.projectListings), projectCloning: Boolean(services.clones) },
+  } : { ...descriptor, capabilities: { ...descriptor.capabilities, eventBackwardPaging: true, speechTranscription: false, accountUsage: false, commandCatalog: false, mcpServers: false, mcpServerManagement: false, mcpDeviceSync: false, turnChanges: false, gitSync: false, portPreview: false, projectManagement: false, threadManagement: false, interactiveApprovals: false, fileAttachments: false, folderProjects: false } };
   const changes = services?.changes ? new RunnerChangeTransport(services.changes, descriptor.runnerId, authorized) : undefined;
   const app = await NestFactory.create({
     module: RunnerModule,
